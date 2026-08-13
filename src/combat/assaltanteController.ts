@@ -4,13 +4,12 @@ import type { GameEvents } from '../core/events';
 import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
 import { ASSALTANTE_RULES, type Blackboard } from '../ai/rules/assaltanteRules';
-import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS } from './movementDefs';
-import { normalizeVelocity, applyMovement, clampToArena } from './movement';
+import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
+import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
 
 const TELEGRAPH_MS = 400; // = dodge window
 const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
-const ATTACK_REACH = 20;
 
 export class AssaltanteController {
   state: EnemyState = 'idle';
@@ -42,18 +41,7 @@ export class AssaltanteController {
   attackHitbox(): AABB | null {
     if (this.state !== 'attacking') return null;
     if (this.phaseElapsedMs < TELEGRAPH_MS) return null;
-    if (Math.abs(this.attackDirection.x) >= Math.abs(this.attackDirection.y)) {
-      const x =
-        this.attackDirection.x < 0
-          ? this._position.x - ATTACK_REACH
-          : this._position.x + this.width;
-      return { x, y: this._position.y, width: ATTACK_REACH, height: this.height };
-    }
-    const y =
-      this.attackDirection.y < 0
-        ? this._position.y - ATTACK_REACH
-        : this._position.y + this.height;
-    return { x: this._position.x, y, width: this.width, height: ATTACK_REACH };
+    return directionalHitbox(this._position, this.width, this.height, this.attackDirection, ATTACK_REACH);
   }
 
   step(stepMs: number, playerPosition: Vec2): void {

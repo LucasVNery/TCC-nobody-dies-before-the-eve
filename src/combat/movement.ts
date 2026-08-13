@@ -26,3 +26,18 @@ export function clampToArena(position: Vec2, width: number, height: number, boun
     y: Math.min(Math.max(position.y, minY), maxY),
   };
 }
+
+export function directionalHitbox(
+  position: Vec2,
+  width: number,
+  height: number,
+  direction: Vec2,
+  reach: number,
+): AABB {
+  if (Math.abs(direction.x) >= Math.abs(direction.y)) {
+    const x = direction.x < 0 ? position.x - reach : position.x + width;
+    return { x, y: position.y, width: reach, height };
+  }
+  const y = direction.y < 0 ? position.y - reach : position.y + height;
+  return { x: position.x, y, width, height: reach };
+}

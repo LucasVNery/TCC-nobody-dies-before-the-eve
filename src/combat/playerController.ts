@@ -3,10 +3,8 @@ import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { AABB, PlayerState, Vec2 } from './types';
 import { LIGHT_ATTACK, DODGE, totalDurationMs } from './actionDefs';
-import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
-import { normalizeVelocity, applyMovement, clampToArena } from './movement';
-
-const ATTACK_REACH = 20;
+import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
+import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
 
 export class PlayerController {
   state: PlayerState = 'idle';
@@ -47,12 +45,7 @@ export class PlayerController {
       this.phaseElapsedMs >= LIGHT_ATTACK.startupMs &&
       this.phaseElapsedMs < LIGHT_ATTACK.startupMs + LIGHT_ATTACK.activeMs;
     if (!inActive) return null;
-    return {
-      x: this._position.x + this.width,
-      y: this._position.y,
-      width: ATTACK_REACH,
-      height: this.height,
-    };
+    return directionalHitbox(this._position, this.width, this.height, this.lastDirection, ATTACK_REACH);
   }
 
   setMoveInput(dx: number, dy: number): void {

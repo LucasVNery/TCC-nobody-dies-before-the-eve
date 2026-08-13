@@ -35,6 +35,11 @@ export class ArenaScene extends Phaser.Scene {
     this.playerRect = this.add.rectangle(100, 300, 20, 20, 0x4caf50).setOrigin(0, 0);
     this.assaltanteRect = this.add.rectangle(400, 300, 20, 20, 0xf44336).setOrigin(0, 0);
 
+    this.add
+      .rectangle(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height)
+      .setOrigin(0, 0)
+      .setStrokeStyle(2, 0x444444);
+
     this.overlayText = this.add.text(10, 10, '', {
       fontFamily: 'monospace',
       fontSize: '16px',

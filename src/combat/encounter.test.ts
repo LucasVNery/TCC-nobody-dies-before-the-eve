@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Encounter } from './encounter';
 import { DODGE } from './actionDefs';
+import { aabbOverlap } from './collision';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -106,6 +107,25 @@ describe('Encounter', () => {
       elapsed += STEP_MS;
     }
     expect(encounter.assaltante.state).toBe('attacking');
+  });
+
+  it('assaltante attack hitbox actually overlaps a stationary player hurtbox when it swings (reachability invariant)', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 200, y: 0, width: 20, height: 20 },
+    );
+    let overlapped = false;
+    let elapsed = 0;
+    while (elapsed < 3000) {
+      encounter.step(STEP_MS);
+      elapsed += STEP_MS;
+      const hitbox = encounter.assaltante.attackHitbox();
+      if (hitbox && aabbOverlap(hitbox, encounter.player.hurtbox())) {
+        overlapped = true;
+        break;
+      }
+    }
+    expect(overlapped).toBe(true);
   });
 
   it('player moves via setPlayerMoveInput', () => {
