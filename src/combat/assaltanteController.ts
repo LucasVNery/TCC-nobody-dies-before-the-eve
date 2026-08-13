@@ -42,7 +42,7 @@ export class AssaltanteController {
       if (rule?.id === 'assaltante.attack') {
         this.state = 'attacking';
         this.phaseElapsedMs = 0;
-        this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS);
+        this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
       } else {
         this.state = 'chasing';
       }

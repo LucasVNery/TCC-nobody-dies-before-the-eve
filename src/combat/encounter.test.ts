@@ -50,7 +50,7 @@ describe('Encounter', () => {
     const closeEvents: unknown[] = [];
     encounter.bus.on('opp.close', (e) => closeEvents.push(e));
 
-    runFor(encounter, TELEGRAPH_MS + STEP_MS * 2);
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
 
     const dodgeClose = closeEvents.find(
       (e): e is { type: string; outcome: string } =>

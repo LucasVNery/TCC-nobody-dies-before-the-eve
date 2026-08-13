@@ -21,12 +21,12 @@ export class ArenaScene extends Phaser.Scene {
   create(): void {
     this.encounter = new Encounter(
       { x: 100, y: 300, width: 20, height: 20 },
-      { x: 250, y: 300, width: 20, height: 20 },
-      150,
+      { x: 130, y: 300, width: 20, height: 20 },
+      30,
     );
 
     this.playerRect = this.add.rectangle(100, 300, 20, 20, 0x4caf50);
-    this.assaltanteRect = this.add.rectangle(250, 300, 20, 20, 0xf44336);
+    this.assaltanteRect = this.add.rectangle(130, 300, 20, 20, 0xf44336);
 
     this.overlayText = this.add.text(10, 10, '', {
       fontFamily: 'monospace',
@@ -51,9 +51,6 @@ export class ArenaScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.loop.advance(delta);
-
-    const dx = this.assaltanteRect.x - this.playerRect.x;
-    this.encounter.setDistanceToPlayer(Math.abs(dx));
 
     this.playerRect.setFillStyle(this.encounter.player.isInvulnerable ? 0x8bc34a : 0x4caf50);
     this.assaltanteRect.setFillStyle(

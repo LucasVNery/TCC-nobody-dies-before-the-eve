@@ -81,4 +81,24 @@ describe('AssaltanteController', () => {
     );
     expect(opp.activeOfType('dodge')).toHaveLength(0);
   });
+
+  it('resolves the dodge opportunity as taken when the dodge lands during the swing (after telegraph ends)', () => {
+    const { enemy, opp, bus } = makeAssaltante();
+    enemy.step(16, 30); // enters attacking, opens dodge opportunity
+    let elapsed = 16;
+    // Advance just past TELEGRAPH_MS (400ms) but stay within the swing (before 550ms),
+    // i.e. the hitbox is live but the enemy hasn't transitioned to recovering yet.
+    while (elapsed < 416) {
+      enemy.step(16, 30);
+      elapsed += 16;
+    }
+    expect(enemy.state).toBe('attacking');
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    enemy.onPlayerDodgeSuccess();
+    expect(closeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dodge', outcome: 'taken' }),
+    );
+    expect(opp.activeOfType('dodge')).toHaveLength(0);
+  });
 });

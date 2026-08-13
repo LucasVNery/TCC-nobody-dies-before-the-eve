@@ -96,3 +96,4 @@ Pastas do documento original não criadas ainda: `profile/`, `adaptation/`, `pcg
 3. Roleta ponderada real + weight clipping/top-culling, mais arquétipos.
 4. PCG (`pcg/`) e boss (`ai/bt/`, `ai/boss/`).
 5. Decisões ainda abertas no documento original (§11): humanos vs. agentes sintéticos, medida de retenção, corte de 7 para 4–5 dimensões de perfil.
+6. `OppOutcome` (`src/opportunity/types.ts`) é intencionalmente restrito a `'taken' | 'expired'` neste sub-projeto — o código nunca emite `'missed'` nem `'invalid'`. Esses dois outcomes ficam deferidos até o sub-projeto `profile/` definir o que conta como resposta errada para fins de knowledge tracing (ex.: jogador atacou quando deveria ter esquivado, contando como `'missed'` em vez de simplesmente ausente). Isso segue o esquema de evento de quatro outcomes do documento de arquitetura original (§4.1), que o código deste sub-projeto intencionalmente ainda não implementa por completo.

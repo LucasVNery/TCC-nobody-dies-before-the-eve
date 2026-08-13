@@ -1,6 +1,6 @@
 // src/opportunity/types.ts
 export type OppType = 'dodge' | 'punish';
-export type OppOutcome = 'taken' | 'missed' | 'expired' | 'invalid';
+export type OppOutcome = 'taken' | 'expired';
 
 export interface OppOpenPayload {
   opp_id: string;
