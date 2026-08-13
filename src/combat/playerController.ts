@@ -1,25 +1,44 @@
+// src/combat/playerController.ts
 import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
-import type { AABB, PlayerState } from './types';
+import type { AABB, PlayerState, Vec2 } from './types';
 import { LIGHT_ATTACK, DODGE, totalDurationMs } from './actionDefs';
+import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
+import { normalizeVelocity, applyMovement, clampToArena } from './movement';
+
+const ATTACK_REACH = 20;
 
 export class PlayerController {
   state: PlayerState = 'idle';
   private phaseElapsedMs = 0;
   private dodgeCooldownRemainingMs = 0;
   private invulnerable = false;
+  private _position: Vec2;
+  private readonly width: number;
+  private readonly height: number;
+  private moveInput: Vec2 = { x: 0, y: 0 };
+  private lastDirection: Vec2 = { x: 1, y: 0 };
+  private dashDirection: Vec2 = { x: 1, y: 0 };
 
   constructor(
     private bus: EventBus<GameEvents>,
-    private hurtboxBase: AABB,
-  ) {}
+    initialHurtbox: AABB,
+  ) {
+    this._position = { x: initialHurtbox.x, y: initialHurtbox.y };
+    this.width = initialHurtbox.width;
+    this.height = initialHurtbox.height;
+  }
 
   get isInvulnerable(): boolean {
     return this.invulnerable;
   }
 
+  get position(): Vec2 {
+    return { x: this._position.x, y: this._position.y };
+  }
+
   hurtbox(): AABB {
-    return this.hurtboxBase;
+    return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
 
   attackHitbox(): AABB | null {
@@ -29,11 +48,15 @@ export class PlayerController {
       this.phaseElapsedMs < LIGHT_ATTACK.startupMs + LIGHT_ATTACK.activeMs;
     if (!inActive) return null;
     return {
-      x: this.hurtboxBase.x + this.hurtboxBase.width,
-      y: this.hurtboxBase.y,
-      width: 20,
-      height: this.hurtboxBase.height,
+      x: this._position.x + this.width,
+      y: this._position.y,
+      width: ATTACK_REACH,
+      height: this.height,
     };
+  }
+
+  setMoveInput(dx: number, dy: number): void {
+    this.moveInput = { x: dx, y: dy };
   }
 
   tryLightAttack(): void {
@@ -48,6 +71,7 @@ export class PlayerController {
     this.state = 'dodging';
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
+    this.dashDirection = this.lastDirection;
     this.bus.emit('player.action', { action: 'dodge' });
   }
 
@@ -56,7 +80,19 @@ export class PlayerController {
       this.dodgeCooldownRemainingMs = Math.max(0, this.dodgeCooldownRemainingMs - stepMs);
     }
 
-    if (this.state === 'idle') return;
+    if (this.state === 'idle') {
+      const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
+      if (direction.x !== 0 || direction.y !== 0) {
+        this.lastDirection = direction;
+        this._position = clampToArena(
+          applyMovement(this._position, direction, PLAYER_MOVE_SPEED, stepMs),
+          this.width,
+          this.height,
+          ARENA_BOUNDS,
+        );
+      }
+      return;
+    }
 
     this.phaseElapsedMs += stepMs;
 
@@ -69,6 +105,14 @@ export class PlayerController {
     }
 
     if (this.state === 'dodging') {
+      const dashSpeed = DASH_DISTANCE / (DODGE.durationMs / 1000);
+      this._position = clampToArena(
+        applyMovement(this._position, this.dashDirection, dashSpeed, stepMs),
+        this.width,
+        this.height,
+        ARENA_BOUNDS,
+      );
+
       if (this.phaseElapsedMs >= DODGE.iframesMs) {
         this.invulnerable = false;
       }
