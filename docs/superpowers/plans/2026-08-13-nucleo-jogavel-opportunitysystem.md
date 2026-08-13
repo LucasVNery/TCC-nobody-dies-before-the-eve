@@ -1170,7 +1170,6 @@ export class AssaltanteController {
       } else {
         this.state = 'chasing';
       }
-      return;
     }
 
     this.phaseElapsedMs += stepMs;
@@ -1380,7 +1379,6 @@ export class Encounter {
   step(stepMs: number): void {
     this.assaltante.step(stepMs, this.distanceToPlayer);
     this.player.step(stepMs);
-    this.opportunities.step(stepMs);
 
     const enemyAttack = this.assaltante.attackHitbox();
     if (enemyAttack && aabbOverlap(enemyAttack, this.player.hurtbox()) && this.player.isInvulnerable) {
@@ -1391,6 +1389,11 @@ export class Encounter {
     if (playerAttack && aabbOverlap(playerAttack, this.assaltante.hurtbox())) {
       this.assaltante.onPlayerHitLanded();
     }
+
+    // Runs last so a hit/dodge resolved this tick removes the opportunity
+    // before its own expiry check — otherwise a same-call race would let
+    // OpportunitySystem.step() close it as 'expired' one tick early.
+    this.opportunities.step(stepMs);
   }
 }
 ```
