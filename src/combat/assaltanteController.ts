@@ -46,7 +46,6 @@ export class AssaltanteController {
       } else {
         this.state = 'chasing';
       }
-      return;
     }
 
     this.phaseElapsedMs += stepMs;
