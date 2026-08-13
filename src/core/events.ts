@@ -6,8 +6,8 @@ export interface PlayerActionPayload {
   opp_id?: string;
 }
 
-export interface GameEvents {
+export type GameEvents = {
   'opp.open': OppOpenPayload;
   'opp.close': OppClosePayload;
   'player.action': PlayerActionPayload;
-}
+};

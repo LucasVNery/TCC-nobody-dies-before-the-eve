@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from './eventBus';
 
-interface TestEvents {
+type TestEvents = {
   ping: { n: number };
   pong: { msg: string };
-}
+};
 
 describe('EventBus', () => {
   it('calls subscribed handler with the emitted payload', () => {
