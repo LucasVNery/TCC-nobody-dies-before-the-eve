@@ -12,22 +12,20 @@ export class Encounter {
   readonly opportunities: OpportunitySystem;
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
-  private distanceToPlayer: number;
 
-  constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB, initialDistance: number) {
+  constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB) {
     this.bus = new EventBus<GameEvents>();
     this.opportunities = new OpportunitySystem(this.bus);
     this.player = new PlayerController(this.bus, playerHurtbox);
     this.assaltante = new AssaltanteController(this.bus, this.opportunities, assaltanteHurtbox);
-    this.distanceToPlayer = initialDistance;
   }
 
-  setDistanceToPlayer(d: number): void {
-    this.distanceToPlayer = d;
+  setPlayerMoveInput(dx: number, dy: number): void {
+    this.player.setMoveInput(dx, dy);
   }
 
   step(stepMs: number): void {
-    this.assaltante.step(stepMs, this.distanceToPlayer);
+    this.assaltante.step(stepMs, this.player.position);
     this.player.step(stepMs);
 
     const enemyAttack = this.assaltante.attackHitbox();

@@ -20,15 +20,13 @@ describe('Encounter', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 30, y: 0, width: 20, height: 20 },
-      30,
     );
     const closeEvents: unknown[] = [];
     encounter.bus.on('opp.close', (e) => closeEvents.push(e));
 
-    encounter.step(STEP_MS); // assaltante enters attacking, opens dodge opp
+    encounter.step(STEP_MS);
     expect(encounter.assaltante.state).toBe('attacking');
 
-    // dodge just before the enemy's active swing lands
     runFor(encounter, TELEGRAPH_MS - STEP_MS * 2);
     encounter.player.tryDodge();
     runFor(encounter, SWING_MS + STEP_MS * 2);
@@ -45,7 +43,6 @@ describe('Encounter', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 30, y: 0, width: 20, height: 20 },
-      30,
     );
     const closeEvents: unknown[] = [];
     encounter.bus.on('opp.close', (e) => closeEvents.push(e));
@@ -64,12 +61,11 @@ describe('Encounter', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 20, y: 0, width: 20, height: 20 },
-      20,
     );
     const closeEvents: unknown[] = [];
     encounter.bus.on('opp.close', (e) => closeEvents.push(e));
 
-    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS); // enemy now recovering
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
     expect(encounter.assaltante.state).toBe('recovering');
 
     encounter.player.tryLightAttack();
@@ -88,7 +84,6 @@ describe('Encounter', () => {
       const encounter = new Encounter(
         { x: 0, y: 0, width: 20, height: 20 },
         { x: 30, y: 0, width: 20, height: 20 },
-        30,
       );
       const events: unknown[] = [];
       encounter.bus.on('opp.open', (e) => events.push(e));
@@ -98,5 +93,28 @@ describe('Encounter', () => {
     }
 
     expect(scripted()).toEqual(scripted());
+  });
+
+  it('assaltante chases from outside attack range and eventually attacks', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 200, y: 0, width: 20, height: 20 },
+    );
+    let elapsed = 0;
+    while (encounter.assaltante.state !== 'attacking' && elapsed < 10000) {
+      encounter.step(STEP_MS);
+      elapsed += STEP_MS;
+    }
+    expect(encounter.assaltante.state).toBe('attacking');
+  });
+
+  it('player moves via setPlayerMoveInput', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 500, y: 0, width: 20, height: 20 },
+    );
+    encounter.setPlayerMoveInput(1, 0);
+    for (let i = 0; i < 30; i++) encounter.step(STEP_MS);
+    expect(encounter.player.position.x).toBeGreaterThan(0);
   });
 });
