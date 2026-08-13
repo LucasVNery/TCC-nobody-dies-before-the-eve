@@ -65,6 +65,7 @@ Nenhuma pasta nova além de `combat/movement.ts`/`movementDefs.ts` — ambos fic
 
 ### `combat/assaltanteController.ts`
 - Em `chasing`, `step()` calcula vetor até a posição do jogador (recebida como parâmetro, como hoje `distanceToPlayer` é recebido — vira `playerPosition: Vec2`), anda nessa direção a `ASSALTANTE_CHASE_SPEED`, para quando a distância `<= ATTACK_RANGE`.
+- **Direção do ataque deixa de ser fixa.** Hoje `attackHitbox()` sempre golpeia para a esquerda (`hurtboxBase.x - 20`), porque o jogador sempre esteve à esquerda do Assaltante nos testes do sub-projeto anterior. Com movimento livre, o inimigo pode abordar o jogador de qualquer lado — sem corrigir isso, ele só acertaria quando o jogador estivesse posicionado à direita dele, repetindo a classe de bug que a revisão final do sub-projeto 1 pegou (critério de pronto inalcançável). Correção: ao entrar em `attacking`, capturar a direção normalizada até a posição do jogador naquele instante (congelada durante o telegraph/swing, não recalculada frame a frame) e usar o eixo dominante (x ou y) para posicionar a hitbox do golpe no lado correspondente da hurtbox.
 
 ### `combat/encounter.ts`
 - Substitui `setDistanceToPlayer(d: number)` por `setPlayerMoveInput(dx, dy)` (repassado ao `PlayerController`) — `distanceToPlayer` some como conceito externo; `Encounter.step()` calcula a distância internamente a partir das duas posições antes de chamar `assaltante.step()`.
