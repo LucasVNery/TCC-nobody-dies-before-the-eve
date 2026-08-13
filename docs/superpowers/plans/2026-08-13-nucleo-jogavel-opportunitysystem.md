@@ -1055,12 +1055,14 @@ describe('AssaltanteController', () => {
   });
 
   it('attacks and opens a dodge opportunity when in range', () => {
-    const { enemy } = makeAssaltante();
+    const { bus, enemy } = makeAssaltante();
     const openHandler = vi.fn();
-    const { bus } = makeAssaltante();
     bus.on('opp.open', openHandler);
     enemy.step(16, 30);
     expect(enemy.state).toBe('attacking');
+    expect(openHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dodge', src: 'assaltante.attack' }),
+    );
   });
 
   it('opens exactly one dodge opportunity on entering attack, visible via the opportunity system', () => {
