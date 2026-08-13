@@ -120,4 +120,18 @@ describe('AssaltanteController', () => {
     expect(hitbox).not.toBeNull();
     expect(hitbox!.x).toBeGreaterThan(enemy.position.x);
   });
+
+  it('attacks toward the player when the player is above, not always horizontal', () => {
+    const { enemy } = makeAssaltante(); // enemy at x=100, y=0
+    enemy.step(16, { x: 100, y: -30 }); // player directly above, distance 30
+    expect(enemy.state).toBe('attacking');
+    let elapsed = 16;
+    while (elapsed < 416) {
+      enemy.step(16, { x: 100, y: -30 });
+      elapsed += 16;
+    }
+    const hitbox = enemy.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.y).toBeLessThan(enemy.position.y); // extends upward, toward player
+  });
 });
