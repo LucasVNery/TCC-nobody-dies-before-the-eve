@@ -6,5 +6,10 @@ export interface AABB {
   height: number;
 }
 
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
 export type PlayerState = 'idle' | 'attacking' | 'dodging';
 export type EnemyState = 'idle' | 'chasing' | 'attacking' | 'recovering';
