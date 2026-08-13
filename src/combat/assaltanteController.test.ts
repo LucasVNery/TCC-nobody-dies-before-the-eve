@@ -20,7 +20,7 @@ describe('AssaltanteController', () => {
 
   it('chases when far from the player', () => {
     const { enemy } = makeAssaltante();
-    enemy.step(16, 200);
+    enemy.step(16, { x: -100, y: 0 });
     expect(enemy.state).toBe('chasing');
   });
 
@@ -28,7 +28,7 @@ describe('AssaltanteController', () => {
     const { bus, enemy } = makeAssaltante();
     const openHandler = vi.fn();
     bus.on('opp.open', openHandler);
-    enemy.step(16, 30);
+    enemy.step(16, { x: 70, y: 0 });
     expect(enemy.state).toBe('attacking');
     expect(openHandler).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'dodge', src: 'assaltante.attack' }),
@@ -37,16 +37,16 @@ describe('AssaltanteController', () => {
 
   it('opens exactly one dodge opportunity on entering attack, visible via the opportunity system', () => {
     const { enemy, opp } = makeAssaltante();
-    enemy.step(16, 30); // enters attacking, opens dodge
+    enemy.step(16, { x: 70, y: 0 });
     expect(opp.activeOfType('dodge')).toHaveLength(1);
   });
 
   it('transitions attacking -> recovering and opens a punish opportunity', () => {
     const { enemy, opp } = makeAssaltante();
-    enemy.step(16, 30); // enters attacking
+    enemy.step(16, { x: 70, y: 0 });
     let elapsed = 16;
     while (enemy.state === 'attacking' && elapsed < 2000) {
-      enemy.step(16, 30);
+      enemy.step(16, { x: 70, y: 0 });
       elapsed += 16;
     }
     expect(enemy.state).toBe('recovering');
@@ -55,10 +55,10 @@ describe('AssaltanteController', () => {
 
   it('onPlayerHitLanded() during recovering resolves the punish opportunity as taken', () => {
     const { enemy, opp, bus } = makeAssaltante();
-    enemy.step(16, 30);
+    enemy.step(16, { x: 70, y: 0 });
     let elapsed = 16;
     while (enemy.state === 'attacking' && elapsed < 2000) {
-      enemy.step(16, 30);
+      enemy.step(16, { x: 70, y: 0 });
       elapsed += 16;
     }
     const closeHandler = vi.fn();
@@ -72,7 +72,7 @@ describe('AssaltanteController', () => {
 
   it('onPlayerDodgeSuccess() during attacking resolves the dodge opportunity as taken', () => {
     const { enemy, opp, bus } = makeAssaltante();
-    enemy.step(16, 30);
+    enemy.step(16, { x: 70, y: 0 });
     const closeHandler = vi.fn();
     bus.on('opp.close', closeHandler);
     enemy.onPlayerDodgeSuccess();
@@ -84,12 +84,10 @@ describe('AssaltanteController', () => {
 
   it('resolves the dodge opportunity as taken when the dodge lands during the swing (after telegraph ends)', () => {
     const { enemy, opp, bus } = makeAssaltante();
-    enemy.step(16, 30); // enters attacking, opens dodge opportunity
+    enemy.step(16, { x: 70, y: 0 });
     let elapsed = 16;
-    // Advance just past TELEGRAPH_MS (400ms) but stay within the swing (before 550ms),
-    // i.e. the hitbox is live but the enemy hasn't transitioned to recovering yet.
     while (elapsed < 416) {
-      enemy.step(16, 30);
+      enemy.step(16, { x: 70, y: 0 });
       elapsed += 16;
     }
     expect(enemy.state).toBe('attacking');
@@ -100,5 +98,26 @@ describe('AssaltanteController', () => {
       expect.objectContaining({ type: 'dodge', outcome: 'taken' }),
     );
     expect(opp.activeOfType('dodge')).toHaveLength(0);
+  });
+
+  it('moves toward the player while chasing', () => {
+    const { enemy } = makeAssaltante();
+    const before = enemy.position.x;
+    enemy.step(16, { x: -100, y: 0 });
+    expect(enemy.position.x).toBeLessThan(before);
+  });
+
+  it('attacks toward the player when the player is to the right, not always left', () => {
+    const { enemy } = makeAssaltante();
+    enemy.step(16, { x: 130, y: 0 }); // player to the right, distance 30
+    expect(enemy.state).toBe('attacking');
+    let elapsed = 16;
+    while (elapsed < 416) {
+      enemy.step(16, { x: 130, y: 0 });
+      elapsed += 16;
+    }
+    const hitbox = enemy.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.x).toBeGreaterThan(enemy.position.x);
   });
 });
