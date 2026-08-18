@@ -149,4 +149,72 @@ describe('AssaltanteController', () => {
     enemy.step(16, { x: 130, y: 0 }); // player to the right, distance 30 -> attacks
     expect(enemy.attackDirection).toEqual({ x: 1, y: 0 });
   });
+
+  it('onPlayerWrongAction resolves the active dodge opportunity as missed with the given attempt', () => {
+    const { enemy, opp, bus } = makeAssaltante();
+    enemy.step(16, { x: 70, y: 0 }); // enters attacking, opens dodge
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    enemy.onPlayerWrongAction('light_attack');
+    expect(closeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dodge', outcome: 'missed', attempt: 'light_attack' }),
+    );
+    expect(opp.activeOfType('dodge')).toHaveLength(0);
+  });
+
+  it('onPlayerWrongAction outside the attacking state is a no-op', () => {
+    const { enemy, bus } = makeAssaltante();
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    enemy.onPlayerWrongAction('light_attack'); // still idle, no active dodge opportunity
+    expect(closeHandler).not.toHaveBeenCalled();
+  });
+
+  it('punish opportunity expires normally when the player is in range at some point during the window', () => {
+    const { enemy, opp, bus } = makeAssaltante();
+    enemy.step(16, { x: 70, y: 0 }); // enters attacking
+    opp.step(16);
+    let elapsed = 16;
+    while (enemy.state === 'attacking' && elapsed < 2000) {
+      enemy.step(16, { x: 70, y: 0 });
+      opp.step(16);
+      elapsed += 16;
+    }
+    expect(enemy.state).toBe('recovering');
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    elapsed = 0;
+    while (enemy.state === 'recovering' && elapsed < 1000) {
+      enemy.step(16, { x: 70, y: 0 }); // stays within ATTACK_REACH (45) the whole window
+      opp.step(16);
+      elapsed += 16;
+    }
+    expect(closeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'punish', outcome: 'expired' }),
+    );
+  });
+
+  it('punish opportunity resolves as invalid/out_of_range when the player never enters range during the window', () => {
+    const { enemy, opp, bus } = makeAssaltante();
+    enemy.step(16, { x: 70, y: 0 }); // enters attacking
+    opp.step(16);
+    let elapsed = 16;
+    while (enemy.state === 'attacking' && elapsed < 2000) {
+      enemy.step(16, { x: 70, y: 0 });
+      opp.step(16);
+      elapsed += 16;
+    }
+    expect(enemy.state).toBe('recovering');
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    elapsed = 0;
+    while (enemy.state === 'recovering' && elapsed < 1000) {
+      enemy.step(16, { x: 1000, y: 0 }); // far outside ATTACK_REACH the whole window
+      opp.step(16);
+      elapsed += 16;
+    }
+    expect(closeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'punish', outcome: 'invalid', reason: 'out_of_range' }),
+    );
+  });
 });

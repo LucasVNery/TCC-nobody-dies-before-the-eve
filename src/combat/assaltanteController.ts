@@ -3,6 +3,7 @@ import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
+import type { ActionId } from '../opportunity/types';
 import { ASSALTANTE_RULES, type Blackboard } from '../ai/rules/assaltanteRules';
 import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
@@ -20,6 +21,7 @@ export class AssaltanteController {
   private readonly width: number;
   private readonly height: number;
   private _attackDirection: Vec2 = { x: -1, y: 0 };
+  private playerWasInRangeDuringPunish = false;
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -85,12 +87,20 @@ export class AssaltanteController {
       if (this.phaseElapsedMs >= TELEGRAPH_MS + SWING_MS) {
         this.state = 'recovering';
         this.phaseElapsedMs = 0;
-        this.activeOppId = this.opp.open('punish', 'assaltante.recover', RECOVERY_MS);
+        this.playerWasInRangeDuringPunish = false;
+        this.activeOppId = this.opp.open('punish', 'assaltante.recover', RECOVERY_MS, () =>
+          this.playerWasInRangeDuringPunish
+            ? { outcome: 'expired' }
+            : { outcome: 'invalid', reason: 'out_of_range' },
+        );
       }
       return;
     }
 
     if (this.state === 'recovering') {
+      if (distanceToPlayer <= ATTACK_REACH) {
+        this.playerWasInRangeDuringPunish = true;
+      }
       if (this.phaseElapsedMs >= RECOVERY_MS) {
         this.state = 'idle';
         this.phaseElapsedMs = 0;
@@ -110,6 +120,13 @@ export class AssaltanteController {
   onPlayerHitLanded(): void {
     if (this.state === 'recovering' && this.activeOppId) {
       this.opp.resolve(this.activeOppId, 'taken');
+      this.activeOppId = null;
+    }
+  }
+
+  onPlayerWrongAction(attempt: ActionId): void {
+    if (this.state === 'attacking' && this.activeOppId) {
+      this.opp.resolve(this.activeOppId, 'missed', { attempt });
       this.activeOppId = null;
     }
   }
