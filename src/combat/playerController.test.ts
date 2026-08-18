@@ -139,4 +139,12 @@ describe('PlayerController', () => {
     player.step(DODGE.durationMs);
     expect(player.position.x).toBeGreaterThan(0);
   });
+
+  it('exposes the last movement direction via facing, for visual/HUD purposes', () => {
+    const { player } = makePlayer();
+    expect(player.facing).toEqual({ x: 1, y: 0 });
+    player.setMoveInput(0, 1);
+    player.step(16);
+    expect(player.facing).toEqual({ x: 0, y: 1 });
+  });
 });

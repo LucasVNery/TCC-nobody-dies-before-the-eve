@@ -35,6 +35,10 @@ export class PlayerController {
     return { x: this._position.x, y: this._position.y };
   }
 
+  get facing(): Vec2 {
+    return { x: this.lastDirection.x, y: this.lastDirection.y };
+  }
+
   hurtbox(): AABB {
     return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
