@@ -5,6 +5,10 @@ import { OpportunityOverlay } from '../debug/opportunityOverlay';
 import { HudState, type HudCounters } from '../debug/hudState';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { ARENA_BOUNDS } from '../combat/movementDefs';
+import { ASSET_KEYS } from '../visual/assetRegistry';
+import { generatePlaceholderTextures, GROUND_TILE_SIZE } from '../visual/placeholderTextures';
+import { createGroundTilemap } from '../visual/groundTilemap';
+import { DirectionalSprite } from '../visual/directionalSprite';
 
 const STEP_MS = 1000 / 60;
 
@@ -20,8 +24,8 @@ export class ArenaScene extends Phaser.Scene {
     bossHitsLanded: 0,
   };
   private lastMoveInput = { dx: 0, dy: 0 };
-  private playerRect!: Phaser.GameObjects.Rectangle;
-  private assaltanteRect!: Phaser.GameObjects.Rectangle;
+  private playerSprite!: DirectionalSprite;
+  private assaltanteSprite!: DirectionalSprite;
   private keys!: {
     light: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
@@ -35,14 +39,20 @@ export class ArenaScene extends Phaser.Scene {
     super('ArenaScene');
   }
 
+  preload(): void {
+    generatePlaceholderTextures(this);
+  }
+
   create(): void {
     this.encounter = new Encounter(
       { x: 100, y: 300, width: 20, height: 20 },
       { x: 400, y: 300, width: 20, height: 20 },
     );
 
-    this.playerRect = this.add.rectangle(100, 300, 20, 20, 0x4caf50).setOrigin(0, 0);
-    this.assaltanteRect = this.add.rectangle(400, 300, 20, 20, 0xf44336).setOrigin(0, 0);
+    createGroundTilemap(this, ARENA_BOUNDS, GROUND_TILE_SIZE);
+
+    this.playerSprite = new DirectionalSprite(this, ASSET_KEYS.player, 20, 20, { x: 100, y: 300 });
+    this.assaltanteSprite = new DirectionalSprite(this, ASSET_KEYS.assaltante, 20, 20, { x: 400, y: 300 });
 
     this.add
       .rectangle(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height)
@@ -100,7 +110,7 @@ export class ArenaScene extends Phaser.Scene {
     this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
 
     this.cameras.main.setBounds(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height);
-    this.cameras.main.startFollow(this.playerRect);
+    this.cameras.main.startFollow(this.playerSprite.gameObject);
   }
 
   update(_time: number, delta: number): void {
@@ -113,12 +123,15 @@ export class ArenaScene extends Phaser.Scene {
 
     const playerPos = this.encounter.player.position;
     const assaltantePos = this.encounter.assaltante.position;
-    this.playerRect.setPosition(playerPos.x, playerPos.y);
-    this.assaltanteRect.setPosition(assaltantePos.x, assaltantePos.y);
 
-    this.playerRect.setFillStyle(this.encounter.player.isInvulnerable ? 0x8bc34a : 0x4caf50);
-    this.assaltanteRect.setFillStyle(
-      this.encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xf44336,
+    this.playerSprite.syncPosition(playerPos);
+    this.playerSprite.syncDirection(this.encounter.player.facing);
+    this.playerSprite.setTint(this.encounter.player.isInvulnerable ? 0x8bc34a : 0xffffff);
+
+    this.assaltanteSprite.syncPosition(assaltantePos);
+    this.assaltanteSprite.syncDirection(this.encounter.assaltante.attackDirection);
+    this.assaltanteSprite.setTint(
+      this.encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff,
     );
 
     this.hudText.setText([
