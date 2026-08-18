@@ -49,22 +49,26 @@ export class OpportunitySystem {
   }
 
   step(stepMs: number): void {
+    const expiring: ActiveOpp[] = [];
     const stillActive: ActiveOpp[] = [];
     for (const opp of this.active) {
       opp.remainingMs -= stepMs;
       if (opp.remainingMs <= 0) {
-        const result: ExpiryResult = opp.onExpire?.() ?? { outcome: 'expired' };
-        this.bus.emit('opp.close', {
-          opp_id: opp.opp_id,
-          type: opp.type,
-          outcome: result.outcome,
-          ...(result.reason ? { reason: result.reason } : {}),
-        });
+        expiring.push(opp);
       } else {
         stillActive.push(opp);
       }
     }
     this.active = stillActive;
+    for (const opp of expiring) {
+      const result: ExpiryResult = opp.onExpire?.() ?? { outcome: 'expired' };
+      this.bus.emit('opp.close', {
+        opp_id: opp.opp_id,
+        type: opp.type,
+        outcome: result.outcome,
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+    }
   }
 
   activeOfType(type: OppType): ActiveOpp[] {

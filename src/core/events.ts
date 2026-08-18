@@ -1,8 +1,8 @@
 // src/core/events.ts
-import type { OppOpenPayload, OppClosePayload } from '../opportunity/types';
+import type { OppOpenPayload, OppClosePayload, ActionId } from '../opportunity/types';
 
 export interface PlayerActionPayload {
-  action: string;
+  action: ActionId;
   opp_id?: string;
 }
 

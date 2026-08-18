@@ -12,8 +12,10 @@ Hoje o `OpportunitySystem` só emite `taken` (dodge bem-sucedido / hit de punish
 
 Este sub-projeto existe para:
 - expandir `OppOutcome` para os quatro valores com a tabela de precedência `invalid > taken > missed > expired` (§2.1 do doc de perfil);
-- implementar o único caso de `missed` já possível com o jogo atual: jogador ataca durante uma janela de esquiva aberta (§2.1a, ação de classe incompatível);
-- implementar o único caso de `invalid` já possível: jogador nunca entra em alcance efetivo durante toda a janela de `punish` (§2.2, condição 2);
+- implementar o caso mais simples/direto de `missed` de implementar com o jogo atual: jogador ataca durante uma janela de esquiva aberta (§2.1a, ação de classe incompatível);
+- implementar o caso mais simples/direto de `invalid` de implementar: jogador nunca entra em alcance efetivo durante toda a janela de `punish` (§2.2, condição 2);
+
+  Nota: esses não são os únicos casos de `missed`/`invalid` já alcançáveis com o jogo atual — outros três casos simétricos (dodge/punish trocados) também são possíveis com os sistemas existentes, mas foram deliberadamente deixados fora deste recorte (ver §8, itens sobre casos deferidos).
 - adicionar os campos `reason`/`attempt` ao evento `opp.close`, com validação de que `invalid` sempre carrega `reason` (§2.2: "sem isso não há como distinguir instrumentação correta de bug que está engolindo denominador");
 - provar com testes que a soma dos desfechos fecha com o total de aberturas (§8, passo 2 do doc de perfil).
 
@@ -110,3 +112,9 @@ Conforme `docs/especificacao-perfil-instrumentacao-v2.md` §8, passos 3 em diant
 4. Seleção de déficit-alvo com histerese (§6 do doc de perfil).
 5. Pesos de regra e parâmetros de árvore de comportamento do boss.
 6. As outras cinco condições de `invalid` (hitstun externo, morte, ferramenta bloqueada, fonte interrompida, prioridade sobreposta) — cada uma depende de um sistema de jogo que ainda não existe (hitstun externo, morte, desbloqueio, múltiplas oportunidades concorrentes).
+7. Três casos de `missed`/`invalid` já alcançáveis com o jogo atual, mas deliberadamente deixados fora do recorte deste sub-projeto:
+   - Jogador executa `dodge` (em vez de atacar) durante uma janela `punish` aberta — ação de classe incompatível, mesmo mecanismo do §2.1(a) já implementado para `dodge`, mas não espelhado para `punish`.
+   - Jogador tenta o ataque de punição dentro da janela `punish` mas o hitbox não conecta (whiff) — §2.1(b), "tentou a ação certa e falhou por execução".
+   - Janelas `dodge` onde o jogador nunca esteve em risco real (fora de `ATTACK_REACH` a janela toda) — mesmo raciocínio do §2.2 condição 2 já implementado para `punish`, mas não espelhado para `dodge`.
+
+   Deixar esses três casos sem implementação por enquanto tende a enviesar o sinal diagnóstico `omissao(s)` (§2.4 de `docs/especificacao-perfil-instrumentacao-v2.md`) na direção de `expired` — vale sinalizar para quem retomar este trabalho, não é algo para corrigir silenciosamente.

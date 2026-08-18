@@ -21,7 +21,7 @@ export class Encounter {
 
     this.bus.on('player.action', (e) => {
       if (e.action === 'light_attack' && this.assaltante.state === 'attacking') {
-        this.assaltante.onPlayerWrongAction('light_attack');
+        this.assaltante.onPlayerWrongAction(e.action);
       }
     });
   }
