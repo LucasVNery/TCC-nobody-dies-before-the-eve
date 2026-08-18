@@ -18,6 +18,12 @@ export class Encounter {
     this.opportunities = new OpportunitySystem(this.bus);
     this.player = new PlayerController(this.bus, playerHurtbox);
     this.assaltante = new AssaltanteController(this.bus, this.opportunities, assaltanteHurtbox);
+
+    this.bus.on('player.action', (e) => {
+      if (e.action === 'light_attack' && this.assaltante.state === 'attacking') {
+        this.assaltante.onPlayerWrongAction('light_attack');
+      }
+    });
   }
 
   setPlayerMoveInput(dx: number, dy: number): void {

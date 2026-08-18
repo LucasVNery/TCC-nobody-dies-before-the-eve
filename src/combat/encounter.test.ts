@@ -137,4 +137,27 @@ describe('Encounter', () => {
     for (let i = 0; i < 30; i++) encounter.step(STEP_MS);
     expect(encounter.player.position.x).toBeGreaterThan(0);
   });
+
+  it('attacking during the Assaltante telegraph resolves the dodge opportunity as missed', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    const closeEvents: unknown[] = [];
+    encounter.bus.on('opp.close', (e) => closeEvents.push(e));
+
+    encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('attacking');
+
+    encounter.player.tryLightAttack();
+    runFor(encounter, STEP_MS);
+
+    const dodgeClose = closeEvents.find(
+      (e): e is { type: string; outcome: string; attempt?: string } =>
+        typeof e === 'object' && e !== null && (e as any).type === 'dodge',
+    );
+    expect(dodgeClose).toBeDefined();
+    expect((dodgeClose as any).outcome).toBe('missed');
+    expect((dodgeClose as any).attempt).toBe('light_attack');
+  });
 });
