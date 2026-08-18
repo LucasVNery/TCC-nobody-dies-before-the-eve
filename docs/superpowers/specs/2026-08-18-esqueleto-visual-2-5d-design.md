@@ -72,7 +72,7 @@ Ponto único a editar quando um asset real (spritesheet, atlas, tileset) substit
 ### `src/visual/directionalSprite.ts`
 ```ts
 export class DirectionalSprite {
-  constructor(scene: Phaser.Scene, baseTextureKey: string, x: number, y: number);
+  constructor(scene: Phaser.Scene, baseTextureKey: string, width: number, height: number, initialPosition: Vec2);
   syncPosition(pos: Vec2): void;   // container.setPosition(pos.x, pos.y); container.setDepth(pos.y)
   syncDirection(dir: Vec2): void;  // arrowChild.setRotation(Math.atan2(dir.y, dir.x))
   setTint(color: number): void;    // baseChild.setTint(color)

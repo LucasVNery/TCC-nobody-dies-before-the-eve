@@ -2,7 +2,7 @@ import type Phaser from 'phaser';
 import { ASSET_KEYS } from './assetRegistry';
 
 export const GROUND_TILE_SIZE = 64;
-const ENTITY_SIZE = 20;
+export const ENTITY_SIZE = 20;
 const DIRECTION_ARROW_SIZE = 10;
 
 export function generatePlaceholderTextures(scene: Phaser.Scene): void {

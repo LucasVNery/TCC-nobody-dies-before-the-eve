@@ -6,7 +6,7 @@ import { HudState, type HudCounters } from '../debug/hudState';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { ARENA_BOUNDS } from '../combat/movementDefs';
 import { ASSET_KEYS } from '../visual/assetRegistry';
-import { generatePlaceholderTextures, GROUND_TILE_SIZE } from '../visual/placeholderTextures';
+import { generatePlaceholderTextures, GROUND_TILE_SIZE, ENTITY_SIZE } from '../visual/placeholderTextures';
 import { createGroundTilemap } from '../visual/groundTilemap';
 import { DirectionalSprite } from '../visual/directionalSprite';
 
@@ -45,14 +45,14 @@ export class ArenaScene extends Phaser.Scene {
 
   create(): void {
     this.encounter = new Encounter(
-      { x: 100, y: 300, width: 20, height: 20 },
-      { x: 400, y: 300, width: 20, height: 20 },
+      { x: 100, y: 300, width: ENTITY_SIZE, height: ENTITY_SIZE },
+      { x: 400, y: 300, width: ENTITY_SIZE, height: ENTITY_SIZE },
     );
 
     createGroundTilemap(this, ARENA_BOUNDS, GROUND_TILE_SIZE);
 
-    this.playerSprite = new DirectionalSprite(this, ASSET_KEYS.player, 20, 20, { x: 100, y: 300 });
-    this.assaltanteSprite = new DirectionalSprite(this, ASSET_KEYS.assaltante, 20, 20, { x: 400, y: 300 });
+    this.playerSprite = new DirectionalSprite(this, ASSET_KEYS.player, ENTITY_SIZE, ENTITY_SIZE, { x: 100, y: 300 });
+    this.assaltanteSprite = new DirectionalSprite(this, ASSET_KEYS.assaltante, ENTITY_SIZE, ENTITY_SIZE, { x: 400, y: 300 });
 
     this.add
       .rectangle(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height)
