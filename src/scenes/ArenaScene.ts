@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import { Encounter } from '../combat/encounter';
 import { OpportunityOverlay } from '../debug/opportunityOverlay';
+import { HudState, type HudCounters } from '../debug/hudState';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { ARENA_BOUNDS } from '../combat/movementDefs';
 
@@ -11,6 +12,14 @@ export class ArenaScene extends Phaser.Scene {
   private encounter!: Encounter;
   private loop!: ReturnType<typeof createFixedTimestepLoop>;
   private overlayText!: Phaser.GameObjects.Text;
+  private hudText!: Phaser.GameObjects.Text;
+  private hudCounters: HudCounters = {
+    dashAttempts: 0,
+    effectiveDashes: 0,
+    wastedDashes: 0,
+    bossHitsLanded: 0,
+  };
+  private lastMoveInput = { dx: 0, dy: 0 };
   private playerRect!: Phaser.GameObjects.Rectangle;
   private assaltanteRect!: Phaser.GameObjects.Rectangle;
   private keys!: {
@@ -50,6 +59,31 @@ export class ArenaScene extends Phaser.Scene {
       this.overlayText.setText(lines.length > 0 ? lines : ['(no opportunities open)']);
     });
 
+    this.hudText = this.add.text(10, 400, '', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ffffff',
+    });
+    this.hudText.setScrollFactor(0);
+    new HudState(this.encounter.bus, (counters) => {
+      this.hudCounters = counters;
+    });
+
+    const controlsText = this.add.text(
+      590,
+      10,
+      [
+        'Controls:',
+        '  WASD  - move',
+        '  J     - light attack',
+        '          (use during boss "recovering" to punish)',
+        '  K     - dodge',
+        '          (use during boss "attacking" telegraph for i-frames)',
+      ],
+      { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff' },
+    );
+    controlsText.setScrollFactor(0);
+
     this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => this.encounter.step(stepMs));
 
     const keyboard = this.input.keyboard;
@@ -73,6 +107,7 @@ export class ArenaScene extends Phaser.Scene {
     const dx = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
     const dy = (this.keys.down.isDown ? 1 : 0) - (this.keys.up.isDown ? 1 : 0);
     this.encounter.setPlayerMoveInput(dx, dy);
+    this.lastMoveInput = { dx, dy };
 
     this.loop.advance(delta);
 
@@ -85,5 +120,13 @@ export class ArenaScene extends Phaser.Scene {
     this.assaltanteRect.setFillStyle(
       this.encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xf44336,
     );
+
+    this.hudText.setText([
+      `move: (${this.lastMoveInput.dx}, ${this.lastMoveInput.dy})`,
+      `dash: ${this.encounter.player.isInvulnerable ? 'active (i-frames)' : 'idle'}`,
+      `dashes: ${this.hudCounters.effectiveDashes} effective / ${this.hudCounters.wastedDashes} wasted`,
+      `boss: ${this.encounter.assaltante.state} (${this.encounter.assaltante.activeRuleId ?? '-'})`,
+      `boss hits landed: ${this.hudCounters.bossHitsLanded}`,
+    ]);
   }
 }

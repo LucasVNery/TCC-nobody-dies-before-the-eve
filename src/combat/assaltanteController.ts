@@ -15,6 +15,7 @@ export class AssaltanteController {
   state: EnemyState = 'idle';
   private phaseElapsedMs = 0;
   private activeOppId: string | null = null;
+  private _activeRuleId: string | null = null;
   private _position: Vec2;
   private readonly width: number;
   private readonly height: number;
@@ -32,6 +33,10 @@ export class AssaltanteController {
 
   get position(): Vec2 {
     return { x: this._position.x, y: this._position.y };
+  }
+
+  get activeRuleId(): string | null {
+    return this._activeRuleId;
   }
 
   hurtbox(): AABB {
@@ -52,6 +57,7 @@ export class AssaltanteController {
     if (this.state === 'idle' || this.state === 'chasing') {
       const bb: Blackboard = { distanceToPlayer, state: this.state };
       const rule = ASSALTANTE_RULES.find((r) => r.precond(bb));
+      this._activeRuleId = rule?.id ?? null;
       if (rule?.id === 'assaltante.attack') {
         this.state = 'attacking';
         this.phaseElapsedMs = 0;

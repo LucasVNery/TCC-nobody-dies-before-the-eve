@@ -121,6 +121,14 @@ describe('AssaltanteController', () => {
     expect(hitbox!.x).toBeGreaterThan(enemy.position.x);
   });
 
+  it('exposes the id of the currently selected rule, for HUD/debug purposes', () => {
+    const { enemy } = makeAssaltante();
+    enemy.step(16, { x: -100, y: 0 }); // far away -> chase
+    expect(enemy.activeRuleId).toBe('assaltante.chase');
+    enemy.step(16, { x: 70, y: 0 }); // in range -> attack
+    expect(enemy.activeRuleId).toBe('assaltante.attack');
+  });
+
   it('attacks toward the player when the player is above, not always horizontal', () => {
     const { enemy } = makeAssaltante(); // enemy at x=100, y=0
     enemy.step(16, { x: 100, y: -30 }); // player directly above, distance 30
