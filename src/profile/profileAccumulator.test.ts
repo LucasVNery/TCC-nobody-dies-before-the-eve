@@ -1,3 +1,4 @@
+// src/profile/profileAccumulator.test.ts
 import { describe, it, expect } from 'vitest';
 import { ProfileAccumulator } from './profileAccumulator';
 
@@ -11,17 +12,16 @@ describe('ProfileAccumulator', () => {
 
   it('recordOutcome followed by applyRoomBoundary updates trait domain and confidence', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 9; i++) acc.recordOutcome('punish', true);
-    acc.recordOutcome('punish', false);
+    for (let i = 0; i < 9; i++) acc.recordOutcome('punish', 'taken');
+    acc.recordOutcome('punish', 'missed');
     acc.applyRoomBoundary();
-    // pending folded into a zero total: aproveitadas=9, oportunidades=10
     expect(acc.domain('punish', 'trait')).toBeCloseTo((9 + 1) / (10 + 2));
     expect(acc.confidence('punish', 'trait')).toBeCloseTo(10 / (10 + 10));
   });
 
   it('applyRoomBoundary decays existing totals by gamma even with no new records', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 10; i++) acc.recordOutcome('punish', true);
+    for (let i = 0; i < 10; i++) acc.recordOutcome('punish', 'taken');
     acc.applyRoomBoundary(); // total = {10, 10}
     acc.applyRoomBoundary(); // no new pending: total = {0.87*10, 0.87*10} = {8.7, 8.7}
     expect(acc.domain('punish', 'trait')).toBeCloseTo((8.7 + 1) / (8.7 + 2));
@@ -30,7 +30,7 @@ describe('ProfileAccumulator', () => {
 
   it('applyEncounterBoundary decays existing totals by its own gamma', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 10; i++) acc.recordOutcome('dodge', true);
+    for (let i = 0; i < 10; i++) acc.recordOutcome('dodge', 'taken');
     acc.applyEncounterBoundary(); // total = {10, 10}
     acc.applyEncounterBoundary(); // total = {0.55*10, 0.55*10} = {5.5, 5.5}
     expect(acc.domain('dodge', 'state')).toBeCloseTo((5.5 + 1) / (5.5 + 2));
@@ -38,31 +38,28 @@ describe('ProfileAccumulator', () => {
 
   it('the trait and state clocks are independent: only their own boundary call decays them', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 5; i++) acc.recordOutcome('dodge', true);
+    for (let i = 0; i < 5; i++) acc.recordOutcome('dodge', 'taken');
     acc.applyRoomBoundary();
-    // state clock untouched: applyEncounterBoundary was never called
     expect(acc.domain('dodge', 'state')).toBeCloseTo(0.5);
     expect(acc.confidence('dodge', 'state')).toBe(0);
 
     acc.applyEncounterBoundary();
-    // now the state clock folds in the same pending the trait clock already consumed
     expect(acc.domain('dodge', 'state')).toBeCloseTo((5 + 1) / (5 + 2));
-    // the trait clock (already boundary'd earlier) is unaffected by this call
     expect(acc.domain('dodge', 'trait')).toBeCloseTo((5 + 1) / (5 + 2));
   });
 
   it('multiple room boundaries accumulate rather than reset between calls', () => {
     const acc = new ProfileAccumulator();
-    acc.recordOutcome('dodge', true);
+    acc.recordOutcome('dodge', 'taken');
     acc.applyRoomBoundary(); // total = {1, 1}
-    acc.recordOutcome('dodge', true);
+    acc.recordOutcome('dodge', 'taken');
     acc.applyRoomBoundary(); // total = {0.87*1 + 1, 0.87*1 + 1} = {1.87, 1.87}
     expect(acc.domain('dodge', 'trait')).toBeCloseTo((1.87 + 1) / (1.87 + 2));
   });
 
   it('resetSession zeroes both clocks and pending buffers', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 5; i++) acc.recordOutcome('dodge', true);
+    for (let i = 0; i < 5; i++) acc.recordOutcome('dodge', 'taken');
     acc.applyRoomBoundary();
     acc.applyEncounterBoundary();
     acc.resetSession();
@@ -74,10 +71,10 @@ describe('ProfileAccumulator', () => {
 
   it('snapshot() reflects only the trait clock, with target null and lambda 0', () => {
     const acc = new ProfileAccumulator();
-    for (let i = 0; i < 3; i++) acc.recordOutcome('punish', true);
-    acc.recordOutcome('punish', false);
+    for (let i = 0; i < 3; i++) acc.recordOutcome('punish', 'taken');
+    acc.recordOutcome('punish', 'expired');
     acc.applyRoomBoundary();
-    acc.applyEncounterBoundary(); // state clock also updated — must not leak into the snapshot
+    acc.applyEncounterBoundary();
 
     const snap = acc.snapshot('room.exit');
     expect(snap.at).toBe('room.exit');
@@ -90,10 +87,57 @@ describe('ProfileAccumulator', () => {
 
   it('snapshot() includes multiple skills simultaneously', () => {
     const acc = new ProfileAccumulator();
-    acc.recordOutcome('dodge', true);
-    acc.recordOutcome('punish', false);
+    acc.recordOutcome('dodge', 'taken');
+    acc.recordOutcome('punish', 'expired');
     acc.applyRoomBoundary();
     const snap = acc.snapshot('boss.entry');
     expect(Object.keys(snap.counts).sort()).toEqual(['dodge', 'punish']);
+  });
+
+  it('record() accepts a continuous numerator/denominator pair, not just boolean outcomes', () => {
+    const acc = new ProfileAccumulator();
+    acc.record('distance', 3.5, 10); // e.g. 3.5s in melee range out of 10s of combat
+    acc.applyRoomBoundary();
+    expect(acc.domain('distance', 'trait')).toBeCloseTo((3.5 + 1) / (10 + 2));
+  });
+
+  it('omission() distinguishes expired from missed within the not-taken bucket', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordOutcome('dodge', 'expired');
+    acc.recordOutcome('dodge', 'expired');
+    acc.recordOutcome('dodge', 'missed');
+    acc.applyRoomBoundary();
+    expect(acc.omission('dodge', 'trait')).toBeCloseTo(2 / 3);
+  });
+
+  it('omission() is null when no missed/expired outcome has been recorded yet', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordOutcome('dodge', 'taken');
+    acc.applyRoomBoundary();
+    expect(acc.omission('dodge', 'trait')).toBeNull();
+  });
+
+  it('snapshot() omits a skill whose only evidence is still pending (not yet folded by a boundary)', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordOutcome('dodge', 'taken'); // no applyRoomBoundary() yet
+    const snap = acc.snapshot('boss.entry');
+    expect(snap.counts.dodge).toBeUndefined();
+  });
+
+  it('deficit() reflects 1 - domain() after real records, on both clocks', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 4; i++) acc.recordOutcome('punish', 'taken');
+    acc.recordOutcome('punish', 'expired');
+    acc.applyRoomBoundary();
+    acc.applyEncounterBoundary();
+    expect(acc.deficit('punish', 'trait')).toBeCloseTo(1 - acc.domain('punish', 'trait'));
+    expect(acc.deficit('punish', 'state')).toBeCloseTo(1 - acc.domain('punish', 'state'));
+  });
+
+  it('confidence kappa is constructor-injectable', () => {
+    const acc = new ProfileAccumulator(25);
+    for (let i = 0; i < 25; i++) acc.recordOutcome('weapon-entropy', 'taken');
+    acc.applyRoomBoundary();
+    expect(acc.confidence('weapon-entropy', 'trait')).toBeCloseTo(25 / (25 + 25));
   });
 });

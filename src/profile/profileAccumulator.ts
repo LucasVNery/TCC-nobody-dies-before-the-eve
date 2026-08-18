@@ -1,97 +1,123 @@
-import type { SkillId, Clock, ProfileSnapshotPayload } from './types';
+// src/profile/profileAccumulator.ts
+import type { SkillId, Clock, ProfileSnapshotPayload, ProfileOutcome } from './types';
+import { DecayedRatio } from './decayedRatio';
 
 const TRAIT_GAMMA = 0.87;
 const STATE_GAMMA = 0.55;
 const BETA_ALPHA = 1;
 const BETA_BETA = 1;
-const CONFIDENCE_KAPPA = 10;
+const DEFAULT_CONFIDENCE_KAPPA = 10;
 
-interface SkillCounts {
-  aproveitadas: number;
-  oportunidades: number;
+interface SkillRatios {
+  domain: DecayedRatio;
+  omission: DecayedRatio;
+  folded: boolean;
 }
 
-function emptyCounts(): SkillCounts {
-  return { aproveitadas: 0, oportunidades: 0 };
+function makeSkillRatios(): SkillRatios {
+  return { domain: new DecayedRatio(), omission: new DecayedRatio(), folded: false };
 }
 
 export class ProfileAccumulator {
-  private traitTotals = new Map<SkillId, SkillCounts>();
-  private stateTotals = new Map<SkillId, SkillCounts>();
-  private traitPending = new Map<SkillId, SkillCounts>();
-  private statePending = new Map<SkillId, SkillCounts>();
+  private trait = new Map<SkillId, SkillRatios>();
+  private state = new Map<SkillId, SkillRatios>();
 
-  recordOutcome(skill: SkillId, taken: boolean): void {
-    this.addToPending(this.traitPending, skill, taken);
-    this.addToPending(this.statePending, skill, taken);
+  constructor(private confidenceKappa: number = DEFAULT_CONFIDENCE_KAPPA) {}
+
+  record(skill: SkillId, numerator: number, denominator: number): void {
+    this.ratiosFor(this.trait, skill).domain.add(numerator, denominator);
+    this.ratiosFor(this.state, skill).domain.add(numerator, denominator);
+  }
+
+  recordOutcome(skill: SkillId, outcome: ProfileOutcome): void {
+    this.record(skill, outcome === 'taken' ? 1 : 0, 1);
+
+    if (outcome === 'missed' || outcome === 'expired') {
+      const omissionNumerator = outcome === 'expired' ? 1 : 0;
+      this.ratiosFor(this.trait, skill).omission.add(omissionNumerator, 1);
+      this.ratiosFor(this.state, skill).omission.add(omissionNumerator, 1);
+    }
   }
 
   applyRoomBoundary(): void {
-    this.decayAndFold(this.traitTotals, this.traitPending, TRAIT_GAMMA);
+    this.decayClock(this.trait, TRAIT_GAMMA);
   }
 
   applyEncounterBoundary(): void {
-    this.decayAndFold(this.stateTotals, this.statePending, STATE_GAMMA);
+    this.decayClock(this.state, STATE_GAMMA);
   }
 
   resetSession(): void {
-    this.traitTotals.clear();
-    this.stateTotals.clear();
-    this.traitPending.clear();
-    this.statePending.clear();
+    this.trait.clear();
+    this.state.clear();
   }
 
   domain(skill: SkillId, clock: Clock): number {
-    const c = this.totalsFor(clock).get(skill) ?? emptyCounts();
-    return (c.aproveitadas + BETA_ALPHA) / (c.oportunidades + BETA_ALPHA + BETA_BETA);
+    const r = this.clockFor(clock).get(skill);
+    const num = r?.domain.num ?? 0;
+    const den = r?.domain.den ?? 0;
+    return (num + BETA_ALPHA) / (den + BETA_ALPHA + BETA_BETA);
   }
 
   confidence(skill: SkillId, clock: Clock): number {
-    const c = this.totalsFor(clock).get(skill) ?? emptyCounts();
-    return c.oportunidades / (c.oportunidades + CONFIDENCE_KAPPA);
+    const den = this.clockFor(clock).get(skill)?.domain.den ?? 0;
+    return den / (den + this.confidenceKappa);
   }
 
   deficit(skill: SkillId, clock: Clock): number {
     return 1 - this.domain(skill, clock);
   }
 
+  /**
+   * Fração das oportunidades "não aproveitadas" que expiraram sem tentativa,
+   * em vez de terem sido tentadas e erradas (§2.4 do doc de perfil). `null`
+   * quando nenhum `missed`/`expired` foi registrado ainda para essa skill
+   * nesse relógio — não confundir com `0`.
+   */
+  omission(skill: SkillId, clock: Clock): number | null {
+    const r = this.clockFor(clock).get(skill)?.omission;
+    if (!r || r.den === 0) return null;
+    return r.num / r.den;
+  }
+
+  /**
+   * Empacota o relógio traço no formato do §7. Só inclui skills que já
+   * passaram por pelo menos uma `applyRoomBoundary()` — evidência ainda
+   * pendente (registrada via `record()`/`recordOutcome()` mas não decaída)
+   * não aparece aqui. Para incluir a sala que acabou de terminar, chame
+   * `applyRoomBoundary()` imediatamente antes de `snapshot('room.exit')`.
+   */
   snapshot(at: ProfileSnapshotPayload['at']): ProfileSnapshotPayload {
     const counts: Record<SkillId, [number, number]> = {};
     const domain: Record<SkillId, number> = {};
     const confidence: Record<SkillId, number> = {};
-    for (const [skill, c] of this.traitTotals) {
-      counts[skill] = [c.aproveitadas, c.oportunidades];
+    for (const [skill, r] of this.trait) {
+      if (!r.folded) continue;
+      counts[skill] = [r.domain.num, r.domain.den];
       domain[skill] = this.domain(skill, 'trait');
       confidence[skill] = this.confidence(skill, 'trait');
     }
     return { at, counts, domain, confidence, target: null, lambda: 0 };
   }
 
-  private totalsFor(clock: Clock): Map<SkillId, SkillCounts> {
-    return clock === 'trait' ? this.traitTotals : this.stateTotals;
+  private clockFor(clock: Clock): Map<SkillId, SkillRatios> {
+    return clock === 'trait' ? this.trait : this.state;
   }
 
-  private addToPending(pending: Map<SkillId, SkillCounts>, skill: SkillId, taken: boolean): void {
-    const c = pending.get(skill) ?? emptyCounts();
-    c.oportunidades += 1;
-    if (taken) c.aproveitadas += 1;
-    pending.set(skill, c);
-  }
-
-  private decayAndFold(
-    totals: Map<SkillId, SkillCounts>,
-    pending: Map<SkillId, SkillCounts>,
-    gamma: number,
-  ): void {
-    const skills = new Set([...totals.keys(), ...pending.keys()]);
-    for (const skill of skills) {
-      const total = totals.get(skill) ?? emptyCounts();
-      const p = pending.get(skill) ?? emptyCounts();
-      totals.set(skill, {
-        aproveitadas: gamma * total.aproveitadas + p.aproveitadas,
-        oportunidades: gamma * total.oportunidades + p.oportunidades,
-      });
+  private ratiosFor(clockMap: Map<SkillId, SkillRatios>, skill: SkillId): SkillRatios {
+    let r = clockMap.get(skill);
+    if (!r) {
+      r = makeSkillRatios();
+      clockMap.set(skill, r);
     }
-    pending.clear();
+    return r;
+  }
+
+  private decayClock(clockMap: Map<SkillId, SkillRatios>, gamma: number): void {
+    for (const r of clockMap.values()) {
+      r.domain.decay(gamma);
+      r.omission.decay(gamma);
+      r.folded = true;
+    }
   }
 }

@@ -88,8 +88,10 @@ export class ProfileAccumulator {
 }
 ```
 
-- `recordOutcome`: incrementa `oportunidades` (e `aproveitadas` se `taken`) nos buffers pendentes de **ambos** os relógios. Não decai nada — só acumula.
-- `applyRoomBoundary`/`applyEncounterBoundary`: para cada skill com buffer pendente não-zero no relógio correspondente, aplica `total.aproveitadas = γ·total.aproveitadas + pendente.aproveitadas`, `total.oportunidades = γ·total.oportunidades + pendente.oportunidades`, depois zera o buffer pendente daquele relógio. Skills sem contagem decaída ainda começam implicitamente em `{aproveitadas:0, oportunidades:0}`.
+- `record(skill, numerator, denominator)`: primitiva genérica que `recordOutcome` agora usa por baixo — alimenta os buffers pendentes de **ambos** os relógios com um par numerador/denominador arbitrário (não só 0/1 booleano), permitindo contagens contínuas (ex.: segundos em alcance de melee sobre segundos totais de combate). Não decai nada — só acumula.
+- `recordOutcome(skill, outcome)`: incrementa `oportunidades` (e `aproveitadas` se `outcome === 'taken'`) nos buffers pendentes de **ambos** os relógios via `record()`. O segundo parâmetro agora é `ProfileOutcome` (`'taken'|'missed'|'expired'`), não um booleano, para manter a distinção `missed`/`expired` disponível ao chamador. `invalid` nunca é passado (D3: excluído de numerador e denominador — decisão do chamador, não da classe).
+- `omission(skill, clock)`: diagnóstico separado, mantido para uso futuro (§2.4 do doc de perfil) — dentro do bucket "não aproveitadas", registra a fração que expirou sem tentativa (`expired`) em vez de ter sido tentada e errada (`missed`). Retorna `null` quando nenhum `missed`/`expired` foi registrado ainda para essa skill nesse relógio.
+- `applyRoomBoundary`/`applyEncounterBoundary`: para cada skill já conhecida no relógio (com evidência decaída anterior OU pendente nova), aplica `total = γ·total + pendente`, mesmo que o pendente seja zero — é isso que torna o decaimento genuinamente exponencial entre fronteiras sem novos registros. Depois zera o buffer pendente daquele relógio. Skills sem contagem decaída ainda começam implicitamente em `{aproveitadas:0, oportunidades:0}`.
 - `domain`/`confidence`/`deficit`: leem as contagens decaídas do relógio pedido (não o buffer pendente) e aplicam as fórmulas fixas da tabela acima. Uma skill nunca vista retorna `domain=0,5` (prior uniforme), `confidence=0`, `deficit=0,5`.
 - `snapshot`: itera as skills conhecidas no relógio traço, monta `counts`/`domain`/`confidence`, fixa `target: null` e `lambda: 0`.
 
