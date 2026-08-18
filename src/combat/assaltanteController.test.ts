@@ -142,4 +142,11 @@ describe('AssaltanteController', () => {
     expect(hitbox).not.toBeNull();
     expect(hitbox!.y).toBeLessThan(enemy.position.y); // extends upward, toward player
   });
+
+  it('exposes the current attack direction, for visual/HUD purposes', () => {
+    const { enemy } = makeAssaltante();
+    expect(enemy.attackDirection).toEqual({ x: -1, y: 0 });
+    enemy.step(16, { x: 130, y: 0 }); // player to the right, distance 30 -> attacks
+    expect(enemy.attackDirection).toEqual({ x: 1, y: 0 });
+  });
 });

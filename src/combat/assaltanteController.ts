@@ -19,7 +19,7 @@ export class AssaltanteController {
   private _position: Vec2;
   private readonly width: number;
   private readonly height: number;
-  private attackDirection: Vec2 = { x: -1, y: 0 };
+  private _attackDirection: Vec2 = { x: -1, y: 0 };
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -39,6 +39,10 @@ export class AssaltanteController {
     return this._activeRuleId;
   }
 
+  get attackDirection(): Vec2 {
+    return { x: this._attackDirection.x, y: this._attackDirection.y };
+  }
+
   hurtbox(): AABB {
     return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
@@ -46,7 +50,7 @@ export class AssaltanteController {
   attackHitbox(): AABB | null {
     if (this.state !== 'attacking') return null;
     if (this.phaseElapsedMs < TELEGRAPH_MS) return null;
-    return directionalHitbox(this._position, this.width, this.height, this.attackDirection, ATTACK_REACH);
+    return directionalHitbox(this._position, this.width, this.height, this._attackDirection, ATTACK_REACH);
   }
 
   step(stepMs: number, playerPosition: Vec2): void {
@@ -61,7 +65,7 @@ export class AssaltanteController {
       if (rule?.id === 'assaltante.attack') {
         this.state = 'attacking';
         this.phaseElapsedMs = 0;
-        this.attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this.attackDirection;
+        this._attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this._attackDirection;
         this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
       } else {
         this.state = 'chasing';
