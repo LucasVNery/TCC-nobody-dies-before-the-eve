@@ -9,8 +9,12 @@ import { ASSET_KEYS } from '../visual/assetRegistry';
 import { generatePlaceholderTextures, GROUND_TILE_SIZE, ENTITY_SIZE } from '../visual/placeholderTextures';
 import { createGroundTilemap } from '../visual/groundTilemap';
 import { DirectionalSprite } from '../visual/directionalSprite';
+import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
 
 const STEP_MS = 1000 / 60;
+const HURTBOX_COLOR = 0xffffff;
+const ATTACK_HITBOX_COLOR = 0xffeb3b;
+const ATTACK_RANGE_COLOR = 0xff9800;
 
 export class ArenaScene extends Phaser.Scene {
   private encounter!: Encounter;
@@ -26,6 +30,7 @@ export class ArenaScene extends Phaser.Scene {
   private lastMoveInput = { dx: 0, dy: 0 };
   private playerSprite!: DirectionalSprite;
   private assaltanteSprite!: DirectionalSprite;
+  private debugGraphics!: Phaser.GameObjects.Graphics;
   private keys!: {
     light: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
@@ -111,6 +116,9 @@ export class ArenaScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height);
     this.cameras.main.startFollow(this.playerSprite.gameObject);
+
+    this.debugGraphics = this.add.graphics();
+    this.debugGraphics.setDepth(100000);
   }
 
   update(_time: number, delta: number): void {
@@ -141,5 +149,40 @@ export class ArenaScene extends Phaser.Scene {
       `boss: ${this.encounter.assaltante.state} (${this.encounter.assaltante.activeRuleId ?? '-'})`,
       `boss hits landed: ${this.hudCounters.bossHitsLanded}`,
     ]);
+
+    this.drawDebugHitboxes();
+  }
+
+  private drawDebugHitboxes(): void {
+    this.debugGraphics.clear();
+
+    const playerHurtbox = this.encounter.player.hurtbox();
+    const assaltanteHurtbox = this.encounter.assaltante.hurtbox();
+    this.debugGraphics.lineStyle(1, HURTBOX_COLOR, 0.6);
+    this.debugGraphics.strokeRect(playerHurtbox.x, playerHurtbox.y, playerHurtbox.width, playerHurtbox.height);
+    this.debugGraphics.strokeRect(
+      assaltanteHurtbox.x,
+      assaltanteHurtbox.y,
+      assaltanteHurtbox.width,
+      assaltanteHurtbox.height,
+    );
+
+    const assaltanteCenterX = this.encounter.assaltante.position.x + ENTITY_SIZE / 2;
+    const assaltanteCenterY = this.encounter.assaltante.position.y + ENTITY_SIZE / 2;
+    this.debugGraphics.lineStyle(1, ATTACK_RANGE_COLOR, 0.6);
+    this.debugGraphics.strokeCircle(assaltanteCenterX, assaltanteCenterY, ATTACK_RANGE);
+
+    this.debugGraphics.fillStyle(ATTACK_HITBOX_COLOR, 0.4);
+    const playerAttack = this.encounter.player.attackHitbox();
+    if (playerAttack) this.debugGraphics.fillRect(playerAttack.x, playerAttack.y, playerAttack.width, playerAttack.height);
+    const assaltanteAttack = this.encounter.assaltante.attackHitbox();
+    if (assaltanteAttack) {
+      this.debugGraphics.fillRect(
+        assaltanteAttack.x,
+        assaltanteAttack.y,
+        assaltanteAttack.width,
+        assaltanteAttack.height,
+      );
+    }
   }
 }
