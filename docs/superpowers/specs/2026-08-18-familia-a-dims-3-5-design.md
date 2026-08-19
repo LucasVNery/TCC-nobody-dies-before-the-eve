@@ -30,7 +30,7 @@ Fora de escopo: qualquer fronteira de sala/encontro real (`applyRoomBoundary()`/
 | Dono do `ProfileAccumulator` | `Encounter` ganha `readonly profile: ProfileAccumulator` — mesmo padrão de já possuir `opportunities` |
 | `SkillId` das duas dimensões | `'punish'` (dim 3, já bate com o `OppType` existente) e `'distance'` (dim 5) |
 | Gatilho da dim 3 | `Encounter` assina `opp.close` no construtor; se `type === 'punish'` e `outcome !== 'invalid'`, chama `profile.recordOutcome('punish', outcome)` — `taken`/`missed`/`expired` passam direto, sem tradução (`ProfileOutcome` já é `OppOutcome` sem `invalid`) |
-| Gatilho da dim 5 | Em cada `Encounter.step()`, calcula a distância jogador↔Assaltante e chama `profile.record('distance', dentroDoAlcance ? stepMs : 0, stepMs)` — "alcance corpo-a-corpo" = `ATTACK_REACH`, já definido em `movementDefs.ts` |
+| Gatilho da dim 5 | Em cada `Encounter.step()`, calcula a distância jogador↔Assaltante, converte `stepMs` para segundos e chama `profile.record('distance', dentroDoAlcance ? stepSegundos : 0, stepSegundos)` — a confiança dessa dimensão é medida em segundos de combate, não em ticks, conforme `especificacao-perfil-instrumentacao-v2.md` §3.1 — "alcance corpo-a-corpo" = `ATTACK_REACH`, já definido em `movementDefs.ts` |
 | Fronteiras (sala/encontro) | Continuam sem gatilho real neste sub-projeto — decisão já tomada e explicitamente revalidada ("defensável, não reverteria") pela revisão final do sub-projeto anterior |
 
 ## 3. Arquitetura
@@ -48,7 +48,7 @@ Nenhum arquivo novo. `AssaltanteController`, `PlayerController`, `ProfileAccumul
 ### `src/combat/encounter.ts`
 - Novo campo `readonly profile: ProfileAccumulator = new ProfileAccumulator();`, inicializado no construtor.
 - No construtor, após as assinaturas já existentes: `this.bus.on('opp.close', (e) => { if (e.type === 'punish' && e.outcome !== 'invalid') this.profile.recordOutcome('punish', e.outcome); });`
-- Em `step()`, antes ou depois do resto da lógica (ordem não importa para este cálculo, que só lê posições já atualizadas no fim do tick): calcula `distance = Math.hypot(assaltante.position.x - player.position.x, assaltante.position.y - player.position.y)`; chama `this.profile.record('distance', distance <= ATTACK_REACH ? stepMs : 0, stepMs)`.
+- Em `step()`, antes ou depois do resto da lógica (ordem não importa para este cálculo, que só lê posições já atualizadas no fim do tick): calcula `distance = Math.hypot(assaltante.position.x - player.position.x, assaltante.position.y - player.position.y)`; converte `stepMs` para segundos e chama `this.profile.record('distance', distance <= ATTACK_REACH ? stepSegundos : 0, stepSegundos)` — a confiança dessa dimensão é medida em segundos de combate, não em ticks, conforme `especificacao-perfil-instrumentacao-v2.md` §3.1.
 
 ## 5. Fluxo de dados
 

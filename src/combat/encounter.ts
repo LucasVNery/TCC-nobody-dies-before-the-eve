@@ -62,6 +62,7 @@ export class Encounter {
     const dx = this.assaltante.position.x - this.player.position.x;
     const dy = this.assaltante.position.y - this.player.position.y;
     const distance = Math.hypot(dx, dy);
-    this.profile.record('distance', distance <= ATTACK_REACH ? stepMs : 0, stepMs);
+    const stepSeconds = stepMs / 1000;
+    this.profile.record('distance', distance <= ATTACK_REACH ? stepSeconds : 0, stepSeconds);
   }
 }

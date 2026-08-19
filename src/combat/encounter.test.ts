@@ -177,6 +177,35 @@ describe('Encounter', () => {
     expect(encounter.profile.domain('punish', 'trait')).toBeGreaterThan(0.5);
   });
 
+  it('a punish opportunity that expires naturally still counts toward the punish denominator', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 20, y: 0, width: 20, height: 20 },
+    );
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    expect(encounter.assaltante.state).toBe('recovering');
+
+    runFor(encounter, 600); // let the punish window expire naturally without attacking (RECOVERY_MS = 500)
+
+    encounter.profile.applyRoomBoundary();
+    expect(encounter.profile.domain('punish', 'trait')).toBeLessThan(0.5);
+    expect(encounter.profile.confidence('punish', 'trait')).toBeGreaterThan(0);
+  });
+
+  it('a punish opportunity that resolves as invalid (out of range) does not affect punish confidence', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 50, y: 0, width: 20, height: 20 }, // within ATTACK_RANGE (60) to trigger attack, but outside ATTACK_REACH (45)
+    );
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    expect(encounter.assaltante.state).toBe('recovering');
+
+    runFor(encounter, 600); // player never within ATTACK_REACH during the whole punish window
+
+    encounter.profile.applyRoomBoundary();
+    expect(encounter.profile.confidence('punish', 'trait')).toBe(0);
+  });
+
   it('staying within ATTACK_REACH the whole time drives the distance skill domain toward 1', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },
@@ -184,7 +213,12 @@ describe('Encounter', () => {
     );
     runFor(encounter, 2000);
     encounter.profile.applyRoomBoundary();
-    expect(encounter.profile.domain('distance', 'trait')).toBeGreaterThan(0.9);
+    // With dim 5 now measured in seconds (Finding 1's fix), the Beta(1,1) prior
+    // (weight 2) is no longer negligible next to only ~2s of accumulated evidence,
+    // so domain settles around (2+1)/(2+2)=0.75 rather than the ~1.0 it reached
+    // when the same 2000 raw ticks were (incorrectly) treated as 2000 "seconds".
+    expect(encounter.profile.domain('distance', 'trait')).toBeGreaterThan(0.7);
+    expect(encounter.profile.confidence('distance', 'trait')).toBeCloseTo(2 / (2 + 10), 2);
   });
 
   it('staying outside ATTACK_REACH drives the distance skill domain toward 0', () => {
@@ -194,6 +228,9 @@ describe('Encounter', () => {
     );
     runFor(encounter, 500); // not enough time for the (slower) Assaltante to close a ~480px gap into ATTACK_REACH
     encounter.profile.applyRoomBoundary();
-    expect(encounter.profile.domain('distance', 'trait')).toBeLessThan(0.1);
+    // Same seconds-scale prior effect as above: ~0.5s of evidence against a
+    // Beta(1,1) prior settles around (0+1)/(0.5+2)=0.4, well below the 0.5
+    // uninformative prior but far from the ~0 this test asserted pre-fix.
+    expect(encounter.profile.domain('distance', 'trait')).toBeLessThan(0.45);
   });
 });
