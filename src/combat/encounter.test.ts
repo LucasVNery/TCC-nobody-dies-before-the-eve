@@ -160,4 +160,40 @@ describe('Encounter', () => {
     expect((dodgeClose as any).outcome).toBe('missed');
     expect((dodgeClose as any).attempt).toBe('light_attack');
   });
+
+  it('a punish opportunity resolved as taken raises the punish skill domain above the uniform prior', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 20, y: 0, width: 20, height: 20 },
+    );
+
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    expect(encounter.assaltante.state).toBe('recovering');
+
+    encounter.player.tryLightAttack();
+    runFor(encounter, 300);
+
+    encounter.profile.applyRoomBoundary();
+    expect(encounter.profile.domain('punish', 'trait')).toBeGreaterThan(0.5);
+  });
+
+  it('staying within ATTACK_REACH the whole time drives the distance skill domain toward 1', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 20, y: 0, width: 20, height: 20 },
+    );
+    runFor(encounter, 2000);
+    encounter.profile.applyRoomBoundary();
+    expect(encounter.profile.domain('distance', 'trait')).toBeGreaterThan(0.9);
+  });
+
+  it('staying outside ATTACK_REACH drives the distance skill domain toward 0', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 500, y: 0, width: 20, height: 20 },
+    );
+    runFor(encounter, 500); // not enough time for the (slower) Assaltante to close a ~480px gap into ATTACK_REACH
+    encounter.profile.applyRoomBoundary();
+    expect(encounter.profile.domain('distance', 'trait')).toBeLessThan(0.1);
+  });
 });

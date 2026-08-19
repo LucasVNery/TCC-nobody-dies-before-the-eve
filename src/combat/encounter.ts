@@ -4,7 +4,9 @@ import type { GameEvents } from '../core/events';
 import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { PlayerController } from './playerController';
 import { AssaltanteController } from './assaltanteController';
+import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { aabbOverlap } from './collision';
+import { ATTACK_REACH } from './movementDefs';
 import type { AABB } from './types';
 
 export class Encounter {
@@ -12,16 +14,24 @@ export class Encounter {
   readonly opportunities: OpportunitySystem;
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
+  readonly profile: ProfileAccumulator;
 
   constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB) {
     this.bus = new EventBus<GameEvents>();
     this.opportunities = new OpportunitySystem(this.bus);
     this.player = new PlayerController(this.bus, playerHurtbox);
     this.assaltante = new AssaltanteController(this.bus, this.opportunities, assaltanteHurtbox);
+    this.profile = new ProfileAccumulator();
 
     this.bus.on('player.action', (e) => {
       if (e.action === 'light_attack' && this.assaltante.state === 'attacking') {
         this.assaltante.onPlayerWrongAction(e.action);
+      }
+    });
+
+    this.bus.on('opp.close', (e) => {
+      if (e.type === 'punish' && e.outcome !== 'invalid') {
+        this.profile.recordOutcome('punish', e.outcome);
       }
     });
   }
@@ -48,5 +58,10 @@ export class Encounter {
     // needs to be removed before its own expiry check fires here — otherwise a
     // same-call race would close it as 'expired' one tick early.
     this.opportunities.step(stepMs);
+
+    const dx = this.assaltante.position.x - this.player.position.x;
+    const dy = this.assaltante.position.y - this.player.position.y;
+    const distance = Math.hypot(dx, dy);
+    this.profile.record('distance', distance <= ATTACK_REACH ? stepMs : 0, stepMs);
   }
 }
