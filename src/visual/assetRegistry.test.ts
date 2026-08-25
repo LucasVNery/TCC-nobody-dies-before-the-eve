@@ -7,7 +7,8 @@ describe('ASSET_KEYS', () => {
     expect(keys).toEqual([
       'placeholder_player',
       'placeholder_assaltante',
-      'placeholder_ground_tile',
+      'ground_grass',
+      'ground_water',
       'placeholder_direction_arrow',
     ]);
     expect(new Set(keys).size).toBe(keys.length);

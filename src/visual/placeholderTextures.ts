@@ -1,14 +1,20 @@
 import type Phaser from 'phaser';
 import { ASSET_KEYS } from './assetRegistry';
+import type { IsoConfig } from './isometricProjection';
 
 export const GROUND_TILE_SIZE = 64;
 export const ENTITY_SIZE = 20;
 const DIRECTION_ARROW_SIZE = 10;
 
+export const ISO_CONFIG: IsoConfig = {
+  tileWorldSize: GROUND_TILE_SIZE,
+  halfWidth: 32,
+  halfHeight: 16,
+};
+
 export function generatePlaceholderTextures(scene: Phaser.Scene): void {
   generateSquareTexture(scene, ASSET_KEYS.player, ENTITY_SIZE, 0x4caf50);
   generateSquareTexture(scene, ASSET_KEYS.assaltante, ENTITY_SIZE, 0xf44336);
-  generateSquareTexture(scene, ASSET_KEYS.ground, GROUND_TILE_SIZE, 0x2b2b2b);
   generateArrowTexture(scene, ASSET_KEYS.directionArrow, DIRECTION_ARROW_SIZE);
 }
 
