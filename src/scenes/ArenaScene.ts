@@ -10,6 +10,8 @@ import { generatePlaceholderTextures, ENTITY_SIZE, ISO_CONFIG } from '../visual/
 import { createGroundTilemap } from '../visual/groundTilemap';
 import { DirectionalSprite } from '../visual/directionalSprite';
 import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
+import { toScreen } from '../visual/isometricProjection';
+import type { Vec2, AABB } from '../combat/types';
 
 const STEP_MS = 1000 / 60;
 const HURTBOX_COLOR = 0xffffff;
@@ -60,11 +62,6 @@ export class ArenaScene extends Phaser.Scene {
 
     this.playerSprite = new DirectionalSprite(this, ASSET_KEYS.player, ENTITY_SIZE, ENTITY_SIZE, { x: 100, y: 300 }, ISO_CONFIG);
     this.assaltanteSprite = new DirectionalSprite(this, ASSET_KEYS.assaltante, ENTITY_SIZE, ENTITY_SIZE, { x: 400, y: 300 }, ISO_CONFIG);
-
-    this.add
-      .rectangle(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height)
-      .setOrigin(0, 0)
-      .setStrokeStyle(2, 0x444444);
 
     this.overlayText = this.add.text(10, 10, '', {
       fontFamily: 'monospace',
@@ -161,30 +158,39 @@ export class ArenaScene extends Phaser.Scene {
     const playerHurtbox = this.encounter.player.hurtbox();
     const assaltanteHurtbox = this.encounter.assaltante.hurtbox();
     this.debugGraphics.lineStyle(1, HURTBOX_COLOR, 0.6);
-    this.debugGraphics.strokeRect(playerHurtbox.x, playerHurtbox.y, playerHurtbox.width, playerHurtbox.height);
-    this.debugGraphics.strokeRect(
-      assaltanteHurtbox.x,
-      assaltanteHurtbox.y,
-      assaltanteHurtbox.width,
-      assaltanteHurtbox.height,
-    );
+    this.debugGraphics.strokePoints(this.cornersAsPoints(playerHurtbox), true);
+    this.debugGraphics.strokePoints(this.cornersAsPoints(assaltanteHurtbox), true);
 
-    const assaltanteCenterX = this.encounter.assaltante.position.x + ENTITY_SIZE / 2;
-    const assaltanteCenterY = this.encounter.assaltante.position.y + ENTITY_SIZE / 2;
+    const assaltanteCenter: Vec2 = {
+      x: this.encounter.assaltante.position.x + ENTITY_SIZE / 2,
+      y: this.encounter.assaltante.position.y + ENTITY_SIZE / 2,
+    };
+    const rangeScreenCenter = toScreen(assaltanteCenter, ISO_CONFIG);
     this.debugGraphics.lineStyle(1, ATTACK_RANGE_COLOR, 0.6);
-    this.debugGraphics.strokeCircle(assaltanteCenterX, assaltanteCenterY, ATTACK_RANGE);
+    this.debugGraphics.strokeEllipse(
+      rangeScreenCenter.x,
+      rangeScreenCenter.y,
+      ATTACK_RANGE * 2,
+      ATTACK_RANGE * (ISO_CONFIG.halfHeight / ISO_CONFIG.halfWidth) * 2,
+    );
 
     this.debugGraphics.fillStyle(ATTACK_HITBOX_COLOR, 0.4);
     const playerAttack = this.encounter.player.attackHitbox();
-    if (playerAttack) this.debugGraphics.fillRect(playerAttack.x, playerAttack.y, playerAttack.width, playerAttack.height);
+    if (playerAttack) this.debugGraphics.fillPoints(this.cornersAsPoints(playerAttack), true);
     const assaltanteAttack = this.encounter.assaltante.attackHitbox();
-    if (assaltanteAttack) {
-      this.debugGraphics.fillRect(
-        assaltanteAttack.x,
-        assaltanteAttack.y,
-        assaltanteAttack.width,
-        assaltanteAttack.height,
-      );
-    }
+    if (assaltanteAttack) this.debugGraphics.fillPoints(this.cornersAsPoints(assaltanteAttack), true);
+  }
+
+  private cornersAsPoints(box: AABB): Phaser.Geom.Point[] {
+    const corners: Vec2[] = [
+      { x: box.x, y: box.y },
+      { x: box.x + box.width, y: box.y },
+      { x: box.x + box.width, y: box.y + box.height },
+      { x: box.x, y: box.y + box.height },
+    ];
+    return corners.map((corner) => {
+      const screen = toScreen(corner, ISO_CONFIG);
+      return new Phaser.Geom.Point(screen.x, screen.y);
+    });
   }
 }
