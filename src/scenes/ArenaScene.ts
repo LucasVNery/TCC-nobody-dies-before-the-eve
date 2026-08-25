@@ -113,7 +113,20 @@ export class ArenaScene extends Phaser.Scene {
     this.keys.light.on('down', () => this.encounter.player.tryLightAttack());
     this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
 
-    this.cameras.main.setBounds(ARENA_BOUNDS.x, ARENA_BOUNDS.y, ARENA_BOUNDS.width, ARENA_BOUNDS.height);
+    const arenaCorners: Vec2[] = [
+      { x: ARENA_BOUNDS.x, y: ARENA_BOUNDS.y },
+      { x: ARENA_BOUNDS.x + ARENA_BOUNDS.width, y: ARENA_BOUNDS.y },
+      { x: ARENA_BOUNDS.x, y: ARENA_BOUNDS.y + ARENA_BOUNDS.height },
+      { x: ARENA_BOUNDS.x + ARENA_BOUNDS.width, y: ARENA_BOUNDS.y + ARENA_BOUNDS.height },
+    ];
+    const projectedCorners = arenaCorners.map((corner) => toScreen(corner, ISO_CONFIG));
+    const margin = ISO_CONFIG.halfWidth * 2;
+    const minX = Math.min(...projectedCorners.map((p) => p.x)) - margin;
+    const maxX = Math.max(...projectedCorners.map((p) => p.x)) + margin;
+    const minY = Math.min(...projectedCorners.map((p) => p.y)) - margin;
+    const maxY = Math.max(...projectedCorners.map((p) => p.y)) + margin;
+
+    this.cameras.main.setBounds(minX, minY, maxX - minX, maxY - minY);
     this.cameras.main.startFollow(this.playerSprite.gameObject);
 
     this.debugGraphics = this.add.graphics();

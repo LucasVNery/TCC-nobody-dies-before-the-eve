@@ -18,9 +18,10 @@ export class DirectionalSprite {
     config: IsoConfig,
   ) {
     this.config = config;
-    this.base = scene.add.image(width / 2, height / 2, baseTextureKey).setOrigin(0.5, 0.5);
+    const centerOffset = toScreen({ x: width / 2, y: height / 2 }, config);
+    this.base = scene.add.image(centerOffset.x, centerOffset.y, baseTextureKey).setOrigin(0.5, 0.5);
     this.arrow = scene.add
-      .image(width / 2, height / 2, ASSET_KEYS.directionArrow)
+      .image(centerOffset.x, centerOffset.y, ASSET_KEYS.directionArrow)
       .setOrigin(0, 0.5);
     const initialScreenPos = toScreen(initialPosition, config);
     this.container = scene.add.container(initialScreenPos.x, initialScreenPos.y, [this.base, this.arrow]);

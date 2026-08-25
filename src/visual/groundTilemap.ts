@@ -23,6 +23,7 @@ export function createGroundTilemap(scene: Phaser.Scene, bounds: AABB, config: I
       const screenPos = toScreen(worldPos, config);
 
       const tile = scene.add.image(screenPos.x, screenPos.y, textureKey);
+      tile.setOrigin(0, 0);
       tile.setDisplaySize(tileDisplaySize, tileDisplaySize);
       tile.setDepth(GROUND_DEPTH_BASE + row + col);
     }
