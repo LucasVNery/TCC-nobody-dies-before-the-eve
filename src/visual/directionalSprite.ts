@@ -1,11 +1,13 @@
 import type Phaser from 'phaser';
 import type { Vec2 } from '../combat/types';
 import { ASSET_KEYS } from './assetRegistry';
+import { toScreen, screenDepth, type IsoConfig } from './isometricProjection';
 
 export class DirectionalSprite {
   private readonly container: Phaser.GameObjects.Container;
   private readonly base: Phaser.GameObjects.Image;
   private readonly arrow: Phaser.GameObjects.Image;
+  private readonly config: IsoConfig;
 
   constructor(
     scene: Phaser.Scene,
@@ -13,12 +15,16 @@ export class DirectionalSprite {
     width: number,
     height: number,
     initialPosition: Vec2,
+    config: IsoConfig,
   ) {
+    this.config = config;
     this.base = scene.add.image(width / 2, height / 2, baseTextureKey).setOrigin(0.5, 0.5);
     this.arrow = scene.add
       .image(width / 2, height / 2, ASSET_KEYS.directionArrow)
       .setOrigin(0, 0.5);
-    this.container = scene.add.container(initialPosition.x, initialPosition.y, [this.base, this.arrow]);
+    const initialScreenPos = toScreen(initialPosition, config);
+    this.container = scene.add.container(initialScreenPos.x, initialScreenPos.y, [this.base, this.arrow]);
+    this.container.setDepth(screenDepth(initialPosition, config));
   }
 
   get gameObject(): Phaser.GameObjects.Container {
@@ -26,8 +32,9 @@ export class DirectionalSprite {
   }
 
   syncPosition(pos: Vec2): void {
-    this.container.setPosition(pos.x, pos.y);
-    this.container.setDepth(pos.y);
+    const screenPos = toScreen(pos, this.config);
+    this.container.setPosition(screenPos.x, screenPos.y);
+    this.container.setDepth(screenDepth(pos, this.config));
   }
 
   syncDirection(dir: Vec2): void {
