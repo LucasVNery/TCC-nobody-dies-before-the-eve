@@ -6,7 +6,13 @@ import { HudState, type HudCounters } from '../debug/hudState';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { ARENA_BOUNDS } from '../combat/movementDefs';
 import { ASSET_KEYS } from '../visual/assetRegistry';
-import { generatePlaceholderTextures, ENTITY_SIZE, ISO_CONFIG } from '../visual/placeholderTextures';
+import {
+  generatePlaceholderTextures,
+  ENTITY_SIZE,
+  ENTITY_VISUAL_WIDTH,
+  ENTITY_VISUAL_HEIGHT,
+  ISO_CONFIG,
+} from '../visual/placeholderTextures';
 import { createGroundTilemap } from '../visual/groundTilemap';
 import { DirectionalSprite } from '../visual/directionalSprite';
 import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
@@ -60,8 +66,22 @@ export class ArenaScene extends Phaser.Scene {
 
     createGroundTilemap(this, ARENA_BOUNDS, ISO_CONFIG);
 
-    this.playerSprite = new DirectionalSprite(this, ASSET_KEYS.player, ENTITY_SIZE, ENTITY_SIZE, { x: 100, y: 300 }, ISO_CONFIG);
-    this.assaltanteSprite = new DirectionalSprite(this, ASSET_KEYS.assaltante, ENTITY_SIZE, ENTITY_SIZE, { x: 400, y: 300 }, ISO_CONFIG);
+    this.playerSprite = new DirectionalSprite(
+      this,
+      ASSET_KEYS.player,
+      ENTITY_VISUAL_WIDTH,
+      ENTITY_VISUAL_HEIGHT,
+      { x: 100, y: 300 },
+      ISO_CONFIG,
+    );
+    this.assaltanteSprite = new DirectionalSprite(
+      this,
+      ASSET_KEYS.assaltante,
+      ENTITY_VISUAL_WIDTH,
+      ENTITY_VISUAL_HEIGHT,
+      { x: 400, y: 300 },
+      ISO_CONFIG,
+    );
 
     this.overlayText = this.add.text(10, 10, '', {
       fontFamily: 'monospace',

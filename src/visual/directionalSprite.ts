@@ -39,7 +39,11 @@ export class DirectionalSprite {
   }
 
   syncDirection(dir: Vec2): void {
-    this.arrow.setRotation(Math.atan2(dir.y, dir.x));
+    // toScreen is linear (no additive offset), so projecting a direction
+    // vector directly gives the correct on-screen angle — no need to
+    // subtract a projected origin.
+    const screenDir = toScreen(dir, this.config);
+    this.arrow.setRotation(Math.atan2(screenDir.y, screenDir.x));
   }
 
   setTint(color: number): void {
