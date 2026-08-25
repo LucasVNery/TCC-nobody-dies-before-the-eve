@@ -28,7 +28,16 @@ Pode simplesmente arrastar os arquivos pra dentro dessas duas pastas. Se preferi
 ### 3. Chão da arena (tile único ou pequeno tileset)
 - **Papel:** substitui o tile cinza gerado por código hoje.
 - **Sugestão de fonte:** mesmo pack Roguelike/RPG (tiles de masmorra/piso).
-- **Formato:** PNG, tile quadrado (qualquer tamanho — hoje o código usa 64×64, mas eu ajusto pro tamanho real do tile que vier).
+- **Formato:** PNG, **top-down reto** (visão de cima, sem projeção isométrica/losango), tile **quadrado**, "seamless" (encaixa borda-a-borda sem gaps). Qualquer tamanho — hoje o código usa 64×64, mas eu ajusto pro tamanho real do tile que vier.
+- **Importante:** tiles em formato de losango/bloco isométrico (topo em rombo) **não servem** aqui — o jogo usa câmera top-down estilo Hades com grid cartesiano reto, não isometria de verdade. Um tile em losango deixa espaço transparente em xadrez quando colocado num grid quadrado. Ver `_unused/` abaixo.
+
+## Pasta `_unused/`
+Chegaram pacotes em 2026-08-24 que **não servem** pro pipeline atual e foram movidos pra cá pra não confundir a integração:
+- `isometric tileset/` — tileset em losango de verdade (isometria clássica), incompatível com o grid cartesiano top-down do jogo.
+- `Essential_Isometric_3D_Block_Pack_.../` e `treeSet_pine_demo/` — modelos 3D (`.fbx`/`.obj`/`.dae`). Phaser é 2D, não carrega esses formatos direto.
+- `critters/` — sprites isométricos de animais (lobo, javali, texugo, cervo), quadrúpedes. Não substituem player/Assaltante (humanoides), mas podem virar inimigo/decoração numa fase futura se a arte servir.
+
+Nada aqui é referenciado em `src/visual/assetRegistry.ts`. Se algum dia migrarmos pra isometria de verdade, esses arquivos voltam à mesa.
 
 ## O que NÃO precisa ainda
 - Spritesheets de animação (idle/walk/attack) — o jogo ainda não tem sistema de animação, é o próximo passo depois dos assets estáticos entrarem.

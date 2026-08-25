@@ -1,0 +1,297 @@
+<title>Tileset Isométrico — Exemplo</title>
+<style>
+  :root {
+    --bg: #14120d;
+    --panel: #1c1913;
+    --panel-line: #34301f;
+    --ink: #e9e3d3;
+    --muted: #9a9284;
+    --player: #4fa8ff;
+    --player-dim: #2c6bb0;
+    --enemy: #ff5c4d;
+    --enemy-dim: #b03f35;
+    --shadow: rgba(0, 0, 0, 0.5);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: clamp(20px, 5vw, 56px) 16px;
+  }
+
+  main {
+    width: 100%;
+    max-width: 900px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  header { display: flex; flex-direction: column; gap: 6px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    font-family: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 42px);
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p.lede {
+    margin: 0;
+    max-width: 66ch;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .stage-frame {
+    position: relative;
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: clamp(16px, 3vw, 28px);
+  }
+
+  .stage-frame::before {
+    content: "1 pacote só — grama + terra + água, sem misturar artistas";
+    position: absolute;
+    top: 10px;
+    left: 16px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .iso-viewport {
+    position: relative;
+    margin-top: 30px;
+    height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .iso-grid {
+    position: relative;
+    width: 448px;
+    height: 256px;
+  }
+
+  .tile {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    background-repeat: no-repeat;
+    background-size: contain;
+    image-rendering: pixelated;
+  }
+
+  .tile-grass { background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAvpJREFUWIXllz9v00AYh3+XOLHbBMWuFEGrLEBpFksMVExsXVjZyoYY2Dr2U7DBxpC1/QhZUJeoA6KolbI0TdMFAVaqJoQGYpxyDPZ7PdvnNAlpF14pimM79zzvn9gxwxSxWioDAIxMGt4FwFIpnPY9NNuH0yz3nweb9oubW2uhz6+fv79egSgwCA4Ai9Y8W1rIAQDWH2/PTmD7w7rY/vHrNxpfvvO8kWHnAy8EL+SyyOkZ3jl3WcvpTVSNcQS4vG/vuC22H90vInpsZanAbs1lAYxXjUSBza01WDkdVl6Hldd50nnjrp0kExPY3FrDojUPAPja+cmBeKaTRutbj3X6rrI1IQHKutN3+b9CKahlVk5XSjDgctg65y5aTm9m8KiIaj406RxuZNPsOuCAaCPNkqh8Sj5pLqtNM2xTBVWdSb/1G4MDAF0zUp+apzcOB4CW0+OMM2j7zTPOWZh/XXMQZewdt3mq9bafCJeverOISrUh3ivVBg6OOmAvbJvXHA/P3pSUInvH7ZlUpFJt4KQ+xF1bw0l9iMKui64LsNVSmdtmBjXHw70N/4728IEVW2BSCcqW4qQ+FNsEB+BXoN71Qid3XcRkRglUqg28fLoS+kxAyjgKpkgR3DYz4t3UAZqNg6MOAL8V9BqVsQynzPmOC77jk03df1GIFgBAzfFlntzOoN71hK1cjWB6YxUhARnOd1yYOsQ6Mhjw92sEJzCFbfoSAHD2ru8vsnFZESDeFoILcACJggkOAGy5WOYyuOZ4ogIkIh+LzgYJqfqsylgOUw9aIB+gL9E+WQ6AEFt4lYtlXtiNEBKyljnMvhM8ZGjgKkO5AiqRJPmrsjfSYIYW3BZXS2UMgtmRRWgReUhVUvLPmOBRoBTiVtxsH4b/EalE5ExkMZKIXkNU2arAsZ1JIoML9Z1y1GRHKqAEjxSgWC7686ExIJ+Nz8gomcEQbHCRDB5LgIIqMvwDDDk4ZagCy2t+/Hz10/JEz4bLxTKMtL9taLHWTASm+AsI/olXJFHSKgAAAABJRU5ErkJggg==); }
+  .tile-dirt { background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAqhJREFUWIXtlk1PE1EUhp/bD6YywJAok5Qg0QTTYKOYQty7McbYrSyMif+C6A/Qlf+BjUtWdkHYuHSjRgVDCN2hVGskjLYyAy3jotxhPu4M08BO3k0z99w573PO/ZjCuc51rv9dop/J1XKFyYuDGIN51z++umWha1nRdroAvP7y4WwBquUKALqWpe103RuXjcic1S0LAONCXlh7B6khEgGq5QrmiAZA87fjAqjMwyBXx3QxVMgB8Hz5Tf8AYeOw6eyMGXnn/admZKxld8ROax9r7wBQL00AIMlYZZoGQi6NOaKJo7wBEAGwtDAPwPdff1l++025xicBqMxVMOHNKl4+vs+V8WGAwM6WCdNUroKR74XBZEecTleYwwXE0sK8G8lwhlLBrKxtUzR0AMTcRMl9+ugWAIu1TRpWG/l8WuM4raxtA1A09B6AP3gW5n6I2RnTg5HtB2hYbQDE7cnr7Ox13WlT9wKngYirXFYdlpgaK7kPZ8eVdP2CJB3D9WYv56h2HNt1YgBUevLgWl8gfmO/qV+7Dohn9+64J5nLjhQNPRXIYm1TWXHYfFQDUS1XXGkij0YcRNHQvd8wyGJtMzBXGsRJxnOyuiTJhHd9N+SLVx89YH+Oum0zVSikMgfI+AOybaoXwpLdkOZ12/bM41S3baBnvusc7YGbxRIDWeDoKlaZScmjGlZSy6XpJREEywmEEJD53NiQY6JziBjVjhNNm3rAVPWRSlrCGHMBiI4L6z82gp/juYkSAJ1DyGVw/ZtyvdlWdkAFkGDci//ciA6GQYa0PAAt58C7qlWnRNV+/3Nrv1dt2DgRwA/ikxuGaFht6rYdWV/wAATAu69R41QAYZAhLc9wYcC7NwAVgMhnICugkEs2Tw0gJf8d/7H3vaWR7T6p1XH6Bz5Pai0Hf66lAAAAAElFTkSuQmCC); }
+  .tile-water { background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAb1JREFUWIXtlk1P20AQhp/BIcakgYgIIoGi5tBWXLhwQFF/TH8cPwYhrlxQ4IAUEYm2aSFpMI7jbg9hI8fZxR8qJ/xeLHtm531mvF5ZKKBWpwuAUlOUCkGFAPzoXxUpV6pUqVKlSr1zSZFFn79+s8auz07fDkAbr3s1Qn+iknH3w7YEfx5zQWQCMBm3Ph2t5N3fXFLb2ROAya/vmUBeBWh1urj1Jk7Vo+JuWo1NIFmnYQTQv1xO1SOa+mpr/wtZzeMQ615NQn+yeGaCWQLQHQME46EC0OZ5ATSEySsOIjB/x8F4yCx4WuoYYDToFYZIAAAw+dmXaOrP47fniO7arTfVaNBbWRA3N8m2GU2K13frTYnCAGl1ukujfuhf0GifLCWnQaQp2ZiuNxr0qPyNHlhzGovgmtNYWaDv84CYppk0B5C9j8c4VZfZ82/VaJ+8aphWNE+OU/VkFjzON+Fu+5CNrQMAnkd3Kj4RU9c2kzRjgFnwJNHUJxgP55swHtxtHyKyAVJBpKJsRUyy7ZnYV2T/DJPSB9GLVs58G5hpMm69KS/X9IOoKIhFi9r3t+fpSf8RJJNxLoCMILmMtf4BZPzL69dGrE4AAAAASUVORK5CYII=); }
+
+  .entity {
+    position: absolute;
+    width: 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .ground-shadow {
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    translate: -50% 0;
+    width: 26px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--shadow);
+    filter: blur(2.5px);
+  }
+
+  .block { position: relative; border-radius: 3px; bottom: 14px; }
+  .player-block { width: 24px; height: 24px; background: var(--player); box-shadow: inset 0 0 0 2px var(--player-dim); }
+  .enemy-block { width: 22px; height: 22px; background: var(--enemy); box-shadow: inset 0 0 0 2px var(--enemy-dim); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--panel-line);
+    margin-top: 20px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 2px;
+    flex: none;
+    image-rendering: pixelated;
+    background-size: contain;
+    background-repeat: no-repeat;
+  }
+  .swatch.player { background: var(--player); border-radius: 3px; }
+  .swatch.enemy { background: var(--enemy); border-radius: 3px; }
+
+  .legend-item strong { color: var(--ink); font-weight: 600; }
+
+  .note {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+    padding-top: 14px;
+    margin-top: 4px;
+    border-top: 1px solid var(--panel-line);
+  }
+
+  .note code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    background: #0000003a;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .warn {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border: 1px solid #b8912a55;
+    background: #ffcf400f;
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<main>
+  <header>
+    <span class="eyebrow">Validação · mesmo grupo de origem</span>
+    <h1>Tileset Isométrico — Exemplo</h1>
+    <p class="lede">
+      Montagem de um piso real com as peças de <code style="font-family: 'IBM Plex Mono', monospace; background:#0000003a; padding:1px 5px; border-radius:3px;">_unused/isometric tileset/</code>
+      (grama, terra e água), encaixadas em grade isométrica de verdade (deslocamento diagonal, não grid quadrado) —
+      pra você confirmar se o encaixe e a escala ficam bons antes de eu integrar no jogo.
+    </p>
+  </header>
+
+  <div class="stage-frame">
+    <div class="iso-viewport">
+      <div class="iso-grid">
+        <div class="tile tile-water" style="left:192px; top:0px; z-index:0;"></div>
+        <div class="tile tile-water" style="left:224px; top:16px; z-index:1;"></div>
+        <div class="tile tile-water" style="left:256px; top:32px; z-index:2;"></div>
+        <div class="tile tile-water" style="left:288px; top:48px; z-index:3;"></div>
+        <div class="tile tile-water" style="left:320px; top:64px; z-index:4;"></div>
+        <div class="tile tile-water" style="left:352px; top:80px; z-index:5;"></div>
+        <div class="tile tile-water" style="left:384px; top:96px; z-index:6;"></div>
+        <div class="tile tile-water" style="left:160px; top:16px; z-index:1;"></div>
+        <div class="tile tile-dirt" style="left:192px; top:32px; z-index:2;"></div>
+        <div class="tile tile-grass" style="left:224px; top:48px; z-index:3;"></div>
+        <div class="tile tile-grass" style="left:256px; top:64px; z-index:4;"></div>
+        <div class="tile tile-grass" style="left:288px; top:80px; z-index:5;"></div>
+        <div class="tile tile-dirt" style="left:320px; top:96px; z-index:6;"></div>
+        <div class="tile tile-water" style="left:352px; top:112px; z-index:7;"></div>
+        <div class="tile tile-water" style="left:128px; top:32px; z-index:2;"></div>
+        <div class="tile tile-grass" style="left:160px; top:48px; z-index:3;"></div>
+        <div class="tile tile-dirt" style="left:192px; top:64px; z-index:4;"></div>
+        <div class="tile tile-grass" style="left:224px; top:80px; z-index:5;"></div>
+        <div class="tile tile-dirt" style="left:256px; top:96px; z-index:6;"></div>
+        <div class="tile tile-grass" style="left:288px; top:112px; z-index:7;"></div>
+        <div class="tile tile-water" style="left:320px; top:128px; z-index:8;"></div>
+        <div class="tile tile-water" style="left:96px; top:48px; z-index:3;"></div>
+        <div class="tile tile-grass" style="left:128px; top:64px; z-index:4;"></div>
+        <div class="tile tile-grass" style="left:160px; top:80px; z-index:5;"></div>
+        <div class="tile tile-dirt" style="left:192px; top:96px; z-index:6;"></div>
+        <div class="tile tile-grass" style="left:224px; top:112px; z-index:7;"></div>
+        <div class="tile tile-grass" style="left:256px; top:128px; z-index:8;"></div>
+        <div class="tile tile-water" style="left:288px; top:144px; z-index:9;"></div>
+        <div class="tile tile-water" style="left:64px; top:64px; z-index:4;"></div>
+        <div class="tile tile-grass" style="left:96px; top:80px; z-index:5;"></div>
+        <div class="tile tile-dirt" style="left:128px; top:96px; z-index:6;"></div>
+        <div class="tile tile-grass" style="left:160px; top:112px; z-index:7;"></div>
+        <div class="tile tile-dirt" style="left:192px; top:128px; z-index:8;"></div>
+        <div class="tile tile-grass" style="left:224px; top:144px; z-index:9;"></div>
+        <div class="tile tile-water" style="left:256px; top:160px; z-index:10;"></div>
+        <div class="tile tile-water" style="left:32px; top:80px; z-index:5;"></div>
+        <div class="tile tile-dirt" style="left:64px; top:96px; z-index:6;"></div>
+        <div class="tile tile-grass" style="left:96px; top:112px; z-index:7;"></div>
+        <div class="tile tile-grass" style="left:128px; top:128px; z-index:8;"></div>
+        <div class="tile tile-grass" style="left:160px; top:144px; z-index:9;"></div>
+        <div class="tile tile-dirt" style="left:192px; top:160px; z-index:10;"></div>
+        <div class="tile tile-water" style="left:224px; top:176px; z-index:11;"></div>
+        <div class="tile tile-water" style="left:0px; top:96px; z-index:6;"></div>
+        <div class="tile tile-water" style="left:32px; top:112px; z-index:7;"></div>
+        <div class="tile tile-water" style="left:64px; top:128px; z-index:8;"></div>
+        <div class="tile tile-water" style="left:96px; top:144px; z-index:9;"></div>
+        <div class="tile tile-water" style="left:128px; top:160px; z-index:10;"></div>
+        <div class="tile tile-water" style="left:160px; top:176px; z-index:11;"></div>
+        <div class="tile tile-water" style="left:192px; top:192px; z-index:12;"></div>
+
+        <div class="entity" style="left:192px; top:120px; z-index:106;">
+          <div class="block player-block"></div>
+          <div class="ground-shadow"></div>
+        </div>
+        <div class="entity" style="left:256px; top:120px; z-index:106;">
+          <div class="block enemy-block"></div>
+          <div class="ground-shadow"></div>
+        </div>
+        <div class="entity" style="left:96px; top:136px; z-index:107;">
+          <div class="block enemy-block"></div>
+          <div class="ground-shadow"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><span class="swatch tile-grass"></span><strong>Grama</strong> — chão base</div>
+      <div class="legend-item"><span class="swatch tile-dirt"></span><strong>Terra</strong> — trilha</div>
+      <div class="legend-item"><span class="swatch tile-water"></span><strong>Água</strong> — obstáculo/borda</div>
+      <div class="legend-item"><span class="swatch player"></span><strong>Azul</strong> — jogador</div>
+      <div class="legend-item"><span class="swatch enemy"></span><strong>Vermelho</strong> — inimigo</div>
+    </div>
+
+    <p class="note">
+      Grade <strong>7×7</strong>, projeção <code>screenX = (col − row) × 32</code>, <code>screenY = (col + row) × 16</code>
+      (2:1, padrão do gênero). Física/colisão continuam em <code>combat/</code>, em coordenadas cartesianas — só essa
+      camada de desenho projeta pra losango.
+    </p>
+
+    <div class="warn">
+      Chute de proporção: como o tile nativo é 32×32 (canvas quadrado, não 64×32), a altura do losango na tela
+      pode não bater exatamente com <code>screenY</code> acima — dá pra ver aqui se sobra ou falta espaço entre as
+      fileiras. Se estiver errado, é só eu ajustar o fator de deslocamento vertical.
+    </div>
+  </div>
+</main>
