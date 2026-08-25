@@ -134,8 +134,15 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    const dx = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
-    const dy = (this.keys.down.isDown ? 1 : 0) - (this.keys.up.isDown ? 1 : 0);
+    const inputX = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
+    const inputY = (this.keys.down.isDown ? 1 : 0) - (this.keys.up.isDown ? 1 : 0);
+    // Rotate WASD 45° so each key drives the player toward a screen-space
+    // point of the isometric diamond (up/down/left/right on screen),
+    // instead of along the underlying cartesian world axes. Combat/movement
+    // still only ever sees a cartesian (dx, dy) — this is an input-mapping
+    // concern local to the scene, not a physics change.
+    const dx = inputX + inputY;
+    const dy = inputY - inputX;
     this.encounter.setPlayerMoveInput(dx, dy);
     this.lastMoveInput = { dx, dy };
 
