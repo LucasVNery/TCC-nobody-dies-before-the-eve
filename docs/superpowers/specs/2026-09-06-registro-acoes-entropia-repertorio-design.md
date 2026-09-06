@@ -294,6 +294,30 @@ Não existe lib madura de "sistema de combate data-driven" para Phaser 3. `phase
 
 **Recomendação para agora:** desenhar prismas isométricos (3 faces com tons diferentes) direto em `src/visual/`, com hitboxes de ataque como volumes projetados na mesma malha isométrica. Custo quase zero, sem dependência, sem pipeline — e entrega a leitura "caixa 3D + margens de hitbox 3D" pedida. Migração para Three.js/Babylon fica registrada como sub-projeto visual futuro possível (a separação lógica/visual atual sobreviveria: `combat/`, `opportunity/`, `ai/`, `profile/` ficam intactos).
 
+**Atualização (06/09/2026, mesma rodada — sub-projeto visual antecipado):** o usuário decidiu antecipar o sub-projeto visual futuro citado acima — [[project_2_5d_asset_readiness_flag]] resolvida. Personagem/inimigos (não a arena, que fica com os tiles isométricos atuais) migram de prisma placeholder para **sprite 3D pré-renderizado**, estilo Diablo/Torchlight, mantendo o jogo 100% Phaser 2D (sem trocar de engine, sem Three.js/Babylon em runtime).
+
+### 8.5 Armas — visualização e efeitos (pesquisa adicional, 06/09/2026)
+
+**Pipeline de personagem 3D pré-renderizado (decisão travada):**
+
+| Etapa | Escolha | Por quê |
+|---|---|---|
+| Modelo base | **KayKit Adventurers** (CC0, kaylousberg.com) | Vem com armas/props que já combinam visualmente com o personagem (espada+escudo, arco) — alinhado à trilha de armas deste sub-projeto e dos próximos. Rejeitado Kenney Blocky Characters: já vem com 27 animações prontas (mais rápido), mas sem prop de arma combinando — exigiria compor a arma separada. |
+| Animação | Mixamo (grátis com conta Adobe) ou Quaternius Universal Animation Library (retarget de 260 clipes no navegador) | KayKit não vem pré-animado como o pack Kenney; precisa desse passo. |
+| Render 3D→sprite sheet | `blender-sprite-render` (GitHub, headless, corte automático, N-direcional) ou addon `BlenderSpriteGenerator` | Ferramentas prontas para o batch render — não precisa escrever o script do zero. |
+| Integração no jogo | Sprite sheet resultante consumido como os atlases de placeholder hoje | Nenhuma mudança em `combat/`, `opportunity/`, `ai/`, `profile/` — só a camada visual. |
+
+**Efeitos de ataque (demais armas — arco, arma pesada):**
+
+- `postFX` nativo do Phaser 3.80.1 (já instalado — `gameObject.postFX.addGlow/addShine/addBloom/...`) para feedback de carga/impacto, sem dependência nova.
+- **Phaser 3 Particle Editor** (`koreezgames/phaser3-particle-editor`, GUI web + plugin companion `phaser-particle-editor-plugin`) para desenhar visualmente emissores de partícula (poeira no golpe pesado, rastro na flechada) em vez de tunar configuração de emissor no código.
+- Sprites CC0 de slash/impacto (OpenGameArt: "Pixel Art Sword Slash Effect", "Weapon Slash Effect") como overlay pronto pro frame de impacto, se o efeito por partícula não for suficiente.
+
+**Reavaliação do critério 8.1-8.3 (dependência só se justificada) sob o novo critério "visual bom e fluidez também contam":**
+
+- **GSAP:** rejeitado mesmo com a barra mais alta. O próprio Phaser modelou os parâmetros do seu Tween Manager no TweenMax/GSAP de propósito — não há ganho de fluidez que justifique a dependência.
+- **Spine vs DragonBones** (animação esquelética 2D para o swing das armas): DragonBones é grátis mas seu editor está sem manutenção há anos — risco alto para a base de um TCC. Spine é o padrão da indústria, tem runtime oficial pro Phaser (`@esotericsoftware/spine-phaser`), licença única sem royalty. **Decisão: adiada.** O usuário não tem experiência com Spine; só vale reconsiderar se aparecer alguma ferramenta (MCP ou outra) que gere a animação esquelética automaticamente — caso contrário, o pipeline de pré-render 3D acima já deve entregar a fluidez de swing necessária, tornando Spine redundante.
+
 ---
 
 ## 9. Riscos e mitigações
