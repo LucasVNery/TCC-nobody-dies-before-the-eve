@@ -16,6 +16,7 @@
 | D4 | Persistência do perfil | **Continua entre runs, reseta entre sessões.** O perfil é do jogador, não da tentativa. | v1 §3.3 |
 | D5 | Retenção / 2ª sessão | Não decidido. Esquema instrumentado para suportar, sem compromisso de execução. | v1 §11.2 |
 | D6 | Mecanismo de suavização | **Contagens decaídas**, não EWMA sobre a razão. Unifica domínio e confiança num só mecanismo. | v1 §3.3, §3.4 |
+| D9 | Taxonomia da dim 2 (repertório de ações) | **Remove `aéreo` do conjunto.** Novo conjunto: `{leve, pesado, carregado, arremesso, utilitário}`, **n = 5** fixo. `aéreo` exige eixo Z no combate; a decisão "combate 100% planar" (spec do núcleo jogável, 13/08) está travada, logo a remoção é consequência dela, não corte arbitrário. Se o eixo Z for reintroduzido num sub-projeto futuro, `aéreo` volta e `n` passa a 6. A dim 7 (uso de espaço) permanece bloqueada pelo mesmo motivo — fora de escopo até haver decisão sobre eixo Z, não pendência aberta. | §3.2 (06/09/2026) |
 
 **Consequência de D1 no cronograma:** o Estudo 1 deixa de ser só validação e passa a ser **critério de seleção de dimensões**. Isso é uma melhoria de posicionamento — o corte vira resultado do trabalho, com justificativa estatística, em vez de decisão de projeto arbitrária. O texto do TCC deve enquadrar assim.
 
@@ -119,6 +120,8 @@ confiança(s) = oportunidades_s / (oportunidades_s + κ)              κ = 10
 | 6 | Paciência / comprometimento | ataques iniciados em janela segura | total de ataques iniciados |
 | 7 | Uso de espaço | oportunidades `reposition` com outcome `taken` | oportunidades `reposition` ∈ {taken, missed, expired} |
 
+**Bloqueio da dim 7 (revisto por D9):** exige um `OppType` `reposition` que não existe **e** esbarra na decisão "sem eixo Z". Fora de escopo até haver decisão explícita de arquitetura sobre eixo Z — não é pendência aberta a ser resolvida no fluxo normal de sub-projetos.
+
 **Nota sobre 5 e 6:** não passam pelo `OpportunitySystem` — o denominador é tempo ou contagem de ações, não janela anotada. São mais baratas de instrumentar, e por isso devem estabilizar mais rápido no ICC. A confiança delas usa `κ` sobre a mesma contagem (segundos de combate para a 5, ataques para a 6).
 
 **Definição pendente de "janela segura" (dim 6):** ausência de hitbox inimiga ativa ou telegrafada que alcance a posição do jogador dentro do tempo de recuperação da ação escolhida. Precisa virar predicado implementável antes do Estudo 1.
@@ -137,7 +140,7 @@ com `n` = número de opções **disponíveis ao jogador naquele momento** (v1 §
 | # | Dimensão | Distribuição sobre | Base de contagem | Confiança sobre |
 |---|---|---|---|---|
 | 1 ★ | Entropia de repertório de armas | armas desbloqueadas | ações de ataque executadas | nº de ações de ataque |
-| 2 ★ | Entropia de repertório de ações | {leve, pesado, carregado, aéreo, arremesso, utilitário} | ações executadas | nº de ações |
+| 2 ★ | Entropia de repertório de ações | {leve, pesado, carregado, arremesso, utilitário} — **n = 5**, ver D9 | ações executadas | nº de ações |
 | 4 | Repertório defensivo | {esquiva, bloqueio, recuo, contra-ataque} | **apenas janelas defensivas resolvidas como `taken`** | nº de janelas defensivas `taken` |
 
 Confiança da Família B: `confiança(s) = contagem_s / (contagem_s + κ_H)`, com `κ_H = 25` (entropia precisa de mais amostras que uma razão para estabilizar).
