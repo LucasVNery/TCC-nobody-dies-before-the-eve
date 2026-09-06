@@ -17,8 +17,7 @@ export class HudState {
     private bus: EventBus<GameEvents>,
     private render: (counters: HudCounters) => void,
   ) {
-    this.bus.on('player.action', (e) => {
-      if (e.action !== 'dodge') return;
+    this.bus.on('player.dodge', () => {
       this.dashAttempts += 1;
       this.renderNow();
     });

@@ -5,12 +5,6 @@ export interface ActionPhaseTiming {
   recoveryMs: number;
 }
 
-export const LIGHT_ATTACK: ActionPhaseTiming = {
-  startupMs: 100,
-  activeMs: 100,
-  recoveryMs: 150,
-};
-
 export interface DodgeTiming {
   durationMs: number;
   iframesMs: number;

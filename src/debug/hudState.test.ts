@@ -16,21 +16,21 @@ describe('HudState', () => {
     });
   });
 
-  it('counts a dodge action as a dash attempt', () => {
+  it('counts a dodge as a dash attempt', () => {
     const bus = new EventBus<GameEvents>();
     const render = vi.fn();
     new HudState(bus, render);
-    bus.emit('player.action', { action: 'dodge' });
+    bus.emit('player.dodge', {});
     expect(render).toHaveBeenLastCalledWith(
       expect.objectContaining({ dashAttempts: 1, wastedDashes: 1 }),
     );
   });
 
-  it('does not count a light_attack action as a dash attempt', () => {
+  it('does not count a light attack as a dash attempt', () => {
     const bus = new EventBus<GameEvents>();
     const render = vi.fn();
     new HudState(bus, render);
-    bus.emit('player.action', { action: 'light_attack' });
+    bus.emit('player.action', { actionId: 'sword_shield.light', actionType: 'light', weaponId: 'sword_shield' });
     expect(render).toHaveBeenLastCalledWith(expect.objectContaining({ dashAttempts: 0 }));
   });
 
@@ -38,7 +38,7 @@ describe('HudState', () => {
     const bus = new EventBus<GameEvents>();
     const render = vi.fn();
     new HudState(bus, render);
-    bus.emit('player.action', { action: 'dodge' });
+    bus.emit('player.dodge', {});
     bus.emit('opp.close', { opp_id: 'opp_1', type: 'dodge', outcome: 'taken' });
     expect(render).toHaveBeenLastCalledWith(
       expect.objectContaining({ dashAttempts: 1, effectiveDashes: 1, wastedDashes: 0 }),
@@ -49,7 +49,7 @@ describe('HudState', () => {
     const bus = new EventBus<GameEvents>();
     const render = vi.fn();
     new HudState(bus, render);
-    bus.emit('player.action', { action: 'dodge' });
+    bus.emit('player.dodge', {});
     bus.emit('opp.close', { opp_id: 'opp_1', type: 'dodge', outcome: 'expired' });
     expect(render).toHaveBeenLastCalledWith(
       expect.objectContaining({ dashAttempts: 1, effectiveDashes: 0, wastedDashes: 1 }),
