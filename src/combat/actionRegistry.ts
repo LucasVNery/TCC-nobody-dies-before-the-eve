@@ -53,6 +53,43 @@ export const SWORD_SHIELD_ACTIONS: ActionDef[] = [
   },
 ];
 
+export const WEAPON_IDS: readonly string[] = ['sword_shield', 'bow', 'heavy_weapon'];
+
+export const HEAVY_WEAPON_ACTIONS: ActionDef[] = [
+  {
+    id: 'heavy_weapon.light',
+    weaponId: 'heavy_weapon',
+    actionType: 'light',
+    timing: { startupMs: 160, activeMs: 120, recoveryMs: 220 },
+    reach: 55,
+  },
+  {
+    id: 'heavy_weapon.heavy',
+    weaponId: 'heavy_weapon',
+    actionType: 'heavy',
+    timing: { startupMs: 320, activeMs: 150, recoveryMs: 420 },
+    reach: 70,
+  },
+  {
+    id: 'heavy_weapon.charged',
+    weaponId: 'heavy_weapon',
+    actionType: 'charged',
+    timing: { startupMs: 200, activeMs: 180, recoveryMs: 500 },
+    reach: 65,
+    charge: { minHoldMs: 200, maxHoldMs: 1100, reachMax: 90 },
+  },
+];
+
+export const BOW_ACTIONS: ActionDef[] = [
+  {
+    id: 'bow.shot',
+    weaponId: 'bow',
+    actionType: 'throw',
+    timing: { startupMs: 80, activeMs: 60, recoveryMs: 200 },
+    reach: 220,
+  },
+];
+
 function buildRegistry(weaponActionLists: readonly ActionDef[][]): ReadonlyMap<string, ActionDef> {
   const map = new Map<string, ActionDef>();
   for (const list of weaponActionLists) {
@@ -64,10 +101,21 @@ function buildRegistry(weaponActionLists: readonly ActionDef[][]): ReadonlyMap<s
   return map;
 }
 
-export const ACTION_REGISTRY: ReadonlyMap<string, ActionDef> = buildRegistry([SWORD_SHIELD_ACTIONS]);
+export const ACTION_REGISTRY: ReadonlyMap<string, ActionDef> = buildRegistry([
+  SWORD_SHIELD_ACTIONS,
+  HEAVY_WEAPON_ACTIONS,
+  BOW_ACTIONS,
+]);
 
 export function resolveAction(id: string): ActionDef {
   const action = ACTION_REGISTRY.get(id);
   if (!action) throw new Error(`unknown action id: ${id}`);
   return action;
+}
+
+export function findWeaponAction(weaponId: string, actionType: ActionType): ActionDef | undefined {
+  for (const action of ACTION_REGISTRY.values()) {
+    if (action.weaponId === weaponId && action.actionType === actionType) return action;
+  }
+  return undefined;
 }
