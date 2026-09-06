@@ -2,7 +2,7 @@
 import type { SkillId, Clock, ProfileSnapshotPayload, ProfileOutcome } from './types';
 import { DecayedRatio } from './decayedRatio';
 import { EntropyAccumulator } from './entropyAccumulator';
-import { ACTION_TYPES, type ActionType } from '../combat/actionRegistry';
+import { ACTION_TYPES, WEAPON_IDS, type ActionType } from '../combat/actionRegistry';
 
 const TRAIT_GAMMA = 0.87;
 const STATE_GAMMA = 0.55;
@@ -37,6 +37,11 @@ export class ProfileAccumulator {
       folded: false,
       everRecorded: false,
     });
+    this.entropyDims.set('weapon_repertoire', {
+      acc: new EntropyAccumulator(WEAPON_IDS),
+      folded: false,
+      everRecorded: false,
+    });
   }
 
   record(skill: SkillId, numerator: number, denominator: number): void {
@@ -54,10 +59,16 @@ export class ProfileAccumulator {
     }
   }
 
-  recordAction(actionType: ActionType): void {
-    const dim = this.entropyDims.get('action_repertoire')!;
-    dim.acc.record(actionType);
-    dim.everRecorded = true;
+  recordAction(actionType: ActionType, weaponId?: string): void {
+    const actionDim = this.entropyDims.get('action_repertoire')!;
+    actionDim.acc.record(actionType);
+    actionDim.everRecorded = true;
+
+    if (weaponId !== undefined) {
+      const weaponDim = this.entropyDims.get('weapon_repertoire')!;
+      weaponDim.acc.record(weaponId);
+      weaponDim.everRecorded = true;
+    }
   }
 
   applyRoomBoundary(): void {

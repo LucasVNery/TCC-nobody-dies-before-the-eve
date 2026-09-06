@@ -208,3 +208,49 @@ describe('ProfileAccumulator — action repertoire (Família B, dim 2)', () => {
     expect(snap.counts.action_repertoire).toBeUndefined();
   });
 });
+
+describe('ProfileAccumulator — weapon repertoire (Família B, dim 1)', () => {
+  it('a skill with no attacks recorded has a null domain and deficit', () => {
+    const acc = new ProfileAccumulator();
+    acc.applyRoomBoundary();
+    expect(acc.domain('weapon_repertoire', 'trait')).toBeNull();
+    expect(acc.deficit('weapon_repertoire', 'trait')).toBeNull();
+  });
+
+  it('recordAction() feeds the weapon_repertoire entropy dimension when a weaponId is given', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 4; i++) acc.recordAction('light', 'sword_shield');
+    for (let i = 0; i < 3; i++) acc.recordAction('throw', 'bow');
+    acc.recordAction('light', 'heavy_weapon');
+    acc.applyRoomBoundary();
+
+    const domain = acc.domain('weapon_repertoire', 'trait');
+    expect(domain).not.toBeNull();
+    expect(domain!).toBeGreaterThan(0);
+    expect(domain!).toBeLessThan(1);
+  });
+
+  it('recordAction() without a weaponId still feeds action_repertoire and leaves weapon_repertoire untouched', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('light'); // pre-existing call shape from the prior sub-project, no weaponId
+    acc.applyRoomBoundary();
+    expect(acc.domain('action_repertoire', 'trait')).toBeNull(); // only 1 label used -> still null
+    expect(acc.domain('weapon_repertoire', 'trait')).toBeNull(); // never recorded at all
+  });
+
+  it('only one weapon ever used keeps the domain null (n effective < 2)', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 10; i++) acc.recordAction('light', 'sword_shield');
+    acc.applyRoomBoundary();
+    expect(acc.domain('weapon_repertoire', 'trait')).toBeNull();
+  });
+
+  it('snapshot includes weapon_repertoire once folded, independently of action_repertoire', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('throw', 'bow');
+    acc.applyRoomBoundary();
+    const snap = acc.snapshot('room.exit');
+    expect('weapon_repertoire' in snap.domain).toBe(true);
+    expect(snap.counts.weapon_repertoire).toEqual([1, 1]);
+  });
+});
