@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import { PlayerController } from './playerController';
-import { DODGE } from './actionDefs';
+import { DODGE, SWITCH_RECOVERY_MS } from './actionDefs';
 import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, ARENA_BOUNDS } from './movementDefs';
 
@@ -278,5 +278,60 @@ describe('PlayerController', () => {
     player.tryDodge();
     player.step(DODGE.durationMs);
     expect(player.position.x).toBeGreaterThan(beforeX); // still dashes right (movement dir), not left (aim dir)
+  });
+});
+
+describe('PlayerController — weapon switching', () => {
+  it('defaults to sword_shield equipped', () => {
+    const { player } = makePlayer();
+    expect(player.equippedWeaponId).toBe('sword_shield');
+  });
+
+  it('switchWeapon changes the equipped weapon and locks attacks for SWITCH_RECOVERY_MS', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    expect(player.equippedWeaponId).toBe('bow');
+    expect(() => player.tryAction('bow.shot')).not.toThrow();
+    expect(player.state).toBe('idle'); // rejected: still locked
+  });
+
+  it('the attack lock clears on its own after SWITCH_RECOVERY_MS', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.step(SWITCH_RECOVERY_MS);
+    player.tryAction('bow.shot');
+    expect(player.state).toBe('acting');
+  });
+
+  it('switching to the already-equipped weapon is a no-op and does not lock attacks', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('sword_shield'); // already equipped
+    player.tryAction('sword_shield.light');
+    expect(player.state).toBe('acting');
+  });
+
+  it('tryDodge cancels the switch lock immediately', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.tryDodge();
+    player.step(DODGE.durationMs); // return to idle
+    player.tryAction('bow.shot');
+    expect(player.state).toBe('acting');
+  });
+
+  it('switching again before the previous lock elapses resets the lock to a full SWITCH_RECOVERY_MS', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.step(SWITCH_RECOVERY_MS - 20); // 20ms left on the first lock
+    player.switchWeapon('heavy_weapon'); // resets to a fresh SWITCH_RECOVERY_MS
+    player.step(30); // would have cleared the *first* lock, not a fresh one
+    expect(() => player.tryAction('heavy_weapon.light')).not.toThrow();
+    expect(player.state).toBe('idle'); // still locked
+  });
+
+  it('tryAction rejects an action belonging to a non-equipped weapon, without throwing or changing state', () => {
+    const { player } = makePlayer();
+    expect(() => player.tryAction('bow.shot')).not.toThrow(); // sword_shield still equipped by default
+    expect(player.state).toBe('idle');
   });
 });

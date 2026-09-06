@@ -17,6 +17,8 @@ export const DODGE: DodgeTiming = {
   cooldownMs: 300,
 };
 
+export const SWITCH_RECOVERY_MS = 250;
+
 export function totalDurationMs(t: ActionPhaseTiming): number {
   return t.startupMs + t.activeMs + t.recoveryMs;
 }

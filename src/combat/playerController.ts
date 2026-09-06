@@ -2,7 +2,7 @@
 import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { AABB, PlayerState, Vec2 } from './types';
-import { DODGE } from './actionDefs';
+import { DODGE, SWITCH_RECOVERY_MS } from './actionDefs';
 import { resolveAction, type ActionDef } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
@@ -13,6 +13,8 @@ export class PlayerController {
   private currentAction: ActionDef | null = null;
   private chargeHeldMs = 0;
   private chargeTriggered = false;
+  equippedWeaponId: string = 'sword_shield';
+  private attackLockedMs = 0;
   private dodgeCooldownRemainingMs = 0;
   private invulnerable = false;
   private _position: Vec2;
@@ -73,9 +75,16 @@ export class PlayerController {
     this.aimDirection = normalized;
   }
 
+  switchWeapon(weaponId: string): void {
+    if (this.state !== 'idle' || weaponId === this.equippedWeaponId) return;
+    this.equippedWeaponId = weaponId;
+    this.attackLockedMs = SWITCH_RECOVERY_MS;
+  }
+
   tryAction(actionId: string): void {
-    if (this.state !== 'idle') return;
+    if (this.state !== 'idle' || this.attackLockedMs > 0) return;
     const action = resolveAction(actionId); // throws for unknown ids, before any state mutation
+    if (action.weaponId !== this.equippedWeaponId) return;
 
     this.state = 'acting';
     this.phaseElapsedMs = 0;
@@ -114,12 +123,16 @@ export class PlayerController {
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
     this.dashDirection = this.lastMoveDirection;
+    this.attackLockedMs = 0;
     this.bus.emit('player.dodge', {});
   }
 
   step(stepMs: number): void {
     if (this.dodgeCooldownRemainingMs > 0) {
       this.dodgeCooldownRemainingMs = Math.max(0, this.dodgeCooldownRemainingMs - stepMs);
+    }
+    if (this.attackLockedMs > 0) {
+      this.attackLockedMs = Math.max(0, this.attackLockedMs - stepMs);
     }
 
     if (this.state === 'idle') {
