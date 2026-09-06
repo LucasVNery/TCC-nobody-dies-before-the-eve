@@ -127,6 +127,8 @@ export class ArenaScene extends Phaser.Scene {
 
     this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => this.encounter.step(stepMs));
 
+    this.input.mouse?.disableContextMenu();
+
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error('Keyboard input plugin not available');
     this.keys = {

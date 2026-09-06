@@ -95,6 +95,9 @@ function buildRegistry(weaponActionLists: readonly ActionDef[][]): ReadonlyMap<s
   for (const list of weaponActionLists) {
     for (const action of list) {
       if (map.has(action.id)) throw new Error(`duplicate action id: ${action.id}`);
+      if (!WEAPON_IDS.includes(action.weaponId)) {
+        throw new Error(`action ${action.id} references unknown weaponId: ${action.weaponId}`);
+      }
       map.set(action.id, action);
     }
   }

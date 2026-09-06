@@ -56,6 +56,12 @@ describe('bow and heavy_weapon data', () => {
     );
   });
 
+  it('every registered action belongs to a known weapon in WEAPON_IDS', () => {
+    for (const action of ACTION_REGISTRY.values()) {
+      expect(WEAPON_IDS).toContain(action.weaponId);
+    }
+  });
+
   it('the bow has exactly one action, of type throw', () => {
     expect(BOW_ACTIONS).toHaveLength(1);
     expect(BOW_ACTIONS[0].actionType).toBe('throw');

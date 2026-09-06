@@ -23,6 +23,7 @@ export class PlayerController {
   private moveInput: Vec2 = { x: 0, y: 0 };
   private lastMoveDirection: Vec2 = { x: 1, y: 0 };
   private aimDirection: Vec2 = { x: 1, y: 0 };
+  private committedDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
 
   constructor(
@@ -56,13 +57,13 @@ export class PlayerController {
     if (this.currentAction.actionType === 'charged') {
       if (!this.chargeTriggered) return null;
       if (this.phaseElapsedMs >= this.currentAction.timing.activeMs) return null;
-      return directionalHitbox(this._position, this.width, this.height, this.aimDirection, this.chargedReach());
+      return directionalHitbox(this._position, this.width, this.height, this.committedDirection, this.chargedReach());
     }
 
     const { startupMs, activeMs } = this.currentAction.timing;
     const inActive = this.phaseElapsedMs >= startupMs && this.phaseElapsedMs < startupMs + activeMs;
     if (!inActive) return null;
-    return directionalHitbox(this._position, this.width, this.height, this.aimDirection, this.currentAction.reach);
+    return directionalHitbox(this._position, this.width, this.height, this.committedDirection, this.currentAction.reach);
   }
 
   setMoveInput(dx: number, dy: number): void {
@@ -89,6 +90,7 @@ export class PlayerController {
     this.state = 'acting';
     this.phaseElapsedMs = 0;
     this.currentAction = action;
+    this.committedDirection = { x: this.aimDirection.x, y: this.aimDirection.y };
     this.chargeHeldMs = 0;
     this.chargeTriggered = action.actionType !== 'charged';
     if (action.actionType !== 'charged') {

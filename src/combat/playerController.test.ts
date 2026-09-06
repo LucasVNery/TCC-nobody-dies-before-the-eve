@@ -268,6 +268,17 @@ describe('PlayerController', () => {
     expect(hitbox!.y).toBeLessThan(player.hurtbox().y); // reach strip is above the hurtbox, matching the aim
   });
 
+  it('attackHitbox() direction is committed at tryAction() time, not updated live during the swing', () => {
+    const { player } = makePlayer();
+    player.setAimDirection({ x: 0, y: -1 }); // aim up
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs + 10); // now in the active window
+    player.setAimDirection({ x: 1, y: 0 }); // player spins the mouse to aim right, mid-swing
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.y).toBeLessThan(player.hurtbox().y); // still using the "aim up" direction committed at tryAction() time
+  });
+
   it('dash still uses the last movement direction, not the aim direction', () => {
     const { player } = makePlayer();
     player.setMoveInput(1, 0);
