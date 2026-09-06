@@ -24,7 +24,7 @@ export class Encounter {
     this.profile = new ProfileAccumulator();
 
     this.bus.on('player.action', (e) => {
-      this.profile.recordAction(e.actionType);
+      this.profile.recordAction(e.actionType, e.weaponId);
       if (this.assaltante.state === 'attacking') {
         this.assaltante.onPlayerWrongAction(e.actionId);
       }

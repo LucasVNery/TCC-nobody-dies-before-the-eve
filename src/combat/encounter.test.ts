@@ -16,6 +16,16 @@ function runFor(encounter: Encounter, ms: number) {
   }
 }
 
+function useWeapon(encounter: Encounter, weaponId: string) {
+  encounter.player.switchWeapon(weaponId);
+  runFor(encounter, 260); // > SWITCH_RECOVERY_MS (250ms) — clears the attack lock
+}
+
+function attackWith(encounter: Encounter, actionId: string, totalMs: number) {
+  encounter.player.tryAction(actionId);
+  runFor(encounter, totalMs);
+}
+
 describe('Encounter', () => {
   it('a successful dodge resolves the dodge opportunity as taken, not expired', () => {
     const encounter = new Encounter(
@@ -288,5 +298,48 @@ describe('Encounter', () => {
     encounter.profile.applyRoomBoundary();
     const snap = encounter.profile.snapshot('room.exit');
     expect(snap.domain.action_repertoire).toBeNull();
+  });
+
+  it('the weapon-repertoire dimension end to end: switching weapons between attacks yields the hand-computed entropy at room.exit', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 1000, y: 0, width: 20, height: 20 }, // far enough away to stay out of the way
+    );
+
+    useWeapon(encounter, 'bow');
+    for (let i = 0; i < 3; i++) attackWith(encounter, 'bow.shot', 340); // 80+60+200
+
+    useWeapon(encounter, 'heavy_weapon');
+    for (let i = 0; i < 2; i++) attackWith(encounter, 'heavy_weapon.light', 500); // 160+120+220
+
+    useWeapon(encounter, 'sword_shield');
+    for (let i = 0; i < 4; i++) attackWith(encounter, 'sword_shield.light', 400); // > 350
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+
+    const counts = { bow: 3, heavy_weapon: 2, sword_shield: 4 };
+    const total = 9;
+    const H =
+      -Object.values(counts).reduce((acc, c) => {
+        const p = c / total;
+        return acc + p * Math.log(p);
+      }, 0) / Math.log(3);
+
+    expect(snap.domain.weapon_repertoire).toBeCloseTo(H, 6);
+    expect(snap.counts.weapon_repertoire).toEqual([3, 9]);
+  });
+
+  it('using only one weapon keeps the weapon-repertoire domain null', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 1000, y: 0, width: 20, height: 20 },
+    );
+
+    for (let i = 0; i < 5; i++) attackWith(encounter, 'sword_shield.light', 400);
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.domain.weapon_repertoire).toBeNull();
   });
 });
