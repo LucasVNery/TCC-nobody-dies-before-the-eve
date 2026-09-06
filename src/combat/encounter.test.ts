@@ -69,7 +69,7 @@ describe('Encounter', () => {
     runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
     expect(encounter.assaltante.state).toBe('recovering');
 
-    encounter.player.tryLightAttack();
+    encounter.player.tryAction('sword_shield.light');
     runFor(encounter, 300);
 
     const punishClose = closeEvents.find(
@@ -149,7 +149,7 @@ describe('Encounter', () => {
     encounter.step(STEP_MS);
     expect(encounter.assaltante.state).toBe('attacking');
 
-    encounter.player.tryLightAttack();
+    encounter.player.tryAction('sword_shield.light');
     runFor(encounter, STEP_MS);
 
     const dodgeClose = closeEvents.find(
@@ -158,7 +158,7 @@ describe('Encounter', () => {
     );
     expect(dodgeClose).toBeDefined();
     expect((dodgeClose as any).outcome).toBe('missed');
-    expect((dodgeClose as any).attempt).toBe('light_attack');
+    expect((dodgeClose as any).attempt).toBe('sword_shield.light');
   });
 
   it('a punish opportunity resolved as taken raises the punish skill domain above the uniform prior', () => {
@@ -170,7 +170,7 @@ describe('Encounter', () => {
     runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
     expect(encounter.assaltante.state).toBe('recovering');
 
-    encounter.player.tryLightAttack();
+    encounter.player.tryAction('sword_shield.light');
     runFor(encounter, 300);
 
     encounter.profile.applyRoomBoundary();
@@ -232,5 +232,61 @@ describe('Encounter', () => {
     // Beta(1,1) prior settles around (0+1)/(0.5+2)=0.4, well below the 0.5
     // uninformative prior but far from the ~0 this test asserted pre-fix.
     expect(encounter.profile.domain('distance', 'trait')).toBeLessThan(0.45);
+  });
+
+  it('the action-repertoire dimension end to end: a mixed sequence of light/heavy/charged actions yields the hand-computed entropy at room.exit', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 1000, y: 0, width: 20, height: 20 }, // far enough away to stay out of the way
+    );
+
+    function doLight() {
+      encounter.player.tryAction('sword_shield.light');
+      runFor(encounter, 400); // > light's total duration (350ms)
+    }
+    function doHeavy() {
+      encounter.player.tryAction('sword_shield.heavy');
+      runFor(encounter, 700); // > heavy's total duration (640ms)
+    }
+    function doCharged() {
+      encounter.player.tryAction('sword_shield.charged');
+      runFor(encounter, 300); // still charging (< maxHoldMs 900), > minHoldMs 150
+      encounter.player.releaseAction();
+      runFor(encounter, 600); // > charged's active+recovery (140+350=490ms)
+    }
+
+    for (let i = 0; i < 6; i++) doLight();
+    for (let i = 0; i < 3; i++) doHeavy();
+    doCharged();
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+
+    const counts = { light: 6, heavy: 3, charged: 1 };
+    const total = 10;
+    const H =
+      -Object.values(counts).reduce((acc, c) => {
+        const p = c / total;
+        return acc + p * Math.log(p);
+      }, 0) / Math.log(5);
+
+    expect(snap.domain.action_repertoire).toBeCloseTo(H, 6);
+    expect(snap.counts.action_repertoire).toEqual([3, 10]);
+  });
+
+  it('using only light attacks keeps the action-repertoire domain null and ineligible as a deficit target', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 1000, y: 0, width: 20, height: 20 },
+    );
+
+    for (let i = 0; i < 5; i++) {
+      encounter.player.tryAction('sword_shield.light');
+      runFor(encounter, 400);
+    }
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.domain.action_repertoire).toBeNull();
   });
 });
