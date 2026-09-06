@@ -5,7 +5,8 @@ export type ProfileOutcome = 'taken' | 'missed' | 'expired';
 
 export interface ProfileSnapshotPayload {
   at: 'room.exit' | 'boss.entry' | 'transfer.entry';
-  /** tuple order: [aproveitadas (numerator), oportunidades (denominator)] — decayed counts, relógio traço only */
+  /** Família A: [aproveitadas (numerator), oportunidades (denominator)] — decayed counts, relógio traço only.
+   *  Família B (entropy dims): [nº de rótulos distintos usados, total count] — informativo, ver spec §6. */
   counts: Record<SkillId, [number, number]>;
   domain: Record<SkillId, number | null>;
   confidence: Record<SkillId, number>;

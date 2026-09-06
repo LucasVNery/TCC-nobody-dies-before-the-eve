@@ -82,12 +82,15 @@ describe('PlayerController', () => {
   });
 
   it('charged: released before minHoldMs cancels back to idle without ever producing a hitbox', () => {
-    const { player } = makePlayer();
+    const { bus, player } = makePlayer();
+    const handler = vi.fn();
+    bus.on('player.action', handler);
     player.tryAction(CHARGED.id);
     player.step(CHARGED.charge!.minHoldMs - 20);
     player.releaseAction();
     expect(player.state).toBe('idle');
     expect(player.attackHitbox()).toBeNull();
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('charged: held past maxHoldMs auto-triggers with reach clamped to the max', () => {
@@ -97,6 +100,21 @@ describe('PlayerController', () => {
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
     expect(hitbox!.width).toBeCloseTo(CHARGED.charge!.reachMax);
+  });
+
+  it('charged: held past maxHoldMs auto-triggers and emits player.action exactly once, at trigger time', () => {
+    const { bus, player } = makePlayer();
+    const handler = vi.fn();
+    bus.on('player.action', handler);
+    player.tryAction(CHARGED.id);
+    expect(handler).not.toHaveBeenCalled();
+    player.step(CHARGED.charge!.maxHoldMs + 500);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({
+      actionId: CHARGED.id,
+      actionType: 'charged',
+      weaponId: CHARGED.weaponId,
+    });
   });
 
   it('charged: released between minHoldMs and maxHoldMs fires with a linearly interpolated reach', () => {
@@ -109,6 +127,23 @@ describe('PlayerController', () => {
     expect(hitbox).not.toBeNull();
     const midpointReach = (CHARGED.reach + CHARGED.charge!.reachMax) / 2;
     expect(hitbox!.width).toBeCloseTo(midpointReach);
+  });
+
+  it('charged: released between minHoldMs and maxHoldMs emits player.action exactly once, at release time', () => {
+    const { bus, player } = makePlayer();
+    const handler = vi.fn();
+    bus.on('player.action', handler);
+    player.tryAction(CHARGED.id);
+    const holdMs = (CHARGED.charge!.minHoldMs + CHARGED.charge!.maxHoldMs) / 2;
+    player.step(holdMs);
+    expect(handler).not.toHaveBeenCalled();
+    player.releaseAction();
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({
+      actionId: CHARGED.id,
+      actionType: 'charged',
+      weaponId: CHARGED.weaponId,
+    });
   });
 
   it('tryDodge() grants invulnerability that ends after iframesMs', () => {

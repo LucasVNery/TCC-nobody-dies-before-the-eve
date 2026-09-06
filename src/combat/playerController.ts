@@ -75,11 +75,9 @@ export class PlayerController {
     this.currentAction = action;
     this.chargeHeldMs = 0;
     this.chargeTriggered = action.actionType !== 'charged';
-    this.bus.emit('player.action', {
-      actionId: action.id,
-      actionType: action.actionType,
-      weaponId: action.weaponId,
-    });
+    if (action.actionType !== 'charged') {
+      this.emitActionEvent(action);
+    }
   }
 
   releaseAction(): void {
@@ -89,9 +87,18 @@ export class PlayerController {
     if (this.chargeHeldMs >= this.currentAction.charge!.minHoldMs) {
       this.chargeTriggered = true;
       this.phaseElapsedMs = 0;
+      this.emitActionEvent(this.currentAction);
     } else {
       this.cancelAction();
     }
+  }
+
+  private emitActionEvent(action: ActionDef): void {
+    this.bus.emit('player.action', {
+      actionId: action.id,
+      actionType: action.actionType,
+      weaponId: action.weaponId,
+    });
   }
 
   tryDodge(): void {
@@ -156,6 +163,7 @@ export class PlayerController {
       if (this.chargeHeldMs >= charge.maxHoldMs) {
         this.chargeTriggered = true;
         this.phaseElapsedMs = 0;
+        this.emitActionEvent(action);
       }
       return;
     }
