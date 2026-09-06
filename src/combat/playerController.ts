@@ -19,7 +19,8 @@ export class PlayerController {
   private readonly width: number;
   private readonly height: number;
   private moveInput: Vec2 = { x: 0, y: 0 };
-  private lastDirection: Vec2 = { x: 1, y: 0 };
+  private lastMoveDirection: Vec2 = { x: 1, y: 0 };
+  private aimDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
 
   constructor(
@@ -40,7 +41,7 @@ export class PlayerController {
   }
 
   get facing(): Vec2 {
-    return { x: this.lastDirection.x, y: this.lastDirection.y };
+    return { x: this.aimDirection.x, y: this.aimDirection.y };
   }
 
   hurtbox(): AABB {
@@ -53,17 +54,23 @@ export class PlayerController {
     if (this.currentAction.actionType === 'charged') {
       if (!this.chargeTriggered) return null;
       if (this.phaseElapsedMs >= this.currentAction.timing.activeMs) return null;
-      return directionalHitbox(this._position, this.width, this.height, this.lastDirection, this.chargedReach());
+      return directionalHitbox(this._position, this.width, this.height, this.aimDirection, this.chargedReach());
     }
 
     const { startupMs, activeMs } = this.currentAction.timing;
     const inActive = this.phaseElapsedMs >= startupMs && this.phaseElapsedMs < startupMs + activeMs;
     if (!inActive) return null;
-    return directionalHitbox(this._position, this.width, this.height, this.lastDirection, this.currentAction.reach);
+    return directionalHitbox(this._position, this.width, this.height, this.aimDirection, this.currentAction.reach);
   }
 
   setMoveInput(dx: number, dy: number): void {
     this.moveInput = { x: dx, y: dy };
+  }
+
+  setAimDirection(direction: Vec2): void {
+    const normalized = normalizeVelocity(direction.x, direction.y);
+    if (normalized.x === 0 && normalized.y === 0) return; // mouse exactly over the player — keep the previous aim
+    this.aimDirection = normalized;
   }
 
   tryAction(actionId: string): void {
@@ -106,7 +113,7 @@ export class PlayerController {
     this.state = 'dodging';
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
-    this.dashDirection = this.lastDirection;
+    this.dashDirection = this.lastMoveDirection;
     this.bus.emit('player.dodge', {});
   }
 
@@ -118,7 +125,7 @@ export class PlayerController {
     if (this.state === 'idle') {
       const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
       if (direction.x !== 0 || direction.y !== 0) {
-        this.lastDirection = direction;
+        this.lastMoveDirection = direction;
         this._position = clampToArena(
           applyMovement(this._position, direction, PLAYER_MOVE_SPEED, stepMs),
           this.width,

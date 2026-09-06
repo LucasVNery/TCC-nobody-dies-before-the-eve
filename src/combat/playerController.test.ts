@@ -238,11 +238,45 @@ describe('PlayerController', () => {
     expect(player.position.x).toBeGreaterThan(0);
   });
 
-  it('exposes the last movement direction via facing, for visual/HUD purposes', () => {
+  it('facing defaults to aiming right before any setAimDirection call', () => {
     const { player } = makePlayer();
     expect(player.facing).toEqual({ x: 1, y: 0 });
-    player.setMoveInput(0, 1);
-    player.step(16);
+  });
+
+  it('setAimDirection normalizes the vector and updates facing', () => {
+    const { player } = makePlayer();
+    player.setAimDirection({ x: 0, y: 5 });
     expect(player.facing).toEqual({ x: 0, y: 1 });
+  });
+
+  it('setAimDirection with a zero vector leaves the previous aim unchanged', () => {
+    const { player } = makePlayer();
+    player.setAimDirection({ x: 0, y: 1 });
+    player.setAimDirection({ x: 0, y: 0 });
+    expect(player.facing).toEqual({ x: 0, y: 1 });
+  });
+
+  it('attackHitbox() follows aimDirection, independent of the last movement direction', () => {
+    const { player } = makePlayer();
+    player.setMoveInput(1, 0);
+    player.step(16); // moving right
+    player.setAimDirection({ x: 0, y: -1 }); // aiming up
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs + 10);
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.y).toBeLessThan(player.hurtbox().y); // reach strip is above the hurtbox, matching the aim
+  });
+
+  it('dash still uses the last movement direction, not the aim direction', () => {
+    const { player } = makePlayer();
+    player.setMoveInput(1, 0);
+    player.step(16);
+    player.setMoveInput(0, 0);
+    player.setAimDirection({ x: -1, y: 0 }); // aiming the opposite way from the dash
+    const beforeX = player.position.x;
+    player.tryDodge();
+    player.step(DODGE.durationMs);
+    expect(player.position.x).toBeGreaterThan(beforeX); // still dashes right (movement dir), not left (aim dir)
   });
 });
