@@ -130,8 +130,8 @@ describe('ProfileAccumulator', () => {
     acc.recordOutcome('punish', 'expired');
     acc.applyRoomBoundary();
     acc.applyEncounterBoundary();
-    expect(acc.deficit('punish', 'trait')).toBeCloseTo(1 - acc.domain('punish', 'trait'));
-    expect(acc.deficit('punish', 'state')).toBeCloseTo(1 - acc.domain('punish', 'state'));
+    expect(acc.deficit('punish', 'trait')).toBeCloseTo(1 - acc.domain('punish', 'trait')!);
+    expect(acc.deficit('punish', 'state')).toBeCloseTo(1 - acc.domain('punish', 'state')!);
   });
 
   it('confidence kappa is constructor-injectable', () => {
