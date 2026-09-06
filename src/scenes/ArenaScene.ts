@@ -16,7 +16,8 @@ import {
 import { createGroundTilemap } from '../visual/groundTilemap';
 import { DirectionalSprite } from '../visual/directionalSprite';
 import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
-import { toScreen } from '../visual/isometricProjection';
+import { toScreen, fromScreen } from '../visual/isometricProjection';
+import { findWeaponAction, type ActionType } from '../combat/actionRegistry';
 import type { Vec2, AABB } from '../combat/types';
 
 const STEP_MS = 1000 / 60;
@@ -40,8 +41,9 @@ export class ArenaScene extends Phaser.Scene {
   private assaltanteSprite!: DirectionalSprite;
   private debugGraphics!: Phaser.GameObjects.Graphics;
   private keys!: {
-    light: Phaser.Input.Keyboard.Key;
-    heavy: Phaser.Input.Keyboard.Key;
+    weapon1: Phaser.Input.Keyboard.Key;
+    weapon2: Phaser.Input.Keyboard.Key;
+    weapon3: Phaser.Input.Keyboard.Key;
     charged: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
     up: Phaser.Input.Keyboard.Key;
@@ -110,13 +112,14 @@ export class ArenaScene extends Phaser.Scene {
       10,
       [
         'Controls:',
-        '  WASD  - move',
-        '  J     - light attack',
-        '  L     - heavy attack',
-        '  U     - hold: charged attack (release to swing)',
-        '          (use during boss "recovering" to punish)',
-        '  K     - dodge',
-        '          (use during boss "attacking" telegraph for i-frames)',
+        '  WASD        - move',
+        '  Mouse       - mira',
+        '  Clique esq  - ataque primario da arma equipada',
+        '  Clique dir  - ataque secundario (sem efeito no arco)',
+        '  Q (segurar) - carregado (sem efeito no arco)',
+        '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
+        '  K           - esquiva',
+        '          (use durante o telegraph do boss pra i-frames)',
       ],
       { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff' },
     );
@@ -127,20 +130,30 @@ export class ArenaScene extends Phaser.Scene {
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error('Keyboard input plugin not available');
     this.keys = {
-      light: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J),
-      heavy: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L),
-      charged: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.U),
+      weapon1: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+      weapon2: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+      weapon3: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+      charged: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
       dodge: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
-    this.keys.light.on('down', () => this.encounter.player.tryAction('sword_shield.light'));
-    this.keys.heavy.on('down', () => this.encounter.player.tryAction('sword_shield.heavy'));
-    this.keys.charged.on('down', () => this.encounter.player.tryAction('sword_shield.charged'));
+    this.keys.weapon1.on('down', () => this.encounter.player.switchWeapon('sword_shield'));
+    this.keys.weapon2.on('down', () => this.encounter.player.switchWeapon('bow'));
+    this.keys.weapon3.on('down', () => this.encounter.player.switchWeapon('heavy_weapon'));
+    this.keys.charged.on('down', () => this.tryEquippedAction('charged'));
     this.keys.charged.on('up', () => this.encounter.player.releaseAction());
     this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.leftButtonDown()) {
+        if (!this.tryEquippedAction('light')) this.tryEquippedAction('throw');
+      } else if (pointer.rightButtonDown()) {
+        this.tryEquippedAction('heavy');
+      }
+    });
 
     const arenaCorners: Vec2[] = [
       { x: ARENA_BOUNDS.x, y: ARENA_BOUNDS.y },
@@ -163,6 +176,12 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    const pointer = this.input.activePointer;
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const playerScreen = toScreen(this.encounter.player.position, ISO_CONFIG);
+    const aimDelta = { x: worldPoint.x - playerScreen.x, y: worldPoint.y - playerScreen.y };
+    this.encounter.player.setAimDirection(fromScreen(aimDelta, ISO_CONFIG));
+
     const inputX = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
     const inputY = (this.keys.down.isDown ? 1 : 0) - (this.keys.up.isDown ? 1 : 0);
     // Rotate WASD 45° so each key drives the player toward a screen-space
@@ -199,6 +218,13 @@ export class ArenaScene extends Phaser.Scene {
     ]);
 
     this.drawDebugHitboxes();
+  }
+
+  private tryEquippedAction(actionType: ActionType): boolean {
+    const action = findWeaponAction(this.encounter.player.equippedWeaponId, actionType);
+    if (!action) return false;
+    this.encounter.player.tryAction(action.id);
+    return true;
   }
 
   private drawDebugHitboxes(): void {
