@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toScreen, screenDepth, type IsoConfig } from './isometricProjection';
+import { toScreen, screenDepth, fromScreen, type IsoConfig } from './isometricProjection';
 
 const config: IsoConfig = { tileWorldSize: 64, halfWidth: 32, halfHeight: 16 };
 
@@ -45,5 +45,39 @@ describe('screenDepth', () => {
   it('is equal for two points on the same iso diagonal (x+y constant)', () => {
     expect(screenDepth({ x: 64, y: 0 }, config)).toBe(screenDepth({ x: 0, y: 64 }, config));
     expect(screenDepth({ x: 32, y: 32 }, config)).toBe(screenDepth({ x: 64, y: 0 }, config));
+  });
+});
+
+describe('fromScreen', () => {
+  it('is the inverse of toScreen for a point along world +x', () => {
+    const worldPoint = { x: 64, y: 0 };
+    expect(fromScreen(toScreen(worldPoint, config), config)).toEqual(worldPoint);
+  });
+
+  it('is the inverse of toScreen for a point along world +y', () => {
+    const worldPoint = { x: 0, y: 64 };
+    expect(fromScreen(toScreen(worldPoint, config), config)).toEqual(worldPoint);
+  });
+
+  it('is the inverse of toScreen for an arbitrary point', () => {
+    const worldPoint = { x: 96, y: -32 };
+    const recovered = fromScreen(toScreen(worldPoint, config), config);
+    expect(recovered.x).toBeCloseTo(worldPoint.x);
+    expect(recovered.y).toBeCloseTo(worldPoint.y);
+  });
+
+  it('maps the screen origin to the world origin', () => {
+    expect(fromScreen({ x: 0, y: 0 }, config)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('is linear: fromScreen(a) + fromScreen(b) == fromScreen(a + b)', () => {
+    const a = { x: 40, y: 24 };
+    const b = { x: -16, y: 8 };
+    const sum = { x: a.x + b.x, y: a.y + b.y };
+    const fa = fromScreen(a, config);
+    const fb = fromScreen(b, config);
+    const fSum = fromScreen(sum, config);
+    expect(fSum.x).toBeCloseTo(fa.x + fb.x);
+    expect(fSum.y).toBeCloseTo(fa.y + fb.y);
   });
 });

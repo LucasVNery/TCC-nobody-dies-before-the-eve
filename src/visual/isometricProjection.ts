@@ -15,6 +15,15 @@ export function toScreen(pos: Vec2, config: IsoConfig): Vec2 {
   };
 }
 
+export function fromScreen(delta: Vec2, config: IsoConfig): Vec2 {
+  const col = (delta.x / config.halfWidth + delta.y / config.halfHeight) / 2;
+  const row = (delta.y / config.halfHeight - delta.x / config.halfWidth) / 2;
+  return {
+    x: col * config.tileWorldSize,
+    y: row * config.tileWorldSize,
+  };
+}
+
 export function screenDepth(pos: Vec2, _config: IsoConfig): number {
   return pos.x + pos.y;
 }
