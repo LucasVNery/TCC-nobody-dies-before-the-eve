@@ -3,8 +3,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import { PlayerController } from './playerController';
-import { LIGHT_ATTACK, DODGE, totalDurationMs } from './actionDefs';
+import { DODGE } from './actionDefs';
+import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, ARENA_BOUNDS } from './movementDefs';
+
+const LIGHT = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'light')!;
+const HEAVY = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'heavy')!;
+const CHARGED = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'charged')!;
 
 function makePlayer() {
   const bus = new EventBus<GameEvents>();
@@ -18,35 +23,92 @@ describe('PlayerController', () => {
     expect(player.state).toBe('idle');
   });
 
-  it('tryLightAttack() transitions to attacking and emits player.action', () => {
+  it('tryAction() resolves via the registry, transitions to acting, and emits player.action', () => {
     const { bus, player } = makePlayer();
     const handler = vi.fn();
     bus.on('player.action', handler);
-    player.tryLightAttack();
-    expect(player.state).toBe('attacking');
-    expect(handler).toHaveBeenCalledWith({ action: 'light_attack' });
+    player.tryAction(LIGHT.id);
+    expect(player.state).toBe('acting');
+    expect(handler).toHaveBeenCalledWith({
+      actionId: LIGHT.id,
+      actionType: 'light',
+      weaponId: LIGHT.weaponId,
+    });
   });
 
-  it('attackHitbox() is null during startup', () => {
+  it('tryAction() with an unknown id throws and does not change state', () => {
     const { player } = makePlayer();
-    player.tryLightAttack();
-    player.step(LIGHT_ATTACK.startupMs - 10);
+    expect(() => player.tryAction('nope')).toThrow();
+    expect(player.state).toBe('idle');
+  });
+
+  it('ignores tryAction while not idle', () => {
+    const { bus, player } = makePlayer();
+    player.tryDodge();
+    const handler = vi.fn();
+    bus.on('player.action', handler);
+    expect(() => player.tryAction(LIGHT.id)).not.toThrow();
+    expect(player.state).toBe('dodging');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('light attack: hitbox is null during startup, present during active, and back to idle after full duration', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs - 10);
     expect(player.attackHitbox()).toBeNull();
-  });
 
-  it('attackHitbox() is non-null during the active phase', () => {
-    const { player } = makePlayer();
-    player.tryLightAttack();
-    player.step(LIGHT_ATTACK.startupMs + 10);
+    player.step(20);
     expect(player.attackHitbox()).not.toBeNull();
-  });
 
-  it('returns to idle after the full attack duration', () => {
-    const { player } = makePlayer();
-    player.tryLightAttack();
-    player.step(totalDurationMs(LIGHT_ATTACK));
+    player.step(LIGHT.timing.activeMs + LIGHT.timing.recoveryMs);
     expect(player.state).toBe('idle');
     expect(player.attackHitbox()).toBeNull();
+  });
+
+  it('heavy attack follows its own startup/active/recovery timing and reach', () => {
+    const { player } = makePlayer();
+    player.tryAction(HEAVY.id);
+    player.step(HEAVY.timing.startupMs - 10);
+    expect(player.attackHitbox()).toBeNull();
+
+    player.step(20);
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.width).toBeCloseTo(HEAVY.reach);
+
+    player.step(HEAVY.timing.activeMs + HEAVY.timing.recoveryMs);
+    expect(player.state).toBe('idle');
+  });
+
+  it('charged: released before minHoldMs cancels back to idle without ever producing a hitbox', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.minHoldMs - 20);
+    player.releaseAction();
+    expect(player.state).toBe('idle');
+    expect(player.attackHitbox()).toBeNull();
+  });
+
+  it('charged: held past maxHoldMs auto-triggers with reach clamped to the max', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.maxHoldMs + 500); // way past max — must clamp, not overshoot
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    expect(hitbox!.width).toBeCloseTo(CHARGED.charge!.reachMax);
+  });
+
+  it('charged: released between minHoldMs and maxHoldMs fires with a linearly interpolated reach', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    const holdMs = (CHARGED.charge!.minHoldMs + CHARGED.charge!.maxHoldMs) / 2;
+    player.step(holdMs);
+    player.releaseAction();
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    const midpointReach = (CHARGED.reach + CHARGED.charge!.reachMax) / 2;
+    expect(hitbox!.width).toBeCloseTo(midpointReach);
   });
 
   it('tryDodge() grants invulnerability that ends after iframesMs', () => {
@@ -75,14 +137,15 @@ describe('PlayerController', () => {
     expect(player.state).toBe('dodging');
   });
 
-  it('ignores tryLightAttack while not idle', () => {
+  it('emits player.dodge, not player.action, on dodge', () => {
     const { bus, player } = makePlayer();
+    const actionHandler = vi.fn();
+    const dodgeHandler = vi.fn();
+    bus.on('player.action', actionHandler);
+    bus.on('player.dodge', dodgeHandler);
     player.tryDodge();
-    const handler = vi.fn();
-    bus.on('player.action', handler);
-    player.tryLightAttack();
-    expect(player.state).toBe('dodging');
-    expect(handler).not.toHaveBeenCalled();
+    expect(dodgeHandler).toHaveBeenCalledWith({});
+    expect(actionHandler).not.toHaveBeenCalled();
   });
 
   it('moves in the direction of moveInput', () => {
@@ -114,9 +177,9 @@ describe('PlayerController', () => {
     expect(player.position.x).toBe(ARENA_BOUNDS.x);
   });
 
-  it('ignores moveInput while attacking', () => {
+  it('ignores moveInput while acting', () => {
     const { player } = makePlayer();
-    player.tryLightAttack();
+    player.tryAction(LIGHT.id);
     player.setMoveInput(1, 0);
     player.step(500);
     expect(player.position).toEqual({ x: 0, y: 0 });

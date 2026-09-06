@@ -41,6 +41,8 @@ export class ArenaScene extends Phaser.Scene {
   private debugGraphics!: Phaser.GameObjects.Graphics;
   private keys!: {
     light: Phaser.Input.Keyboard.Key;
+    heavy: Phaser.Input.Keyboard.Key;
+    charged: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
     up: Phaser.Input.Keyboard.Key;
     down: Phaser.Input.Keyboard.Key;
@@ -110,6 +112,8 @@ export class ArenaScene extends Phaser.Scene {
         'Controls:',
         '  WASD  - move',
         '  J     - light attack',
+        '  L     - heavy attack',
+        '  U     - hold: charged attack (release to swing)',
         '          (use during boss "recovering" to punish)',
         '  K     - dodge',
         '          (use during boss "attacking" telegraph for i-frames)',
@@ -124,13 +128,18 @@ export class ArenaScene extends Phaser.Scene {
     if (!keyboard) throw new Error('Keyboard input plugin not available');
     this.keys = {
       light: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J),
+      heavy: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L),
+      charged: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.U),
       dodge: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
-    this.keys.light.on('down', () => this.encounter.player.tryLightAttack());
+    this.keys.light.on('down', () => this.encounter.player.tryAction('sword_shield.light'));
+    this.keys.heavy.on('down', () => this.encounter.player.tryAction('sword_shield.heavy'));
+    this.keys.charged.on('down', () => this.encounter.player.tryAction('sword_shield.charged'));
+    this.keys.charged.on('up', () => this.encounter.player.releaseAction());
     this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
 
     const arenaCorners: Vec2[] = [

@@ -2,13 +2,17 @@
 import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { AABB, PlayerState, Vec2 } from './types';
-import { LIGHT_ATTACK, DODGE, totalDurationMs } from './actionDefs';
-import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
+import { DODGE } from './actionDefs';
+import { resolveAction, type ActionDef } from './actionRegistry';
+import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
 
 export class PlayerController {
   state: PlayerState = 'idle';
   private phaseElapsedMs = 0;
+  private currentAction: ActionDef | null = null;
+  private chargeHeldMs = 0;
+  private chargeTriggered = false;
   private dodgeCooldownRemainingMs = 0;
   private invulnerable = false;
   private _position: Vec2;
@@ -44,23 +48,50 @@ export class PlayerController {
   }
 
   attackHitbox(): AABB | null {
-    if (this.state !== 'attacking') return null;
-    const inActive =
-      this.phaseElapsedMs >= LIGHT_ATTACK.startupMs &&
-      this.phaseElapsedMs < LIGHT_ATTACK.startupMs + LIGHT_ATTACK.activeMs;
+    if (this.state !== 'acting' || !this.currentAction) return null;
+
+    if (this.currentAction.actionType === 'charged') {
+      if (!this.chargeTriggered) return null;
+      if (this.phaseElapsedMs >= this.currentAction.timing.activeMs) return null;
+      return directionalHitbox(this._position, this.width, this.height, this.lastDirection, this.chargedReach());
+    }
+
+    const { startupMs, activeMs } = this.currentAction.timing;
+    const inActive = this.phaseElapsedMs >= startupMs && this.phaseElapsedMs < startupMs + activeMs;
     if (!inActive) return null;
-    return directionalHitbox(this._position, this.width, this.height, this.lastDirection, ATTACK_REACH);
+    return directionalHitbox(this._position, this.width, this.height, this.lastDirection, this.currentAction.reach);
   }
 
   setMoveInput(dx: number, dy: number): void {
     this.moveInput = { x: dx, y: dy };
   }
 
-  tryLightAttack(): void {
+  tryAction(actionId: string): void {
     if (this.state !== 'idle') return;
-    this.state = 'attacking';
+    const action = resolveAction(actionId); // throws for unknown ids, before any state mutation
+
+    this.state = 'acting';
     this.phaseElapsedMs = 0;
-    this.bus.emit('player.action', { action: 'light_attack' });
+    this.currentAction = action;
+    this.chargeHeldMs = 0;
+    this.chargeTriggered = action.actionType !== 'charged';
+    this.bus.emit('player.action', {
+      actionId: action.id,
+      actionType: action.actionType,
+      weaponId: action.weaponId,
+    });
+  }
+
+  releaseAction(): void {
+    if (this.state !== 'acting' || !this.currentAction) return;
+    if (this.currentAction.actionType !== 'charged' || this.chargeTriggered) return;
+
+    if (this.chargeHeldMs >= this.currentAction.charge!.minHoldMs) {
+      this.chargeTriggered = true;
+      this.phaseElapsedMs = 0;
+    } else {
+      this.cancelAction();
+    }
   }
 
   tryDodge(): void {
@@ -69,7 +100,7 @@ export class PlayerController {
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
     this.dashDirection = this.lastDirection;
-    this.bus.emit('player.action', { action: 'dodge' });
+    this.bus.emit('player.dodge', {});
   }
 
   step(stepMs: number): void {
@@ -91,34 +122,68 @@ export class PlayerController {
       return;
     }
 
+    if (this.state === 'acting') {
+      this.stepActing(stepMs);
+      return;
+    }
+
+    // dodging
     this.phaseElapsedMs += stepMs;
+    const dashSpeed = DASH_DISTANCE / (DODGE.durationMs / 1000);
+    this._position = clampToArena(
+      applyMovement(this._position, this.dashDirection, dashSpeed, stepMs),
+      this.width,
+      this.height,
+      ARENA_BOUNDS,
+    );
 
-    if (this.state === 'attacking') {
-      if (this.phaseElapsedMs >= totalDurationMs(LIGHT_ATTACK)) {
-        this.state = 'idle';
+    if (this.phaseElapsedMs >= DODGE.iframesMs) {
+      this.invulnerable = false;
+    }
+    if (this.phaseElapsedMs >= DODGE.durationMs) {
+      this.state = 'idle';
+      this.phaseElapsedMs = 0;
+      this.dodgeCooldownRemainingMs = DODGE.cooldownMs;
+    }
+  }
+
+  private stepActing(stepMs: number): void {
+    const action = this.currentAction!;
+
+    if (action.actionType === 'charged' && !this.chargeTriggered) {
+      const charge = action.charge!;
+      this.chargeHeldMs = Math.min(this.chargeHeldMs + stepMs, charge.maxHoldMs);
+      if (this.chargeHeldMs >= charge.maxHoldMs) {
+        this.chargeTriggered = true;
         this.phaseElapsedMs = 0;
       }
       return;
     }
 
-    if (this.state === 'dodging') {
-      const dashSpeed = DASH_DISTANCE / (DODGE.durationMs / 1000);
-      this._position = clampToArena(
-        applyMovement(this._position, this.dashDirection, dashSpeed, stepMs),
-        this.width,
-        this.height,
-        ARENA_BOUNDS,
-      );
+    this.phaseElapsedMs += stepMs;
+    const totalMs =
+      action.actionType === 'charged'
+        ? action.timing.activeMs + action.timing.recoveryMs
+        : action.timing.startupMs + action.timing.activeMs + action.timing.recoveryMs;
 
-      if (this.phaseElapsedMs >= DODGE.iframesMs) {
-        this.invulnerable = false;
-      }
-      if (this.phaseElapsedMs >= DODGE.durationMs) {
-        this.state = 'idle';
-        this.phaseElapsedMs = 0;
-        this.dodgeCooldownRemainingMs = DODGE.cooldownMs;
-      }
-      return;
+    if (this.phaseElapsedMs >= totalMs) {
+      this.cancelAction();
     }
+  }
+
+  private cancelAction(): void {
+    this.state = 'idle';
+    this.phaseElapsedMs = 0;
+    this.currentAction = null;
+    this.chargeHeldMs = 0;
+    this.chargeTriggered = false;
+  }
+
+  private chargedReach(): number {
+    const action = this.currentAction!;
+    const charge = action.charge!;
+    const ratio = (this.chargeHeldMs - charge.minHoldMs) / (charge.maxHoldMs - charge.minHoldMs);
+    const clamped = Math.max(0, Math.min(1, ratio));
+    return action.reach + (charge.reachMax - action.reach) * clamped;
   }
 }
