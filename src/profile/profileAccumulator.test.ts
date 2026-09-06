@@ -141,3 +141,70 @@ describe('ProfileAccumulator', () => {
     expect(acc.confidence('weapon-entropy', 'trait')).toBeCloseTo(25 / (25 + 25));
   });
 });
+
+describe('ProfileAccumulator — action repertoire (Família B, dim 2)', () => {
+  it('a skill with no actions recorded has a null domain and deficit', () => {
+    const acc = new ProfileAccumulator();
+    acc.applyRoomBoundary();
+    expect(acc.domain('action_repertoire', 'trait')).toBeNull();
+    expect(acc.deficit('action_repertoire', 'trait')).toBeNull();
+  });
+
+  it('recordAction() feeds the action_repertoire entropy dimension', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 6; i++) acc.recordAction('light');
+    for (let i = 0; i < 3; i++) acc.recordAction('heavy');
+    acc.recordAction('charged');
+    acc.applyRoomBoundary();
+
+    const domain = acc.domain('action_repertoire', 'trait');
+    expect(domain).not.toBeNull();
+    expect(domain!).toBeGreaterThan(0);
+    expect(domain!).toBeLessThan(1);
+  });
+
+  it('only one action type ever used keeps the domain null (n effective < 2)', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 10; i++) acc.recordAction('light');
+    acc.applyRoomBoundary();
+    expect(acc.domain('action_repertoire', 'trait')).toBeNull();
+  });
+
+  it('applyRoomBoundary decays the entropy dimension even with no new recorded actions', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('light');
+    acc.recordAction('heavy');
+    acc.applyRoomBoundary();
+    const firstConfidence = acc.confidence('action_repertoire', 'trait');
+
+    acc.applyRoomBoundary(); // no new actions: total count should shrink by TRAIT_GAMMA
+    const secondConfidence = acc.confidence('action_repertoire', 'trait');
+    expect(secondConfidence).toBeLessThan(firstConfidence);
+  });
+
+  it('resetSession clears the entropy dimension', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('light');
+    acc.recordAction('heavy');
+    acc.applyRoomBoundary();
+    acc.resetSession();
+    expect(acc.domain('action_repertoire', 'trait')).toBeNull();
+  });
+
+  it('snapshot includes action_repertoire once folded, with domain null or numeric explicitly present', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('light');
+    acc.applyRoomBoundary(); // one label only -> domain null, but still folded/present
+    const snap = acc.snapshot('room.exit');
+    expect('action_repertoire' in snap.domain).toBe(true);
+    expect(snap.domain.action_repertoire).toBeNull();
+    expect(snap.counts.action_repertoire).toEqual([1, 1]);
+  });
+
+  it('snapshot omits action_repertoire before any boundary has folded it', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordAction('light');
+    const snap = acc.snapshot('room.exit');
+    expect(snap.counts.action_repertoire).toBeUndefined();
+  });
+});
