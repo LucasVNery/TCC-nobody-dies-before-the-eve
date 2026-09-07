@@ -46,6 +46,7 @@ export class ArenaScene extends Phaser.Scene {
     effectiveDashes: 0,
     wastedDashes: 0,
     bossHitsLanded: 0,
+    hitsUnmitigated: 0,
   };
   private lastMoveInput = { dx: 0, dy: 0 };
   private playerSprite!: DirectionalSprite;
@@ -57,6 +58,7 @@ export class ArenaScene extends Phaser.Scene {
     weapon3: Phaser.Input.Keyboard.Key;
     charged: Phaser.Input.Keyboard.Key;
     dodge: Phaser.Input.Keyboard.Key;
+    guard: Phaser.Input.Keyboard.Key;
     up: Phaser.Input.Keyboard.Key;
     down: Phaser.Input.Keyboard.Key;
     left: Phaser.Input.Keyboard.Key;
@@ -152,7 +154,8 @@ export class ArenaScene extends Phaser.Scene {
         '  Clique dir  - ataque secundario (sem efeito no arco)',
         '  Q (segurar) - carregado (sem efeito no arco)',
         '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
-        '  K           - esquiva',
+        '  Espaço     - esquiva',
+        '  E (segurar) - bloqueio / soltar no timing certo = parry',
         '          (use durante o telegraph do boss pra i-frames)',
       ],
       { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff' },
@@ -170,7 +173,8 @@ export class ArenaScene extends Phaser.Scene {
       weapon2: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
       weapon3: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
       charged: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
-      dodge: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+      dodge: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      guard: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
@@ -182,6 +186,8 @@ export class ArenaScene extends Phaser.Scene {
     this.keys.charged.on('down', () => this.tryEquippedAction('charged'));
     this.keys.charged.on('up', () => this.encounter.player.releaseAction());
     this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
+    this.keys.guard.on('down', () => this.encounter.player.startBlock());
+    this.keys.guard.on('up', () => this.encounter.player.stopBlock());
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
@@ -260,6 +266,8 @@ export class ArenaScene extends Phaser.Scene {
       `dashes: ${this.hudCounters.effectiveDashes} effective / ${this.hudCounters.wastedDashes} wasted`,
       `boss: ${this.encounter.assaltante.state} (${this.encounter.assaltante.activeRuleId ?? '-'})`,
       `boss hits landed: ${this.hudCounters.bossHitsLanded}`,
+      `postura: ${Math.round(this.encounter.player.poise)}/100`,
+      `hits sofridos: ${this.hudCounters.hitsUnmitigated}`,
     ]);
 
     this.drawDebugHitboxes();
