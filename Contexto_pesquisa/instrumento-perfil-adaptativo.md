@@ -352,6 +352,7 @@ Decisões que ainda não foram tomadas, com o que cada uma bloqueia.
 | Predicado de "janela segura" | Design | Dim 6. Definição esboçada existe; falta virar código. |
 | Verificação bibliográfica de 11 entradas | Revisão de literatura | Nada em código. Pendência de escrita. |
 | Telemetria rica (heatmap, direção de dash) | Escopo | Nada — mas a recomendação registrada é **fechar o loop mínimo antes de expandir a coleta**, para não remodelar telemetria depois que a adaptação estiver rodando. |
+| Redesign de HUD (gameplay vs. dev mode) | Design/UX | Nada bloqueado, mas registrado 07/09/2026: a HUD atual é texto cru mal dimensionado. Quando for redesenhada, precisa de dois modos — **gameplay** (o mínimo: ataque, esquiva, o que um jogador comum precisa ver) e **dev** (tudo: todos os inputs, dados sendo coletados pelo perfil, behavior tree do boss e suas decisões). Até lá, qualquer adição de HUD (ex: kit defensivo) fica no estilo texto cru já existente, sem investir em polimento visual prematuro. |
 
 ### 9.1 O maior bloqueio não é o boss
 
