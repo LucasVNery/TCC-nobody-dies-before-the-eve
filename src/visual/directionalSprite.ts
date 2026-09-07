@@ -15,15 +15,18 @@ export interface DirectionalSpriteTextures {
  * compose step writes direction d to image row (DIRECTION_COUNT-1-d) from
  * the top (Blender's pixel buffer origin is bottom-left, so the composer
  * flips vertically to land in a normal top-down PNG) — that part is a known,
- * provable fact from the render script, not a guess. ROW_ROTATION_OFFSET
- * below is the still-empirical part: which of the 8 rows is Blender-world
- * azimuth 0 doesn't necessarily line up with directionBucket's "east" (0)
- * without checking the actual rendered image against real gameplay
- * movement — adjust this single constant (0-7) if Task 9's visual check
- * shows the sprite facing 90/180/etc degrees off from the movement
- * direction; do not change the flip math above, which is independent of it.
+ * provable fact from the render script, not a guess. ROW_ROTATION_OFFSET is
+ * the empirical part: which of the 8 rendered rows lines up with
+ * directionBucket's "east" (0) doesn't follow from the flip math alone.
+ * Calibrated 2026-09-07 by pausing the scene and driving syncDirection()
+ * directly for all 4 cardinal directions, screenshotting each: offset 6
+ * makes south (0,1) show the front of the character, north (0,-1) the
+ * back, and east/west mirror each other — confirmed correct and
+ * consistent, not just "one direction looks okay". Re-verify this if the
+ * render pipeline's camera azimuth convention
+ * (tools/blender/render_character.py) ever changes.
  */
-const ROW_ROTATION_OFFSET = 0;
+const ROW_ROTATION_OFFSET = 6;
 
 function spriteRowForDirection(bucket: number): number {
   const rotated = (bucket + ROW_ROTATION_OFFSET) % DIRECTION_COUNT;
@@ -53,6 +56,13 @@ export class DirectionalSprite {
 
     const centerOffset = toScreen({ x: width / 2, y: height / 2 }, config);
     this.sprite = scene.add.sprite(centerOffset.x, centerOffset.y, textures.idleTextureKey).setOrigin(0.5, 0.5);
+    // The rendered sprite sheet's per-frame size is whatever the Blender
+    // pipeline produced (currently 128x128, see tools/blender/README.md) —
+    // not necessarily the game's placeholder-era visual size. Scale
+    // uniformly by height so the character reads at a consistent size
+    // against the tile grid, regardless of the source frame's raw pixels.
+    const scale = height / this.sprite.height;
+    this.sprite.setScale(scale);
     const initialScreenPos = toScreen(initialPosition, config);
     this.container = scene.add.container(initialScreenPos.x, initialScreenPos.y, [this.sprite]);
     this.container.setDepth(screenDepth(initialPosition, config));

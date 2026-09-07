@@ -24,9 +24,11 @@ Render: Blender 5.2.1, headless, via a purpose-written script (`render_character
    ```
    This renders 8 directions (45° apart, orthographic, elevation 26.57° to match the game's 2:1 dimetric ground tiles) × 1 frame (idle, mid-cycle frame 17 of the 33-frame `Idle_A` clip) or 6 frames (walk, evenly sampled across the 33-frame `Walking_A` clip) per direction, then composes each (entity, animation) pair into a single grid PNG: 8 rows (one per direction) × N columns (animation frames), written to `public/assets/characters/<entity>/<idle|walk>.png`. Frame size: 128×128px per cell (both idle.png and walk.png share this — required for Phaser's uniform-grid `load.spritesheet`).
 
-## Direction-row convention (needs empirical confirmation during code integration)
+## Direction-row convention (calibrated 2026-09-07)
 
-Row index `d` (0-7, top of the sheet = row 0 = direction 7, since the compose step writes rows bottom-up to match Blender's own bottom-to-top pixel buffer origin — see `row_from_bottom` in `render_character.py`) corresponds to a Blender-world camera azimuth of `d * 45°`, camera orbiting counter-clockwise (viewed from above) starting from world +X. **This has not yet been pixel-verified against which screen-space game direction ("east", "south", etc.) each row visually represents** — that calibration is deferred to the code-integration task (`spriteDirection.ts` + the final visual check playing the actual game), per the implementation plan's own Task 4 Step 1 / Task 9. Open `public/assets/characters/player/idle.png` in an image viewer to see all 8 rows side by side when doing that calibration.
+Row index `d` (0-7, top of the sheet = row 0 = direction 7, since the compose step writes rows bottom-up to match Blender's own bottom-to-top pixel buffer origin — see `row_from_bottom` in `render_character.py`) corresponds to a Blender-world camera azimuth of `d * 45°`, camera orbiting counter-clockwise (viewed from above) starting from world +X.
+
+This was pixel-verified against real gameplay: `src/visual/directionalSprite.ts`'s `ROW_ROTATION_OFFSET = 6` makes `directionBucket`'s screen-space "south" (`{0,1}`) show the character's front, "north" (`{0,-1}`) the back, and "east"/"west" mirror each other correctly. Verified by pausing the running scene and driving `DirectionalSprite.syncDirection()` directly for all 4 cardinal directions, screenshotting each. If this pipeline's render camera convention ever changes, re-run that calibration rather than assuming the offset still holds.
 
 ## Bugs found and fixed during this pipeline's first run
 
