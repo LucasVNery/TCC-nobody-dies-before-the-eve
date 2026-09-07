@@ -5,7 +5,7 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { PlayerController } from './playerController';
 import { AssaltanteController } from './assaltanteController';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
-import { aabbOverlap } from './collision';
+import { sectorOverlapsBox } from './sector';
 import { ATTACK_REACH } from './movementDefs';
 import type { AABB } from './types';
 
@@ -74,7 +74,7 @@ export class Encounter {
     // absorbBlockHit()/enterStagger() would refire every tick (poise would
     // vanish in ~3 ticks; stagger would never end while overlap holds).
     const enemyAttack = this.assaltante.attackHitbox();
-    if (enemyAttack && aabbOverlap(enemyAttack, this.player.hurtbox())) {
+    if (enemyAttack && sectorOverlapsBox(enemyAttack, this.player.hurtbox())) {
       if (this.player.isInvulnerable) {
         this.assaltante.onPlayerDodgeSuccess();
       } else if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
@@ -91,7 +91,7 @@ export class Encounter {
     }
 
     const playerAttack = this.player.attackHitbox();
-    if (playerAttack && aabbOverlap(playerAttack, this.assaltante.hurtbox())) {
+    if (playerAttack && sectorOverlapsBox(playerAttack, this.assaltante.hurtbox())) {
       this.assaltante.onPlayerHitLanded();
     }
 

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Encounter } from './encounter';
 import { DODGE } from './actionDefs';
-import { aabbOverlap } from './collision';
+import { sectorOverlapsBox } from './sector';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -132,7 +132,7 @@ describe('Encounter', () => {
       encounter.step(STEP_MS);
       elapsed += STEP_MS;
       const hitbox = encounter.assaltante.attackHitbox();
-      if (hitbox && aabbOverlap(hitbox, encounter.player.hurtbox())) {
+      if (hitbox && sectorOverlapsBox(hitbox, encounter.player.hurtbox())) {
         overlapped = true;
         break;
       }
@@ -471,5 +471,21 @@ describe('Encounter', () => {
     expect(e4.profile.snapshot('room.exit').counts.defensive_repertoire).toEqual([1, 1]);
     expect(e5.profile.snapshot('room.exit').counts.defensive_repertoire).toBeUndefined(); // never folded, nothing recorded
     expect(hits).toHaveLength(1);
+  });
+
+  it('a stationary in-range player approached diagonally is hit, not misread as retreat (regression for the 4-quadrant hitbox bug)', () => {
+    const encounter = new Encounter(
+      { x: 130, y: 30, width: 20, height: 20 },
+      { x: 100, y: 0, width: 20, height: 20 },
+    );
+    const hitEvents: unknown[] = [];
+    encounter.bus.on('player.hit_unmitigated', (e) => hitEvents.push(e));
+
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    expect(hitEvents).toHaveLength(1);
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.defensive_repertoire).toBeUndefined(); // no dim-4 label — the window resolved as a hit, not a retreat
   });
 });
