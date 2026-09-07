@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
-import { HudState } from './hudState';
+import { HudState, type HudCounters } from './hudState';
 
 describe('HudState', () => {
   it('starts with zeroed counters', () => {
@@ -13,6 +13,7 @@ describe('HudState', () => {
       effectiveDashes: 0,
       wastedDashes: 0,
       bossHitsLanded: 0,
+      hitsUnmitigated: 0,
     });
   });
 
@@ -70,5 +71,14 @@ describe('HudState', () => {
     new HudState(bus, render);
     bus.emit('opp.close', { opp_id: 'opp_1', type: 'punish', outcome: 'expired' });
     expect(render).toHaveBeenLastCalledWith(expect.objectContaining({ bossHitsLanded: 0 }));
+  });
+
+  it('counts unmitigated hits via player.hit_unmitigated', () => {
+    const bus = new EventBus<GameEvents>();
+    let latest: HudCounters | undefined;
+    new HudState(bus, (c) => (latest = c));
+    bus.emit('player.hit_unmitigated', {});
+    bus.emit('player.hit_unmitigated', {});
+    expect(latest?.hitsUnmitigated).toBe(2);
   });
 });

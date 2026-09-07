@@ -6,12 +6,14 @@ export interface HudCounters {
   effectiveDashes: number;
   wastedDashes: number;
   bossHitsLanded: number;
+  hitsUnmitigated: number;
 }
 
 export class HudState {
   private dashAttempts = 0;
   private effectiveDashes = 0;
   private bossHitsLanded = 0;
+  private hitsUnmitigated = 0;
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -19,6 +21,10 @@ export class HudState {
   ) {
     this.bus.on('player.dodge', () => {
       this.dashAttempts += 1;
+      this.renderNow();
+    });
+    this.bus.on('player.hit_unmitigated', () => {
+      this.hitsUnmitigated += 1;
       this.renderNow();
     });
     this.bus.on('opp.close', (e) => {
@@ -40,6 +46,7 @@ export class HudState {
       effectiveDashes: this.effectiveDashes,
       wastedDashes: Math.max(0, this.dashAttempts - this.effectiveDashes),
       bossHitsLanded: this.bossHitsLanded,
+      hitsUnmitigated: this.hitsUnmitigated,
     });
   }
 }
