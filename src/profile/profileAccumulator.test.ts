@@ -254,3 +254,47 @@ describe('ProfileAccumulator — weapon repertoire (Família B, dim 1)', () => {
     expect(snap.counts.weapon_repertoire).toEqual([1, 1]);
   });
 });
+
+describe('ProfileAccumulator — defensive repertoire (Família B, dim 4)', () => {
+  it('a skill with no defenses recorded has a null domain', () => {
+    const acc = new ProfileAccumulator();
+    acc.applyRoomBoundary();
+    expect(acc.domain('defensive_repertoire', 'trait')).toBeNull();
+  });
+
+  it('recordDefense() feeds the defensive_repertoire entropy dimension', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordDefense('dodge');
+    acc.recordDefense('dodge');
+    acc.recordDefense('block');
+    acc.recordDefense('parry');
+    acc.recordDefense('retreat');
+    acc.applyRoomBoundary();
+
+    const counts = { dodge: 2, block: 1, parry: 1, retreat: 1 };
+    const total = 5;
+    const H =
+      -Object.values(counts).reduce((acc2, c) => {
+        const p = c / total;
+        return acc2 + p * Math.log(p);
+      }, 0) / Math.log(4);
+
+    expect(acc.domain('defensive_repertoire', 'trait')).toBeCloseTo(H, 6);
+  });
+
+  it('only one defensive label ever used keeps the domain null (n effective < 2)', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 10; i++) acc.recordDefense('dodge');
+    acc.applyRoomBoundary();
+    expect(acc.domain('defensive_repertoire', 'trait')).toBeNull();
+  });
+
+  it('snapshot includes defensive_repertoire once folded, independently of the other dims', () => {
+    const acc = new ProfileAccumulator();
+    acc.recordDefense('block');
+    acc.applyRoomBoundary();
+    const snap = acc.snapshot('room.exit');
+    expect('defensive_repertoire' in snap.domain).toBe(true);
+    expect(snap.counts.defensive_repertoire).toEqual([1, 1]);
+  });
+});

@@ -4,6 +4,9 @@ import { DecayedRatio } from './decayedRatio';
 import { EntropyAccumulator } from './entropyAccumulator';
 import { ACTION_TYPES, WEAPON_IDS, type ActionType } from '../combat/actionRegistry';
 
+export const DEFENSIVE_LABELS = ['dodge', 'block', 'parry', 'retreat'] as const;
+export type DefensiveLabel = (typeof DEFENSIVE_LABELS)[number];
+
 const TRAIT_GAMMA = 0.87;
 const STATE_GAMMA = 0.55;
 const BETA_ALPHA = 1;
@@ -42,6 +45,11 @@ export class ProfileAccumulator {
       folded: false,
       everRecorded: false,
     });
+    this.entropyDims.set('defensive_repertoire', {
+      acc: new EntropyAccumulator(DEFENSIVE_LABELS),
+      folded: false,
+      everRecorded: false,
+    });
   }
 
   record(skill: SkillId, numerator: number, denominator: number): void {
@@ -69,6 +77,12 @@ export class ProfileAccumulator {
       weaponDim.acc.record(weaponId);
       weaponDim.everRecorded = true;
     }
+  }
+
+  recordDefense(label: DefensiveLabel): void {
+    const dim = this.entropyDims.get('defensive_repertoire')!;
+    dim.acc.record(label);
+    dim.everRecorded = true;
   }
 
   applyRoomBoundary(): void {
