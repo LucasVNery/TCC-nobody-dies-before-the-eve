@@ -29,12 +29,18 @@ const ATTACK_RANGE_COLOR = 0xff9800;
 // and walk sheets, for both entities, share this size.
 const CHARACTER_FRAME_SIZE = 128;
 const WALK_FRAME_COUNT = 6;
+const WEAPON_LABELS: Record<string, string> = {
+  sword_shield: 'Espada + Escudo',
+  bow: 'Arco',
+  heavy_weapon: 'Arma Pesada',
+};
 
 export class ArenaScene extends Phaser.Scene {
   private encounter!: Encounter;
   private loop!: ReturnType<typeof createFixedTimestepLoop>;
   private overlayText!: Phaser.GameObjects.Text;
   private hudText!: Phaser.GameObjects.Text;
+  private weaponText!: Phaser.GameObjects.Text;
   private hudCounters: HudCounters = {
     dashAttempts: 0,
     effectiveDashes: 0,
@@ -127,6 +133,13 @@ export class ArenaScene extends Phaser.Scene {
     new HudState(this.encounter.bus, (counters) => {
       this.hudCounters = counters;
     });
+
+    this.weaponText = this.add.text(10, 690, '', {
+      fontFamily: 'monospace',
+      fontSize: '18px',
+      color: '#ffeb3b',
+    });
+    this.weaponText.setScrollFactor(0);
 
     const controlsText = this.add.text(
       590,
@@ -237,6 +250,9 @@ export class ArenaScene extends Phaser.Scene {
     this.assaltanteSprite.setTint(
       this.encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff,
     );
+
+    const equippedWeaponId = this.encounter.player.equippedWeaponId;
+    this.weaponText.setText(`Arma: ${WEAPON_LABELS[equippedWeaponId] ?? equippedWeaponId}`);
 
     this.hudText.setText([
       `move: (${this.lastMoveInput.dx}, ${this.lastMoveInput.dy})`,
