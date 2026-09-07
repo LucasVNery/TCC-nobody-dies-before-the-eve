@@ -11,9 +11,12 @@ export interface PlayerActionPayload {
 
 export type PlayerDodgePayload = Record<string, never>;
 
+export type PlayerHitUnmitigatedPayload = Record<string, never>;
+
 export type GameEvents = {
   'opp.open': OppOpenPayload;
   'opp.close': OppClosePayload;
   'player.action': PlayerActionPayload;
   'player.dodge': PlayerDodgePayload;
+  'player.hit_unmitigated': PlayerHitUnmitigatedPayload;
 };

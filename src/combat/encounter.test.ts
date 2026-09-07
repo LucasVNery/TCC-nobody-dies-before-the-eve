@@ -76,7 +76,9 @@ describe('Encounter', () => {
     const closeEvents: unknown[] = [];
     encounter.bus.on('opp.close', (e) => closeEvents.push(e));
 
+    encounter.player.startBlock(); // guard held well before impact -> resolves as a block (not parry, since PARRY_WINDOW_MS is only 150ms and this guard has been up ~400ms by the time the swing connects); player never moves, so the punish attack below still reaches the Assaltante
     runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    encounter.player.stopBlock(); // back to idle so tryAction() below isn't a no-op
     expect(encounter.assaltante.state).toBe('recovering');
 
     encounter.player.tryAction('sword_shield.light');
@@ -177,7 +179,9 @@ describe('Encounter', () => {
       { x: 20, y: 0, width: 20, height: 20 },
     );
 
+    encounter.player.startBlock(); // guard held well before impact -> resolves as a block (not parry, since PARRY_WINDOW_MS is only 150ms and this guard has been up ~400ms by the time the swing connects); player never moves, so the punish attack below still reaches the Assaltante
     runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    encounter.player.stopBlock(); // back to idle so tryAction() below isn't a no-op
     expect(encounter.assaltante.state).toBe('recovering');
 
     encounter.player.tryAction('sword_shield.light');
@@ -341,5 +345,114 @@ describe('Encounter', () => {
     encounter.profile.applyRoomBoundary();
     const snap = encounter.profile.snapshot('room.exit');
     expect(snap.domain.weapon_repertoire).toBeNull();
+  });
+
+  it('a well-timed parry (E right before impact) resolves dodge as taken, records the parry label, and opens a bigger punish window', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('attacking');
+
+    runFor(encounter, TELEGRAPH_MS - STEP_MS * 2);
+    encounter.player.startBlock(); // right before impact -> parry window
+    runFor(encounter, STEP_MS * 3); // let the swing connect while still inside PARRY_WINDOW_MS
+
+    expect(encounter.assaltante.state).toBe('recovering');
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.defensive_repertoire).toEqual([1, 1]); // exactly 1 label recorded: parry
+  });
+
+  it('holding block from well before impact (past PARRY_WINDOW_MS) absorbs the hit as a block, draining poise, not a parry', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    encounter.player.startBlock();
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    // Block absorbs the hit but — unlike parry — never cuts the swing short;
+    // the Assaltante still reaches 'recovering' on its own normal timing.
+    // Poise drops by exactly one hit's worth (40), not to 0 — the hitbox
+    // keeps overlapping for the rest of the ~150ms swing, but the guard
+    // must make absorbBlockHit() fire only once per attack window.
+    expect(encounter.player.poise).toBe(60);
+    expect(encounter.assaltante.state).toBe('recovering');
+  });
+
+  it('taking a hit with no defense at all increments the unmitigated-hit counter and staggers the player', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    const hitEvents: unknown[] = [];
+    encounter.bus.on('player.hit_unmitigated', (e) => hitEvents.push(e));
+
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    expect(hitEvents).toHaveLength(1);
+    expect(encounter.player.state).toBe('staggered');
+  });
+
+  it('retreating out of range before the swing connects, with no defense used, records the retreat label', () => {
+    // Player at x=100 (not x=0) so there's room to retreat left without
+    // hitting ARENA_BOUNDS' left edge (x=0).
+    const encounter = new Encounter(
+      { x: 100, y: 0, width: 20, height: 20 },
+      { x: 130, y: 0, width: 20, height: 20 },
+    );
+    encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('attacking');
+
+    encounter.setPlayerMoveInput(-1, 0); // run away from the Assaltante
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.defensive_repertoire).toEqual([1, 1]); // exactly 1 label recorded: retreat
+  });
+
+  it('a full sequence of one of each defense yields exactly 4 dim-4 records and 1 unmitigated hit', () => {
+    // Room 1: dodge
+    const e1 = new Encounter({ x: 0, y: 0, width: 20, height: 20 }, { x: 30, y: 0, width: 20, height: 20 });
+    e1.step(STEP_MS);
+    runFor(e1, TELEGRAPH_MS - STEP_MS * 2);
+    e1.player.tryDodge();
+    runFor(e1, SWING_MS + STEP_MS * 2);
+
+    // Room 2: parry
+    const e2 = new Encounter({ x: 0, y: 0, width: 20, height: 20 }, { x: 30, y: 0, width: 20, height: 20 });
+    e2.step(STEP_MS);
+    runFor(e2, TELEGRAPH_MS - STEP_MS * 2);
+    e2.player.startBlock();
+    runFor(e2, STEP_MS * 3);
+
+    // Room 3: block (held from well before impact)
+    const e3 = new Encounter({ x: 0, y: 0, width: 20, height: 20 }, { x: 30, y: 0, width: 20, height: 20 });
+    e3.player.startBlock();
+    runFor(e3, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    // Room 4: retreat (player offset from x=0 so there's room to move away
+    // from the Assaltante without hitting ARENA_BOUNDS' left edge)
+    const e4 = new Encounter({ x: 100, y: 0, width: 20, height: 20 }, { x: 130, y: 0, width: 20, height: 20 });
+    e4.step(STEP_MS);
+    e4.setPlayerMoveInput(-1, 0);
+    runFor(e4, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    // Room 5: unmitigated hit
+    const e5 = new Encounter({ x: 0, y: 0, width: 20, height: 20 }, { x: 30, y: 0, width: 20, height: 20 });
+    const hits: unknown[] = [];
+    e5.bus.on('player.hit_unmitigated', (e) => hits.push(e));
+    runFor(e5, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+
+    for (const e of [e1, e2, e3, e4, e5]) e.profile.applyRoomBoundary();
+    expect(e1.profile.snapshot('room.exit').counts.defensive_repertoire).toEqual([1, 1]);
+    expect(e2.profile.snapshot('room.exit').counts.defensive_repertoire).toEqual([1, 1]);
+    expect(e3.profile.snapshot('room.exit').counts.defensive_repertoire).toEqual([1, 1]);
+    expect(e4.profile.snapshot('room.exit').counts.defensive_repertoire).toEqual([1, 1]);
+    expect(e5.profile.snapshot('room.exit').counts.defensive_repertoire).toBeUndefined(); // never folded, nothing recorded
+    expect(hits).toHaveLength(1);
   });
 });

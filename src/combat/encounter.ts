@@ -15,6 +15,10 @@ export class Encounter {
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
   readonly profile: ProfileAccumulator;
+  // Guards dim 4: at most one recordDefense() (or unmitigated-hit event) per
+  // attack window. Reset whenever the Assaltante opens a new 'dodge'
+  // opportunity (i.e. starts a new attack).
+  private defenseRecordedThisAttack = false;
 
   constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB) {
     this.bus = new EventBus<GameEvents>();
@@ -30,9 +34,24 @@ export class Encounter {
       }
     });
 
+    this.bus.on('player.dodge', () => {
+      if (this.assaltante.state === 'attacking' && !this.defenseRecordedThisAttack) {
+        this.defenseRecordedThisAttack = true;
+        this.profile.recordDefense('dodge');
+      }
+    });
+
+    this.bus.on('opp.open', (e) => {
+      if (e.type === 'dodge') this.defenseRecordedThisAttack = false;
+    });
+
     this.bus.on('opp.close', (e) => {
       if (e.type === 'punish' && e.outcome !== 'invalid') {
         this.profile.recordOutcome('punish', e.outcome);
+      }
+      if (e.type === 'dodge' && e.outcome === 'expired' && !this.defenseRecordedThisAttack) {
+        this.defenseRecordedThisAttack = true;
+        this.profile.recordDefense('retreat');
       }
     });
   }
@@ -45,9 +64,30 @@ export class Encounter {
     this.assaltante.step(stepMs, this.player.position);
     this.player.step(stepMs);
 
+    // Dodge and parry are self-terminating (dodge via its own i-frame timing;
+    // parry by pushing the Assaltante straight into 'recovering', which makes
+    // attackHitbox() go null on the very next tick) — safe to leave ungated,
+    // matching how onPlayerDodgeSuccess() already worked pre-existing this
+    // plan. Block and the unmitigated-hit case are NOT self-terminating: the
+    // hitbox keeps overlapping every tick for the rest of the ~150ms swing,
+    // so both are explicitly gated by defenseRecordedThisAttack — otherwise
+    // absorbBlockHit()/enterStagger() would refire every tick (poise would
+    // vanish in ~3 ticks; stagger would never end while overlap holds).
     const enemyAttack = this.assaltante.attackHitbox();
-    if (enemyAttack && aabbOverlap(enemyAttack, this.player.hurtbox()) && this.player.isInvulnerable) {
-      this.assaltante.onPlayerDodgeSuccess();
+    if (enemyAttack && aabbOverlap(enemyAttack, this.player.hurtbox())) {
+      if (this.player.isInvulnerable) {
+        this.assaltante.onPlayerDodgeSuccess();
+      } else if (this.player.isParryTiming) {
+        this.assaltante.onPlayerParrySuccess();
+        this.recordDefenseOnce('parry');
+      } else if (!this.defenseRecordedThisAttack && this.player.isBlocking) {
+        this.player.absorbBlockHit();
+        this.recordDefenseOnce('block');
+      } else if (!this.defenseRecordedThisAttack) {
+        this.player.enterStagger();
+        this.bus.emit('player.hit_unmitigated', {});
+        this.defenseRecordedThisAttack = true; // no dim-4 label, but the window is "resolved"
+      }
     }
 
     const playerAttack = this.player.attackHitbox();
@@ -65,5 +105,11 @@ export class Encounter {
     const distance = Math.hypot(dx, dy);
     const stepSeconds = stepMs / 1000;
     this.profile.record('distance', distance <= ATTACK_REACH ? stepSeconds : 0, stepSeconds);
+  }
+
+  private recordDefenseOnce(label: 'block' | 'parry'): void {
+    if (this.defenseRecordedThisAttack) return;
+    this.defenseRecordedThisAttack = true;
+    this.profile.recordDefense(label);
   }
 }
