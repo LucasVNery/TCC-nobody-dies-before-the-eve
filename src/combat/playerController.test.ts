@@ -3,7 +3,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import { PlayerController } from './playerController';
-import { DODGE, SWITCH_RECOVERY_MS } from './actionDefs';
+import {
+  DODGE,
+  SWITCH_RECOVERY_MS,
+  POISE_MAX,
+  POISE_DRAIN_PER_BLOCK,
+  POISE_REGEN_DELAY_MS,
+  PARRY_WINDOW_MS,
+  STAGGER_MS,
+} from './actionDefs';
 import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, ARENA_BOUNDS } from './movementDefs';
 
@@ -344,5 +352,88 @@ describe('PlayerController — weapon switching', () => {
     const { player } = makePlayer();
     expect(() => player.tryAction('bow.shot')).not.toThrow(); // sword_shield still equipped by default
     expect(player.state).toBe('idle');
+  });
+});
+
+describe('PlayerController — defensive kit (blocking/parry/stagger/poise)', () => {
+  it('starts with full poise', () => {
+    const { player } = makePlayer();
+    expect(player.poise).toBe(POISE_MAX);
+  });
+
+  it('startBlock() transitions to blocking, only from idle', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    expect(player.state).toBe('blocking');
+    expect(player.isBlocking).toBe(true);
+  });
+
+  it('startBlock() is a no-op outside idle', () => {
+    const { player } = makePlayer();
+    player.tryDodge();
+    expect(player.state).toBe('dodging');
+    player.startBlock();
+    expect(player.state).toBe('dodging'); // unchanged
+  });
+
+  it('stopBlock() returns to idle', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.stopBlock();
+    expect(player.state).toBe('idle');
+  });
+
+  it('isParryTiming is true just after starting the block, false once past PARRY_WINDOW_MS', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    expect(player.isParryTiming).toBe(true);
+    player.step(PARRY_WINDOW_MS + 10);
+    expect(player.isParryTiming).toBe(false);
+    expect(player.isBlocking).toBe(true); // still blocking, just past the parry window
+  });
+
+  it('absorbBlockHit() drains poise by POISE_DRAIN_PER_BLOCK', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.absorbBlockHit();
+    expect(player.poise).toBe(POISE_MAX - POISE_DRAIN_PER_BLOCK);
+    expect(player.state).toBe('blocking'); // poise not yet broken
+  });
+
+  it('poise breaking (3 absorbed hits) enters staggered', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.absorbBlockHit();
+    player.absorbBlockHit();
+    player.absorbBlockHit();
+    expect(player.poise).toBe(0);
+    expect(player.state).toBe('staggered');
+  });
+
+  it('enterStagger() blocks all input until STAGGER_MS elapses, then returns to idle', () => {
+    const { player } = makePlayer();
+    player.enterStagger();
+    expect(player.state).toBe('staggered');
+    player.tryDodge();
+    expect(player.state).toBe('staggered'); // still locked out
+    player.step(STAGGER_MS - 1);
+    expect(player.state).toBe('staggered');
+    player.step(2);
+    expect(player.state).toBe('idle');
+  });
+
+  it('poise regenerates after POISE_REGEN_DELAY_MS of standing idle, even across a single large step()', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.absorbBlockHit();
+    player.stopBlock(); // back to idle, poise = 60, regen delay armed at 1000ms
+    player.step(POISE_REGEN_DELAY_MS + 1000); // one big step: 1000ms of delay + 1000ms of regen
+    expect(player.poise).toBe(POISE_MAX); // 60 + (1000/1000)*50 = 110, clamped to 100
+  });
+
+  it('poise never regenerates above POISE_MAX', () => {
+    const { player } = makePlayer();
+    player.step(POISE_REGEN_DELAY_MS + 5000);
+    expect(player.poise).toBe(POISE_MAX);
   });
 });

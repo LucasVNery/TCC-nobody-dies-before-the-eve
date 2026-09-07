@@ -11,5 +11,5 @@ export interface Vec2 {
   y: number;
 }
 
-export type PlayerState = 'idle' | 'acting' | 'dodging';
+export type PlayerState = 'idle' | 'acting' | 'dodging' | 'blocking' | 'staggered';
 export type EnemyState = 'idle' | 'chasing' | 'attacking' | 'recovering';

@@ -2,7 +2,16 @@
 import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { AABB, PlayerState, Vec2 } from './types';
-import { DODGE, SWITCH_RECOVERY_MS } from './actionDefs';
+import {
+  DODGE,
+  SWITCH_RECOVERY_MS,
+  POISE_MAX,
+  POISE_DRAIN_PER_BLOCK,
+  POISE_REGEN_DELAY_MS,
+  POISE_REGEN_PER_SECOND,
+  STAGGER_MS,
+  PARRY_WINDOW_MS,
+} from './actionDefs';
 import { resolveAction, type ActionDef } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
@@ -25,6 +34,10 @@ export class PlayerController {
   private aimDirection: Vec2 = { x: 1, y: 0 };
   private committedDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
+  poise = POISE_MAX;
+  private blockHeldMs = 0;
+  private staggerRemainingMs = 0;
+  private poiseRegenDelayRemainingMs = 0;
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -45,6 +58,14 @@ export class PlayerController {
 
   get facing(): Vec2 {
     return { x: this.aimDirection.x, y: this.aimDirection.y };
+  }
+
+  get isBlocking(): boolean {
+    return this.state === 'blocking';
+  }
+
+  get isParryTiming(): boolean {
+    return this.state === 'blocking' && this.blockHeldMs < PARRY_WINDOW_MS;
   }
 
   hurtbox(): AABB {
@@ -129,6 +150,30 @@ export class PlayerController {
     this.bus.emit('player.dodge', {});
   }
 
+  startBlock(): void {
+    if (this.state !== 'idle') return;
+    this.state = 'blocking';
+    this.blockHeldMs = 0;
+  }
+
+  stopBlock(): void {
+    if (this.state !== 'blocking') return;
+    this.state = 'idle';
+    this.blockHeldMs = 0;
+  }
+
+  absorbBlockHit(): void {
+    this.poise = Math.max(0, this.poise - POISE_DRAIN_PER_BLOCK);
+    this.poiseRegenDelayRemainingMs = POISE_REGEN_DELAY_MS;
+    if (this.poise <= 0) this.enterStagger();
+  }
+
+  enterStagger(): void {
+    this.state = 'staggered';
+    this.staggerRemainingMs = STAGGER_MS;
+    this.blockHeldMs = 0;
+  }
+
   step(stepMs: number): void {
     if (this.dodgeCooldownRemainingMs > 0) {
       this.dodgeCooldownRemainingMs = Math.max(0, this.dodgeCooldownRemainingMs - stepMs);
@@ -148,11 +193,37 @@ export class PlayerController {
           ARENA_BOUNDS,
         );
       }
+      if (this.poise < POISE_MAX) {
+        // Handles a single large stepMs (as tests use, e.g. player.step(DODGE.durationMs)
+        // elsewhere) as correctly as many small 60Hz ticks: whatever portion of this
+        // step falls *after* the delay expires still regenerates poise, instead of the
+        // delay-countdown and the regen being mutually exclusive within one call.
+        const delayBefore = this.poiseRegenDelayRemainingMs;
+        this.poiseRegenDelayRemainingMs = Math.max(0, delayBefore - stepMs);
+        const regenMs = stepMs - delayBefore; // time left in this step after the delay ends
+        if (regenMs > 0) {
+          this.poise = Math.min(POISE_MAX, this.poise + (regenMs / 1000) * POISE_REGEN_PER_SECOND);
+        }
+      }
       return;
     }
 
     if (this.state === 'acting') {
       this.stepActing(stepMs);
+      return;
+    }
+
+    if (this.state === 'blocking') {
+      this.blockHeldMs += stepMs;
+      return;
+    }
+
+    if (this.state === 'staggered') {
+      this.staggerRemainingMs -= stepMs;
+      if (this.staggerRemainingMs <= 0) {
+        this.state = 'idle';
+        this.staggerRemainingMs = 0;
+      }
       return;
     }
 
