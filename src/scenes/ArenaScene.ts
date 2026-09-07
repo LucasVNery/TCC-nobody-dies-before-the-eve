@@ -24,6 +24,11 @@ const STEP_MS = 1000 / 60;
 const HURTBOX_COLOR = 0xffffff;
 const ATTACK_HITBOX_COLOR = 0xffeb3b;
 const ATTACK_RANGE_COLOR = 0xff9800;
+// Native per-frame size of the rendered character sprite sheets — see
+// tools/blender/README.md (FRAME_SIZE in render_character.py). Both idle
+// and walk sheets, for both entities, share this size.
+const CHARACTER_FRAME_SIZE = 128;
+const WALK_FRAME_COUNT = 6;
 
 export class ArenaScene extends Phaser.Scene {
   private encounter!: Encounter;
@@ -59,6 +64,22 @@ export class ArenaScene extends Phaser.Scene {
   preload(): void {
     this.load.image(ASSET_KEYS.groundGrass, '/assets/tiles/grass.png');
     this.load.image(ASSET_KEYS.groundWater, '/assets/tiles/water.png');
+    this.load.spritesheet(ASSET_KEYS.playerIdle, '/assets/characters/player/idle.png', {
+      frameWidth: CHARACTER_FRAME_SIZE,
+      frameHeight: CHARACTER_FRAME_SIZE,
+    });
+    this.load.spritesheet(ASSET_KEYS.playerWalk, '/assets/characters/player/walk.png', {
+      frameWidth: CHARACTER_FRAME_SIZE,
+      frameHeight: CHARACTER_FRAME_SIZE,
+    });
+    this.load.spritesheet(ASSET_KEYS.assaltanteIdle, '/assets/characters/assaltante/idle.png', {
+      frameWidth: CHARACTER_FRAME_SIZE,
+      frameHeight: CHARACTER_FRAME_SIZE,
+    });
+    this.load.spritesheet(ASSET_KEYS.assaltanteWalk, '/assets/characters/assaltante/walk.png', {
+      frameWidth: CHARACTER_FRAME_SIZE,
+      frameHeight: CHARACTER_FRAME_SIZE,
+    });
     generatePlaceholderTextures(this);
   }
 
@@ -72,7 +93,7 @@ export class ArenaScene extends Phaser.Scene {
 
     this.playerSprite = new DirectionalSprite(
       this,
-      ASSET_KEYS.player,
+      { idleTextureKey: ASSET_KEYS.playerIdle, walkTextureKey: ASSET_KEYS.playerWalk, walkFrameCount: WALK_FRAME_COUNT },
       ENTITY_VISUAL_WIDTH,
       ENTITY_VISUAL_HEIGHT,
       { x: 100, y: 300 },
@@ -80,7 +101,7 @@ export class ArenaScene extends Phaser.Scene {
     );
     this.assaltanteSprite = new DirectionalSprite(
       this,
-      ASSET_KEYS.assaltante,
+      { idleTextureKey: ASSET_KEYS.assaltanteIdle, walkTextureKey: ASSET_KEYS.assaltanteWalk, walkFrameCount: WALK_FRAME_COUNT },
       ENTITY_VISUAL_WIDTH,
       ENTITY_VISUAL_HEIGHT,
       { x: 400, y: 300 },
@@ -202,11 +223,17 @@ export class ArenaScene extends Phaser.Scene {
     const assaltantePos = this.encounter.assaltante.position;
 
     this.playerSprite.syncPosition(playerPos);
-    this.playerSprite.syncDirection(this.encounter.player.facing);
+    this.playerSprite.syncDirection(
+      this.encounter.player.facing,
+      this.lastMoveInput.dx !== 0 || this.lastMoveInput.dy !== 0,
+    );
     this.playerSprite.setTint(this.encounter.player.isInvulnerable ? 0x8bc34a : 0xffffff);
 
     this.assaltanteSprite.syncPosition(assaltantePos);
-    this.assaltanteSprite.syncDirection(this.encounter.assaltante.attackDirection);
+    this.assaltanteSprite.syncDirection(
+      this.encounter.assaltante.attackDirection,
+      this.encounter.assaltante.state === 'chasing',
+    );
     this.assaltanteSprite.setTint(
       this.encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff,
     );
