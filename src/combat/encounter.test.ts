@@ -382,6 +382,23 @@ describe('Encounter', () => {
     expect(encounter.assaltante.state).toBe('recovering');
   });
 
+  it('re-blocking then re-entering the parry-timing window mid-swing does not grant a second parry once the window is already resolved', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    encounter.player.startBlock(); // held from t=0 -> resolves as an ordinary block, not a parry, when the swing connects at TELEGRAPH_MS
+    runFor(encounter, TELEGRAPH_MS + STEP_MS);
+    expect(encounter.player.poise).toBeLessThan(100); // confirms the block already absorbed the hit this window
+
+    encounter.player.stopBlock();
+    encounter.player.startBlock(); // re-press -> blockHeldMs resets to 0, briefly back inside the parry window
+    runFor(encounter, STEP_MS * 3); // hitbox is still overlapping (swing runs until TELEGRAPH_MS + SWING_MS)
+
+    // Without the fix, this second parry-timing window would incorrectly cut the swing short.
+    expect(encounter.assaltante.state).toBe('attacking');
+  });
+
   it('taking a hit with no defense at all increments the unmitigated-hit counter and staggers the player', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },

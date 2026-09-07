@@ -154,9 +154,8 @@ export class ArenaScene extends Phaser.Scene {
         '  Clique dir  - ataque secundario (sem efeito no arco)',
         '  Q (segurar) - carregado (sem efeito no arco)',
         '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
-        '  Espaço     - esquiva',
-        '  E (segurar) - bloqueio / soltar no timing certo = parry',
-        '          (use durante o telegraph do boss pra i-frames)',
+        '  Espaço     - esquiva (use durante o telegraph do boss pra i-frames)',
+        '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
       ],
       { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff' },
     );

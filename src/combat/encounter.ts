@@ -77,7 +77,7 @@ export class Encounter {
     if (enemyAttack && aabbOverlap(enemyAttack, this.player.hurtbox())) {
       if (this.player.isInvulnerable) {
         this.assaltante.onPlayerDodgeSuccess();
-      } else if (this.player.isParryTiming) {
+      } else if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
         this.assaltante.onPlayerParrySuccess();
         this.recordDefenseOnce('parry');
       } else if (!this.defenseRecordedThisAttack && this.player.isBlocking) {
