@@ -281,10 +281,27 @@ Determinismo: `fromScreen`/`setAimDirection` são funções puras de entrada exp
 
 ---
 
-## 8. Trilha completa (contexto — só o passo 2 é este sub-projeto)
+## 8. Pendências conhecidas (não bloqueantes, registradas na revisão final de 06/09/2026)
+
+Nenhuma afeta a validade dos dados coletados pelo perfil (dim 1/dim 2) — são sensação de jogo e robustez de código. Não bloquearam o merge; ficam aqui para não se perderem quando alguma sessão futura mexer nessa área de novo.
+
+| Item | Detalhe | Quando vale a pena resolver |
+|---|---|---|
+| Mira diagonal vs. hitbox de 4 direções | `directionalHitbox` (`movement.ts`) resolve a mira em 4 quadrantes; a seta visual agora aponta continuamente pro mouse. Num tiro de arco na diagonal, o hitbox pode "errar" um alvo que a seta aponta certeiro. | Junto com o sub-projeto do kit defensivo (passo 3 abaixo), que já vai mexer em `movement.ts`/geometria de hitbox. |
+| Direção do `charged` trava no aperte, não na soltura | `committedDirection` é fixado em `tryAction()`. Girar o mouse durante a carga não muda a direção do golpe final. | Questão de sensação de jogo — só se incomodar durante playtest. |
+| `switchWeapon` não valida o `weaponId` | Um id inexistente é aceito silenciosamente e trava todo `tryAction` depois disso (nenhuma arma bate). `equippedWeaponId` também é campo público mutável, sem guarda. | Cedo, é barato — checar contra `WEAPON_IDS` (já importável) ou tipar como union. |
+| `WEAPON_IDS` é `string[]` genérico | Perde a checagem de tipo literal — `findWeaponAction('sword_sheild', ...)` (erro de digitação) compila. | Trocar por `as const` + tipo `WeaponId` derivado, sem custo de runtime. |
+| Sem indicador de arma equipada / bloqueio de troca na HUD | Quem está jogando não vê qual arma está segurando nem que o ataque está bloqueado durante os 250ms de troca. | Uma linha no `hudText` existente (`weapon: ${player.equippedWeaponId}`) resolve. |
+| Clique esquerdo+direito simultâneos | `pointer.leftButtonDown()` checado primeiro — segurar os dois faz o clique ser lido como ataque primário. | Trocar para checar `pointer.button` (0/2) em vez dos helpers de estado. |
+| `tryEquippedAction` tem nome mais forte que o que faz | Retorna "existe uma ação desse tipo pra arma atual", não "a ação foi executada" — o fallback esquerdo (`light`→`throw`) depende dessa distinção continuar válida conforme mais armas entram. | Renomear ou comentar quando a 4ª arma for adicionada. |
+| Teste com nome desatualizado | `'dash defaults to facing right if the player never moved'` usa "facing" no sentido antigo (movimento); hoje `facing` = mira. Testa posição, então continua correto — só o nome ficou capenga. | Cosmético, qualquer PR que passar por perto. |
+
+---
+
+## 9. Trilha completa (contexto — só o passo 2 é este sub-projeto)
 
 1. ~~Registro de ações + dim 2, com espada+escudo.~~ **Mesclado (commit `0c9bee4`).**
-2. **[este doc]** Mira por mouse + arco + arma pesada + troca de arma → dim 1.
+2. ~~Mira por mouse + arco + arma pesada + troca de arma → dim 1.~~ **Mesclado (commit `939a521`).**
 3. Kit defensivo: recuo, bloqueio, parry, barra de postura, stagger → **dim 4**.
 4. Definição do predicado "janela segura" → **dim 6**.
 5. Seleção de déficit-alvo com histerese.
