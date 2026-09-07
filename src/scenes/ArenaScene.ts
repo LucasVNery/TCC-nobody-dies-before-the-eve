@@ -19,6 +19,7 @@ import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
 import { toScreen, fromScreen } from '../visual/isometricProjection';
 import { findWeaponAction, type ActionType } from '../combat/actionRegistry';
 import type { Vec2, AABB } from '../combat/types';
+import type { AttackSector } from '../combat/sector';
 
 const STEP_MS = 1000 / 60;
 const HURTBOX_COLOR = 0xffffff;
@@ -303,9 +304,25 @@ export class ArenaScene extends Phaser.Scene {
 
     this.debugGraphics.fillStyle(ATTACK_HITBOX_COLOR, 0.4);
     const playerAttack = this.encounter.player.attackHitbox();
-    if (playerAttack) this.debugGraphics.fillPoints(this.cornersAsPoints(playerAttack), true);
+    if (playerAttack) this.debugGraphics.fillPoints(this.sectorAsPoints(playerAttack), true);
     const assaltanteAttack = this.encounter.assaltante.attackHitbox();
-    if (assaltanteAttack) this.debugGraphics.fillPoints(this.cornersAsPoints(assaltanteAttack), true);
+    if (assaltanteAttack) this.debugGraphics.fillPoints(this.sectorAsPoints(assaltanteAttack), true);
+  }
+
+  private sectorAsPoints(sector: AttackSector, samples = 10): Phaser.Geom.Point[] {
+    const centerAngle = Math.atan2(sector.direction.y, sector.direction.x);
+    const originScreen = toScreen(sector.origin, ISO_CONFIG);
+    const points: Phaser.Geom.Point[] = [new Phaser.Geom.Point(originScreen.x, originScreen.y)];
+    for (let i = 0; i <= samples; i++) {
+      const angle = centerAngle - sector.halfAngleRad + (2 * sector.halfAngleRad * i) / samples;
+      const worldPoint = {
+        x: sector.origin.x + Math.cos(angle) * sector.reach,
+        y: sector.origin.y + Math.sin(angle) * sector.reach,
+      };
+      const screen = toScreen(worldPoint, ISO_CONFIG);
+      points.push(new Phaser.Geom.Point(screen.x, screen.y));
+    }
+    return points;
   }
 
   private cornersAsPoints(box: AABB): Phaser.Geom.Point[] {
