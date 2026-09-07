@@ -5,6 +5,7 @@ import type { GameEvents } from '../core/events';
 import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
+import { sectorOverlapsBox } from './sector';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
@@ -119,7 +120,7 @@ describe('AssaltanteController', () => {
     }
     const hitbox = enemy.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.x).toBeGreaterThan(enemy.position.x);
+    expect(hitbox!.direction).toEqual({ x: 1, y: 0 });
   });
 
   it('exposes the id of the currently selected rule, for HUD/debug purposes', () => {
@@ -141,7 +142,7 @@ describe('AssaltanteController', () => {
     }
     const hitbox = enemy.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.y).toBeLessThan(enemy.position.y); // extends upward, toward player
+    expect(hitbox!.direction).toEqual({ x: 0, y: -1 }); // extends upward, toward player
   });
 
   it('exposes the current attack direction, for visual/HUD purposes', () => {
@@ -246,5 +247,21 @@ describe('AssaltanteController', () => {
     enemy.onPlayerParrySuccess(); // still idle, no active dodge opportunity
     expect(closeHandler).not.toHaveBeenCalled();
     expect(enemy.state).toBe('idle');
+  });
+
+  it('attack hitbox reaches a diagonally-positioned player (regression: old 4-quadrant hitbox could miss this)', () => {
+    const { enemy } = makeAssaltante(); // enemy at x=100, y=0, 20x20
+    const playerPos = { x: 130, y: 30 }; // diagonal offset, distance ~42.4, within ATTACK_RANGE (60)
+    enemy.step(16, playerPos);
+    expect(enemy.state).toBe('attacking');
+    let elapsed = 16;
+    while (elapsed < 416) {
+      enemy.step(16, playerPos);
+      elapsed += 16;
+    }
+    const hitbox = enemy.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    const playerHurtbox = { x: playerPos.x, y: playerPos.y, width: 20, height: 20 };
+    expect(sectorOverlapsBox(hitbox!, playerHurtbox)).toBe(true);
   });
 });

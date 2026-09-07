@@ -5,8 +5,9 @@ import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
 import type { ActionId } from '../opportunity/types';
 import { ASSALTANTE_RULES, type Blackboard } from '../ai/rules/assaltanteRules';
-import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
-import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
+import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
+import { normalizeVelocity, applyMovement, clampToArena } from './movement';
+import { directionalSector, type AttackSector } from './sector';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 
 const TELEGRAPH_MS = 400; // = dodge window
@@ -50,10 +51,11 @@ export class AssaltanteController {
     return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
 
-  attackHitbox(): AABB | null {
+  attackHitbox(): AttackSector | null {
     if (this.state !== 'attacking') return null;
     if (this.phaseElapsedMs < TELEGRAPH_MS) return null;
-    return directionalHitbox(this._position, this.width, this.height, this._attackDirection, ATTACK_REACH);
+    const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
+    return directionalSector(center, this._attackDirection, ATTACK_REACH + this.width / 2, ATTACK_HALF_ANGLE_RAD);
   }
 
   step(stepMs: number, playerPosition: Vec2): void {
