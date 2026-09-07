@@ -1,2 +1,7 @@
 node_modules/
 dist/
+
+# Raw/intermediate 3D asset pipeline output — only the final composed
+# sprite sheets under public/assets/characters/ are versioned.
+tools/blender/source/
+tools/blender/renders/
