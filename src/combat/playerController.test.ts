@@ -14,6 +14,7 @@ import {
 } from './actionDefs';
 import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, ARENA_BOUNDS } from './movementDefs';
+import { sectorOverlapsBox } from './sector';
 
 const LIGHT = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'light')!;
 const HEAVY = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'heavy')!;
@@ -83,7 +84,7 @@ describe('PlayerController', () => {
     player.step(20);
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.width).toBeCloseTo(HEAVY.reach);
+    expect(hitbox!.reach).toBeCloseTo(HEAVY.reach + 10); // +10 = metade da largura do hurtbox de teste (20)
 
     player.step(HEAVY.timing.activeMs + HEAVY.timing.recoveryMs);
     expect(player.state).toBe('idle');
@@ -107,7 +108,7 @@ describe('PlayerController', () => {
     player.step(CHARGED.charge!.maxHoldMs + 500); // way past max — must clamp, not overshoot
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.width).toBeCloseTo(CHARGED.charge!.reachMax);
+    expect(hitbox!.reach).toBeCloseTo(CHARGED.charge!.reachMax + 10);
   });
 
   it('charged: held past maxHoldMs auto-triggers and emits player.action exactly once, at trigger time', () => {
@@ -133,8 +134,8 @@ describe('PlayerController', () => {
     player.releaseAction();
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
-    const midpointReach = (CHARGED.reach + CHARGED.charge!.reachMax) / 2;
-    expect(hitbox!.width).toBeCloseTo(midpointReach);
+    const midpointReach = (CHARGED.reach + CHARGED.charge!.reachMax) / 2 + 10;
+    expect(hitbox!.reach).toBeCloseTo(midpointReach);
   });
 
   it('charged: released between minHoldMs and maxHoldMs emits player.action exactly once, at release time', () => {
@@ -273,7 +274,7 @@ describe('PlayerController', () => {
     player.step(LIGHT.timing.startupMs + 10);
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.y).toBeLessThan(player.hurtbox().y); // reach strip is above the hurtbox, matching the aim
+    expect(hitbox!.direction).toEqual({ x: 0, y: -1 }); // aiming up
   });
 
   it('attackHitbox() direction is committed at tryAction() time, not updated live during the swing', () => {
@@ -284,7 +285,7 @@ describe('PlayerController', () => {
     player.setAimDirection({ x: 1, y: 0 }); // player spins the mouse to aim right, mid-swing
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
-    expect(hitbox!.y).toBeLessThan(player.hurtbox().y); // still using the "aim up" direction committed at tryAction() time
+    expect(hitbox!.direction).toEqual({ x: 0, y: -1 }); // still using the "aim up" direction committed at tryAction() time
   });
 
   it('dash still uses the last movement direction, not the aim direction', () => {
@@ -435,5 +436,18 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/poise)', ()
     const { player } = makePlayer();
     player.step(POISE_REGEN_DELAY_MS + 5000);
     expect(player.poise).toBe(POISE_MAX);
+  });
+});
+
+describe('PlayerController — diagonal attacks', () => {
+  it('a diagonal attack reaches a target positioned on that diagonal (regression: old 4-quadrant hitbox could miss this)', () => {
+    const { player } = makePlayer();
+    player.setAimDirection({ x: 1, y: 1 });
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs + 10);
+    const hitbox = player.attackHitbox();
+    expect(hitbox).not.toBeNull();
+    const targetBox = { x: 30, y: 30, width: 20, height: 20 }; // on the same diagonal, within reach (LIGHT.reach=45 + 10)
+    expect(sectorOverlapsBox(hitbox!, targetBox)).toBe(true);
   });
 });

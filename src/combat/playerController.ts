@@ -13,8 +13,9 @@ import {
   PARRY_WINDOW_MS,
 } from './actionDefs';
 import { resolveAction, type ActionDef } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS } from './movementDefs';
-import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
+import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
+import { normalizeVelocity, applyMovement, clampToArena } from './movement';
+import { directionalSector, type AttackSector } from './sector';
 
 export class PlayerController {
   state: PlayerState = 'idle';
@@ -72,19 +73,31 @@ export class PlayerController {
     return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
 
-  attackHitbox(): AABB | null {
+  attackHitbox(): AttackSector | null {
     if (this.state !== 'acting' || !this.currentAction) return null;
+
+    const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
 
     if (this.currentAction.actionType === 'charged') {
       if (!this.chargeTriggered) return null;
       if (this.phaseElapsedMs >= this.currentAction.timing.activeMs) return null;
-      return directionalHitbox(this._position, this.width, this.height, this.committedDirection, this.chargedReach());
+      return directionalSector(
+        center,
+        this.committedDirection,
+        this.chargedReach() + this.width / 2,
+        ATTACK_HALF_ANGLE_RAD,
+      );
     }
 
     const { startupMs, activeMs } = this.currentAction.timing;
     const inActive = this.phaseElapsedMs >= startupMs && this.phaseElapsedMs < startupMs + activeMs;
     if (!inActive) return null;
-    return directionalHitbox(this._position, this.width, this.height, this.committedDirection, this.currentAction.reach);
+    return directionalSector(
+      center,
+      this.committedDirection,
+      this.currentAction.reach + this.width / 2,
+      ATTACK_HALF_ANGLE_RAD,
+    );
   }
 
   setMoveInput(dx: number, dy: number): void {
