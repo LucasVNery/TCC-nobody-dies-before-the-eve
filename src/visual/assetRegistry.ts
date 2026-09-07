@@ -1,6 +1,8 @@
 export const ASSET_KEYS = {
-  player: 'placeholder_player',
-  assaltante: 'placeholder_assaltante',
+  playerIdle: 'player_idle',
+  playerWalk: 'player_walk',
+  assaltanteIdle: 'assaltante_idle',
+  assaltanteWalk: 'assaltante_walk',
   groundGrass: 'ground_grass',
   groundWater: 'ground_water',
   directionArrow: 'placeholder_direction_arrow',

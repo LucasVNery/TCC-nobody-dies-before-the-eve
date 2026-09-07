@@ -5,8 +5,10 @@ describe('ASSET_KEYS', () => {
   it('defines a unique texture key for every visual role', () => {
     const keys = Object.values(ASSET_KEYS);
     expect(keys).toEqual([
-      'placeholder_player',
-      'placeholder_assaltante',
+      'player_idle',
+      'player_walk',
+      'assaltante_idle',
+      'assaltante_walk',
       'ground_grass',
       'ground_water',
       'placeholder_direction_arrow',
