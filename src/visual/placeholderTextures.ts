@@ -19,8 +19,6 @@ export const ISO_CONFIG: IsoConfig = {
 };
 
 export function generatePlaceholderTextures(scene: Phaser.Scene): void {
-  generateRectTexture(scene, ASSET_KEYS.player, ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT, 0x2196f3, 0x0d47a1);
-  generateRectTexture(scene, ASSET_KEYS.assaltante, ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT, 0xf44336, 0x8e1c13);
   generateArrowTexture(scene, ASSET_KEYS.directionArrow, DIRECTION_ARROW_SIZE, DIRECTION_ARROW_COLOR);
 }
 
