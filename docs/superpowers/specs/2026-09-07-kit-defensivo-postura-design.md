@@ -191,7 +191,9 @@ postura: ${Math.round(player.poise)}/${POISE_MAX}
 hits sofridos: ${hudCounters.hitsUnmitigated}
 ```
 
-`controlsText` atualizado: `Espaço - esquiva`, `E (segurar) - bloqueio / soltar no timing certo - parry`. Nenhuma barra gráfica nova — texto cru, mesmo estilo do resto da HUD atual (pendência de redesign registrada à parte).
+`controlsText` atualizado: `Espaço - esquiva`, `E (segure) - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio`. Nenhuma barra gráfica nova — texto cru, mesmo estilo do resto da HUD atual (pendência de redesign registrada à parte).
+
+> **CORREÇÃO (revisão final de branch, 07/09/2026):** a redação original deste parágrafo ("soltar no timing certo = parry") descrevia errado o próprio mecanismo — parry é decidido pelo instante em que **E é pressionado** (`blockHeldMs < PARRY_WINDOW_MS` no momento em que o golpe conecta, §3.3), não por quando é solto. Como a dim 4 mede justamente qual das 4 ferramentas o jogador escolhe, uma instrução errada na tela ameaça a própria coleta de dados (parry na prática nunca seria alcançado por quem seguisse o texto). Corrigido no código (`ArenaScene.ts`) e aqui.
 
 ---
 
@@ -214,6 +216,7 @@ Tudo em `combat/`/`profile/` continua puro e testável sem Phaser:
 | Redesign de HUD (gameplay/dev) | Adições desta rodada ficam em texto cru de propósito. | Brainstorm dedicado, ver `Contexto_pesquisa/instrumento-perfil-adaptativo.md` §9. |
 | Bloqueio uniforme entre armas (sem bônus de escudo) | `sword_shield` não bloqueia melhor que `bow`/`heavy_weapon` nesta rodada, ao contrário do que o doc de referência §5.1 cogitava. | Se/quando isso importar para o jogo em si — não afeta a dim 4, que já é `n=4` fixo sem efeito de loadout por desenho. |
 | Sem animação de bloqueio/parry nos sprites 3D | Mecânica pura por enquanto (postura sobe/desce, stagger, sem feedback visual dedicado além do HUD). | Junto com a animação de ataque — e só depois do fix de hitbox diagonal (`2026-09-06-arco-arma-pesada-troca-arma-design.md` §8), que já é pré-requisito registrado. |
+| **Hitbox diagonal do Assaltante agora também é um problema de validade de dados, não só de sensação de combate** | Achado pela revisão final de branch (07/09/2026): `directionalHitbox` (`movement.ts`) resolve em 4 quadrantes; num ângulo de aproximação diagonal, o golpe do Assaltante pode nunca colidir com o jogador mesmo parado e ao alcance — e como "recuo" é inferido só de "a janela expirou sem overlap e sem defesa" (§4.2), esse whiff geométrico é lido como recuo bem-sucedido. Em ângulos diagonais (comuns numa arena isométrica), isso infla artificialmente o rótulo `retreat` da dim 4 com falsos positivos. | **Antes de qualquer coleta de dados real com dim 4** — não é mais só "quando for animar ataques". Ou adianta o fix de `2026-09-06-arco-arma-pesada-troca-arma-design.md` §8, ou adiciona uma checagem de distância no expire da oportunidade `dodge` (se o jogador ainda estava dentro de `ATTACK_REACH`, não foi recuo — foi só o hitbox errando). |
 
 ---
 

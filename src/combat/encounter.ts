@@ -64,13 +64,13 @@ export class Encounter {
     this.assaltante.step(stepMs, this.player.position);
     this.player.step(stepMs);
 
-    // Dodge and parry are self-terminating (dodge via its own i-frame timing;
-    // parry by pushing the Assaltante straight into 'recovering', which makes
-    // attackHitbox() go null on the very next tick) — safe to leave ungated,
-    // matching how onPlayerDodgeSuccess() already worked pre-existing this
-    // plan. Block and the unmitigated-hit case are NOT self-terminating: the
-    // hitbox keeps overlapping every tick for the rest of the ~150ms swing,
-    // so both are explicitly gated by defenseRecordedThisAttack — otherwise
+    // Dodge is self-terminating (i-frame timing means onPlayerDodgeSuccess()
+    // simply becomes a no-op once already resolved) — safe to leave ungated.
+    // Parry, block, and the unmitigated-hit case are NOT self-terminating on
+    // their own: the hitbox keeps overlapping every tick for the rest of the
+    // ~150ms swing, so all three are explicitly gated by
+    // defenseRecordedThisAttack — otherwise a parry could refire after a
+    // block already resolved the window (re-pressing E mid-swing), and
     // absorbBlockHit()/enterStagger() would refire every tick (poise would
     // vanish in ~3 ticks; stagger would never end while overlap holds).
     const enemyAttack = this.assaltante.attackHitbox();
