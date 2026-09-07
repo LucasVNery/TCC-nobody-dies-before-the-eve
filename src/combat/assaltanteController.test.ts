@@ -4,6 +4,7 @@ import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
+import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
@@ -216,5 +217,34 @@ describe('AssaltanteController', () => {
     expect(closeHandler).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'punish', outcome: 'invalid', reason: 'out_of_range' }),
     );
+  });
+
+  it('onPlayerParrySuccess() during attacking cuts the swing short, resolves dodge as taken, and opens a bigger punish window', () => {
+    const { enemy, opp, bus } = makeAssaltante();
+    enemy.step(16, { x: 70, y: 0 }); // enters attacking
+    const closeHandler = vi.fn();
+    const openHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    bus.on('opp.open', openHandler);
+
+    enemy.onPlayerParrySuccess();
+
+    expect(closeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dodge', outcome: 'taken' }),
+    );
+    expect(enemy.state).toBe('recovering');
+    expect(opp.activeOfType('punish')).toHaveLength(1);
+    expect(openHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'punish', src: 'assaltante.recover', window_ms: PARRY_BONUS_RECOVERY_MS }),
+    );
+  });
+
+  it('onPlayerParrySuccess() outside the attacking state is a no-op', () => {
+    const { enemy, bus } = makeAssaltante();
+    const closeHandler = vi.fn();
+    bus.on('opp.close', closeHandler);
+    enemy.onPlayerParrySuccess(); // still idle, no active dodge opportunity
+    expect(closeHandler).not.toHaveBeenCalled();
+    expect(enemy.state).toBe('idle');
   });
 });

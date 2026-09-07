@@ -7,6 +7,7 @@ import type { ActionId } from '../opportunity/types';
 import { ASSALTANTE_RULES, type Blackboard } from '../ai/rules/assaltanteRules';
 import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena, directionalHitbox } from './movement';
+import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 
 const TELEGRAPH_MS = 400; // = dodge window
 const SWING_MS = 150;
@@ -115,6 +116,19 @@ export class AssaltanteController {
       this.opp.resolve(this.activeOppId, 'taken');
       this.activeOppId = null;
     }
+  }
+
+  onPlayerParrySuccess(): void {
+    if (this.state !== 'attacking' || !this.activeOppId) return;
+    this.opp.resolve(this.activeOppId, 'taken');
+    this.state = 'recovering';
+    this.phaseElapsedMs = 0;
+    this.playerWasInRangeDuringPunish = false;
+    this.activeOppId = this.opp.open('punish', 'assaltante.recover', PARRY_BONUS_RECOVERY_MS, () =>
+      this.playerWasInRangeDuringPunish
+        ? { outcome: 'expired' }
+        : { outcome: 'invalid', reason: 'out_of_range' },
+    );
   }
 
   onPlayerHitLanded(): void {
