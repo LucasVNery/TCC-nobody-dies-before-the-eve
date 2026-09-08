@@ -210,6 +210,9 @@ Cobertura em três camadas, mesmo padrão do resto do combate:
 |---|---|---|
 | Largura de leque uniforme entre armas | Arco e espada usam o mesmo `ATTACK_HALF_ANGLE_RAD` — pode não fazer sentido pra sempre (arco "deveria" ser mais preciso). | Se/quando o playtest mostrar que o arco parece bugado por acertar coisas fora da linha de mira. |
 | `directionalHitbox` fica sem uso | Não removida nesta rodada (§2.2) — código morto candidato a limpeza. | Qualquer PR futuro que passar por `movement.ts`. |
+| `aabbOverlap` (`collision.ts`) também fica sem uso | Achado pela revisão final de branch (07/09/2026): com `Encounter` migrado pra `sectorOverlapsBox`, `aabbOverlap` só é referenciada pelo próprio `collision.ts` e seu teste — código morto, mesma situação de `directionalHitbox`. | Mesma oportunidade — qualquer PR futuro que passar por `combat/`. |
+| Amostragem por 5 pontos não cobre alvo sobrepondo/atrás da origem | `sectorOverlapsBox` testa 4 cantos + centro; um alvo que contém ou está atrás da origem do atacante pode ter os 5 pontos fora do ângulo, não é detectado. Mesma limitação que o retângulo antigo já tinha (ele começava na borda do atacante) — não é regressão, mas documentado explicitamente pela revisão final. | Só se o playtest revelar um caso real de "colado no inimigo e o ataque não conecta". |
+| Dados de perfil coletados antes desta correção não são comparáveis aos de depois | Achado pela revisão final: o leque cobre lateralmente muito mais que o retângulo antigo no alcance máximo (±55px vs ±10px) — ataques conectam em situações que antes erravam. Isso é a correção pretendida, mas significa que qualquer sessão de playtest/piloto gravada ANTES deste fix mede um instrumento diferente do que existe depois. | Antes de qualquer análise que combine dados de antes e depois desta correção — descartar ou segregar sessões piloto anteriores, se houver. |
 
 ---
 
