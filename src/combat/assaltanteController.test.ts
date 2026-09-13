@@ -264,4 +264,18 @@ describe('AssaltanteController', () => {
     const playerHurtbox = { x: playerPos.x, y: playerPos.y, width: 20, height: 20 };
     expect(sectorOverlapsBox(hitbox!, playerHurtbox)).toBe(true);
   });
+
+  it('msUntilThreatens returns null for a fresh, far-away enemy with a short horizon', () => {
+    const { enemy } = makeAssaltante(); // idle, at x=100
+    const target = { x: -1000, y: 0, width: 20, height: 20 };
+    expect(enemy.msUntilThreatens(target, 100)).toBeNull();
+  });
+
+  it('msUntilThreatens returns the remaining telegraph time once attacking, aimed at the target', () => {
+    const { enemy } = makeAssaltante(); // at x=100, y=0, 20x20
+    enemy.step(16, { x: 70, y: 0 }); // distance 30 <= ATTACK_RANGE(60) -> attacking, aimed left
+    expect(enemy.state).toBe('attacking');
+    const target = { x: 70, y: 0, width: 20, height: 20 };
+    expect(enemy.msUntilThreatens(target, 500)).toBe(384); // TELEGRAPH_MS(400) - phaseElapsedMs(16)
+  });
 });

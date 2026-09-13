@@ -4,17 +4,19 @@ import type { GameEvents } from '../core/events';
 import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
 import type { ActionId } from '../opportunity/types';
-import { ASSALTANTE_RULES, type Blackboard } from '../ai/rules/assaltanteRules';
+import { ASSALTANTE_RULES, ATTACK_RANGE, type Blackboard } from '../ai/rules/assaltanteRules';
 import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
+import { predictThreatMs, type ChaseTelegraphConfig, type ChaseTelegraphSnapshot } from './threatPrediction';
+import type { ThreatAssessor } from './patience';
 
 const TELEGRAPH_MS = 400; // = dodge window
 const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
 
-export class AssaltanteController {
+export class AssaltanteController implements ThreatAssessor {
   state: EnemyState = 'idle';
   private phaseElapsedMs = 0;
   private activeOppId: string | null = null;
@@ -56,6 +58,27 @@ export class AssaltanteController {
     if (this.phaseElapsedMs < TELEGRAPH_MS) return null;
     const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
     return directionalSector(center, this._attackDirection, ATTACK_REACH + this.width / 2, ATTACK_HALF_ANGLE_RAD);
+  }
+
+  msUntilThreatens(target: AABB, horizonMs: number): number | null {
+    const snapshot: ChaseTelegraphSnapshot = {
+      state: this.state,
+      phaseElapsedMs: this.phaseElapsedMs,
+      position: this._position,
+      width: this.width,
+      height: this.height,
+      attackDirection: this._attackDirection,
+    };
+    const config: ChaseTelegraphConfig = {
+      attackRange: ATTACK_RANGE,
+      chaseSpeedPxPerSec: ASSALTANTE_CHASE_SPEED,
+      telegraphMs: TELEGRAPH_MS,
+      swingMs: SWING_MS,
+      recoveryMs: RECOVERY_MS,
+      reach: ATTACK_REACH + this.width / 2,
+      halfAngleRad: ATTACK_HALF_ANGLE_RAD,
+    };
+    return predictThreatMs(config, snapshot, target, horizonMs);
   }
 
   step(stepMs: number, playerPosition: Vec2): void {
