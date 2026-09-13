@@ -1,8 +1,8 @@
 # Instrumento de Perfil Adaptativo — Documento de Referência
 
-**Atualizado:** 06/09/2026
+**Atualizado:** 12/09/2026
 **Stack:** Phaser 3 · TypeScript · Vite · Vitest
-**Estágio:** Instrumentação — passo 3,5 de 7
+**Estágio:** Instrumentação completa (passos 1–5 de 7) — adaptação (passos 6–7) ainda não iniciada
 
 Roguelike isométrico cuja contribuição de pesquisa não é o jogo, mas um instrumento de medição: um perfil de sete dimensões que detecta o que o jogador evita, e um boss que usa esse perfil para forçar prática da habilidade evitada.
 
@@ -128,15 +128,15 @@ Nenhum corte a priori. As dimensões que sobrevivem são resultado empírico do 
 
 | # | Dimensão | Fam. | Distribuição ou razão | Status | Bloqueio |
 |---|---|---|---|---|---|
-| 1 | Repertório de armas | B | uso entre as armas disponíveis · **n = 3** | ❌ Não iniciada | só existe uma "arma" hoje |
-| 2 | Repertório de ações | B | `{leve, pesado, carregado, arremesso, utilitário}` · **n = 5** | 🔵 Em spec | sub-projeto atual |
+| 1 | Repertório de armas | B | uso entre as armas disponíveis · **n = 3** | ✅ Ligada | — |
+| 2 | Repertório de ações | B | `{leve, pesado, carregado, arremesso, utilitário}` · **n = 5** | ✅ Ligada | — |
 | 3 | Aproveitamento de punição | A | punições `taken` / `taken+missed+expired` | ✅ Ligada | — |
-| 4 | Repertório defensivo | B | `{esquiva, bloqueio, recuo, contra-ataque}` · **n = 4** | ❌ Não iniciada | só a esquiva existe |
+| 4 | Repertório defensivo | B | `{esquiva, bloqueio, recuo, contra-ataque}` · **n = 4** | ✅ Ligada | — |
 | 5 | Distância operacional | A | tempo em alcance corpo-a-corpo / tempo total | ✅ Ligada | — |
 | 6 | Paciência / comprometimento | A | ataques em janela segura / total de ataques | ✅ Ligada | — |
 | 7 | Uso de espaço | A | oportunidades `reposition` `taken` / total | ❌ Fora de escopo | sem `OppType reposition` · sem eixo Z |
 
-Só **três das sete** estão conectadas a dados reais do jogo. As três da Família B — justamente as que medem vício e criatividade — dependem de conteúdo de jogo que ainda não existe: o jogador tem duas ações e uma arma.
+**Seis das sete** estão conectadas a dados reais do jogo — a arco+arma pesada+troca (dim 1), o registro de ações com entropia (dim 2) e o kit defensivo (dim 4) fecharam a Família B inteira. Só a dim 7 (uso de espaço) segue fora de escopo, por decisão de arquitetura (sem eixo Z), não por falta de instrumentação.
 
 > **RISCO ACEITO**
 >
@@ -146,9 +146,9 @@ Só **três das sete** estão conectadas a dados reais do jogo. As três da Fam�
 
 ## 4. Estágio atual
 
-Roadmap oficial de sete passos. A metade de instrumentação está sólida; a metade de adaptação ainda não existe em código.
+Roadmap oficial de sete passos. A metade de instrumentação está completa; a metade de adaptação ainda não existe em código.
 
-**4 completos · 3 não iniciados**
+**5 completos · 2 não iniciados**
 
 | # | Passo | Status | Nota |
 |---|---|---|---|
@@ -156,7 +156,7 @@ Roadmap oficial de sete passos. A metade de instrumentação está sólida; a me
 | 2 | Harness verificando que os desfechos fecham com as aberturas | ✅ Feito | |
 | 3 | Acumuladores decaídos + `profile.snapshot` | ✅ Feito | |
 | 4 | Família A — dims 3, 5, 6, 7 | ✅ Feito no escopo | 3, 5 e 6 ligadas; 7 fora de escopo (sem eixo Z) |
-| 5 | Família B — dims 1, 2, 4 | 🔵 Em spec | Estudo 1 pode rodar ao fim deste passo |
+| 5 | Família B — dims 1, 2, 4 | ✅ Feito | 1, 2 e 4 ligadas via entropia de repertório (arma/ação/defesa) — Estudo 1 já pode rodar |
 | 6 | Seleção de déficit-alvo com histerese | ❌ Não iniciado | `snapshot.target` é sempre `null` hoje |
 | 7 | Pesos de regra, boss adaptativo e preditor | ❌ Não iniciado | `snapshot.lambda` é sempre `0` hoje |
 
@@ -173,7 +173,7 @@ Roadmap oficial de sete passos. A metade de instrumentação está sólida; a me
 | `core/` | loop de timestep fixo 60 Hz, PRNG semeado, barramento de eventos tipado | ✅ Completo |
 | `combat/` | hitboxes AABB, ações, estados do jogador e do Assaltante, `Encounter` | ✅ Completo p/ escopo |
 | `opportunity/` | `OpportunitySystem` com 4 desfechos; tipos `dodge` e `punish` | ✅ Completo |
-| `profile/` | `ProfileAccumulator` genérico; 3 de 7 dimensões ligadas | 🟡 Parcial |
+| `profile/` | `ProfileAccumulator` genérico; 6 de 7 dimensões ligadas (7 fora de escopo) | ✅ Completo p/ escopo |
 | `ai/` | 2 regras fixas do Assaltante; nada lê o perfil | 🟡 Mínimo |
 | `visual/` | projeção isométrica 2:1, tiles reais, entidades como retângulos | ✅ Completo p/ escopo |
 | `debug/` | overlay de oportunidades + HUD de contadores | ✅ Completo |
@@ -188,11 +188,11 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 
 | # | Sub-projeto | Entrega | Status |
 |---|---|---|---|
-| 1 | Registro de ações + espada&nbsp;+&nbsp;escudo | **dim 2** — refactor do `PlayerController` para modelo data-driven; ações leve, pesado e carregado; entropia ligada ao snapshot | 🔵 Spec pronta |
-| 2 | Arco + arma pesada + troca de arma | **dim 1** — 3 armas carregadas simultaneamente, troca com recovery de ~250 ms cancelável por esquiva | Planejado |
-| 3 | Kit defensivo + barra de postura | **dim 4** — recuo, bloqueio e parry universais; escudo com bloqueio superior; postura quebra e causa stagger | Planejado |
-| 4 | Predicado de "janela segura" | **dim 6** — ausência de hitbox ativa ou telegrafada que alcance o jogador dentro do recovery da ação escolhida | Planejado |
-| 5 | Seleção de déficit-alvo com histerese | Primeira vez que o perfil influencia alguma coisa. Estudo 1 roda antes daqui. | Planejado |
+| 1 | Registro de ações + espada&nbsp;+&nbsp;escudo | **dim 2** — refactor do `PlayerController` para modelo data-driven; ações leve, pesado e carregado; entropia ligada ao snapshot | ✅ Feito |
+| 2 | Arco + arma pesada + troca de arma | **dim 1** — 3 armas carregadas simultaneamente, troca com recovery de ~250 ms cancelável por esquiva | ✅ Feito |
+| 3 | Kit defensivo + barra de postura | **dim 4** — recuo, bloqueio e parry universais; escudo com bloqueio superior; postura quebra e causa stagger | ✅ Feito |
+| 4 | Predicado de "janela segura" | **dim 6** — ausência de hitbox ativa ou telegrafada que alcance o jogador dentro do commitment da ação escolhida | ✅ Feito |
+| 5 | Seleção de déficit-alvo com histerese | Primeira vez que o perfil influencia alguma coisa. Estudo 1 já pode rodar agora, antes deste passo (6/7 dimensões ligadas). | Planejado |
 | 6 | Boss adaptativo: pesos de regra + preditor N-gram | A contribuição central da tese em código | Planejado |
 
 ### 5.1 Decisões de design do repertório
@@ -349,11 +349,10 @@ Decisões que ainda não foram tomadas, com o que cada uma bloqueia.
 | Humanos vs. agentes sintéticos como participantes | Metodológica | Sem impacto no formato de dados — o campo `participant` serve aos dois. Impacta cálculo amostral e comitê de ética. |
 | Retenção em segunda sessão | Metodológica | Adiada. Esquema já preparado (mesmo `participant`, `session_idx` diferente). |
 | Eixo Z real no combate | Arquitetural | Dim 7 inteira. Decisão grande — mudá-la invalidaria parte do `OpportunitySystem`, das hitboxes e da projeção isométrica. |
-| Predicado de "janela segura" | Design | Dim 6. Definição esboçada existe; falta virar código. |
 | Verificação bibliográfica de 11 entradas | Revisão de literatura | Nada em código. Pendência de escrita. |
 | Telemetria rica (heatmap, direção de dash) | Escopo | Nada — mas a recomendação registrada é **fechar o loop mínimo antes de expandir a coleta**, para não remodelar telemetria depois que a adaptação estiver rodando. |
 | Redesign de HUD (gameplay vs. dev mode) | Design/UX | Nada bloqueado, mas registrado 07/09/2026: a HUD atual é texto cru mal dimensionado. Quando for redesenhada, precisa de dois modos — **gameplay** (o mínimo: ataque, esquiva, o que um jogador comum precisa ver) e **dev** (tudo: todos os inputs, dados sendo coletados pelo perfil, behavior tree do boss e suas decisões). Até lá, qualquer adição de HUD (ex: kit defensivo) fica no estilo texto cru já existente, sem investir em polimento visual prematuro. |
 
-### 9.1 O maior bloqueio não é o boss
+### 9.1 O maior bloqueio agora é o boss
 
-Três das sete dimensões — 1, 2 e 4, justamente as que medem vício e criatividade — estão bloqueadas por **falta de conteúdo de jogo, não por falta de algoritmo**. O jogador tem duas ações e uma arma; a entropia sobre isso é matematicamente quase degenerada. Nenhuma quantidade de trabalho no boss resolve isso, e é por isso que a trilha de repertório (§5) vem antes da trilha de adaptação.
+**Atualizado 12/09/2026:** a trilha de repertório (§5, sub-projetos 1-4) fechou as três dimensões da Família B (1, 2 e 4) — o jogador hoje tem 3 armas, 5 tipos de ação e 4 respostas defensivas, todas medindo entropia real. Isso resolve o que antes era o maior bloqueio (falta de conteúdo de jogo). O gargalo mudou de lugar: agora é a ponte déficit-alvo → peso de regra → comportamento do inimigo (passos 6-7 do §4), que ainda não existe em código — ver o quadro "LEITURA HONESTA" em §4.
