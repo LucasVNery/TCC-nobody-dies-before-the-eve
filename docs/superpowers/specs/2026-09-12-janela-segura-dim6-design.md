@@ -277,8 +277,8 @@ Três camadas, mesmo padrão do resto de `combat/`:
 - `msUntilThreatens()` depois de `step()` colocar o Assaltante em `attacking`, mirado corretamente → não-`null`, valor bate com `TELEGRAPH_MS - phaseElapsedMs`.
 
 **`encounter.test.ts`** (o critério de pronto mais importante — §2.3 item 4):
-- Simular o Assaltante longe/parado, iniciar um ataque do jogador (`sword_shield.light`), verificar `profile.record('patience', 1, 1)` foi chamado (via `snapshot()` depois de `applyRoomBoundary()`, `domain('patience', 'trait') === 1`).
-- Simular o Assaltante em pleno telegraph mirado no jogador, iniciar um ataque do jogador, verificar `domain('patience', 'trait') === 0`.
+- Simular o Assaltante longe/parado, iniciar um ataque do jogador (`sword_shield.light`), chamar `applyRoomBoundary()` e verificar via `snapshot('room.exit')` que `counts.patience` é `[1, 1]` (contagem bruta, não `domain()` — que aplica suavização Beta e não seria exatamente `1` mesmo com um único registro paciente).
+- Simular o Assaltante em pleno telegraph mirado no jogador, iniciar um ataque do jogador, verificar `counts.patience` é `[0, 1]`.
 - Teste de equivalência: para um cenário fixo (Assaltante em `recovering` com X ms restantes), comparar o veredito de `predictThreatMs` contra rodar `Encounter.step()` de verdade pelo mesmo `commitmentMs` e checar se um hit realmente ocorreu (`player.hit_unmitigated` emitido ou não) — os dois devem concordar.
 
 ---
