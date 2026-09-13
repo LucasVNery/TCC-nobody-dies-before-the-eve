@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { Encounter } from './encounter';
 import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
+import { resolveAction, totalCommitmentMs } from './actionRegistry';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -512,10 +513,78 @@ describe('Encounter', () => {
     expect(encounter.assaltante.state).toBe('attacking');
     runFor(encounter, 336); // advance deep into the telegraph (still < TELEGRAPH_MS)
 
-    encounter.player.tryAction('sword_shield.light'); // commitmentMs = 350; telegraph ends within that window
+    encounter.player.tryAction('sword_shield.light'); // commitmentMs = 350; active phase begins within that window
 
     encounter.profile.applyRoomBoundary();
     const snap = encounter.profile.snapshot('room.exit');
     expect(snap.counts.patience).toEqual([0, 1]);
+  });
+
+  describe('predictThreatMs vs. the real loop (spec §2.3 criterion 4)', () => {
+    // Assaltante starts at distance 150, outside ATTACK_RANGE (60), so it
+    // must CHASE before it can telegraph — this is the branch of
+    // predictThreatMs that a pure telegraph-only test (like the two above)
+    // never exercises. With ASSALTANTE_CHASE_SPEED=90px/s:
+    //   closeMs = (150 - 60) / 90 * 1000 = 1000ms
+    //   predictThreatMs = closeMs + TELEGRAPH_MS = 1000 + 400 = 1400ms
+    // The real 16ms-step loop re-checks distance (and only *then* moves)
+    // every tick, so it crosses into ATTACK_RANGE one tick later than the
+    // continuous model assumes, and its telegraph clock starts a tick after
+    // that — the discrete loop's attack actually goes active at 1408ms, 8ms
+    // (about half a step) after the continuous prediction. This is the
+    // "conservative" discretization bias documented in spec §10: the
+    // predictor never claims *more* safety than the real loop delivers.
+    const DISTANCE = 150;
+
+    it('agrees with reality when neither model reaches the threat within the horizon (negative case)', () => {
+      const encounter = new Encounter(
+        { x: 0, y: 0, width: 20, height: 20 },
+        { x: DISTANCE, y: 0, width: 20, height: 20 },
+      );
+      // A real registry action: sword_shield.heavy = 220+120+300 = 640ms,
+      // far short of the ~1400-1408ms it'd take the Assaltante to threaten —
+      // this exercises predictThreatMs's CHASE-branch early return
+      // (`elapsed + closeMs > horizonMs`) without ever reaching the
+      // attacking-phase / sector-overlap logic.
+      const commitmentMs = totalCommitmentMs(resolveAction('sword_shield.heavy'));
+      expect(commitmentMs).toBe(640);
+
+      const prediction = encounter.assaltante.msUntilThreatens(encounter.player.hurtbox(), commitmentMs);
+
+      const hitEvents: unknown[] = [];
+      encounter.bus.on('player.hit_unmitigated', (e) => hitEvents.push(e));
+      runFor(encounter, commitmentMs);
+
+      expect(prediction).toBeNull();
+      expect(hitEvents).toHaveLength(0);
+      expect(prediction !== null).toBe(hitEvents.length > 0);
+    });
+
+    it('agrees with reality when both models reach the threat within the horizon (positive case)', () => {
+      const encounter = new Encounter(
+        { x: 0, y: 0, width: 20, height: 20 },
+        { x: DISTANCE, y: 0, width: 20, height: 20 },
+      );
+      // Comfortably above both the continuous prediction (1400ms) and the
+      // real loop's actual active-at time (1408ms), with margin well beyond
+      // the one-step discretization bias — not a knife's-edge horizon that
+      // would make this test flaky.
+      const horizonMs = 1500;
+
+      const prediction = encounter.assaltante.msUntilThreatens(encounter.player.hurtbox(), horizonMs);
+
+      const hitEvents: unknown[] = [];
+      encounter.bus.on('player.hit_unmitigated', (e) => hitEvents.push(e));
+      runFor(encounter, horizonMs);
+
+      // If predictThreatMs had a subtly wrong reach/geometry adjustment (e.g.
+      // the sector's reach or the closing-distance math were off), this is
+      // the branch that would catch it: a wrong reach could make the
+      // predicted sector miss the target (flipping this to null) or the real
+      // sweep miss/hit differently than predicted.
+      expect(prediction).toBe(1400);
+      expect(hitEvents.length).toBeGreaterThan(0);
+      expect(prediction !== null).toBe(hitEvents.length > 0);
+    });
   });
 });
