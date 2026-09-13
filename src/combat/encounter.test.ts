@@ -488,4 +488,34 @@ describe('Encounter', () => {
     const snap = encounter.profile.snapshot('room.exit');
     expect(snap.counts.defensive_repertoire).toBeUndefined(); // no dim-4 label — the window resolved as a hit, not a retreat
   });
+
+  it('an attack started while the Assaltante is far away and idle is recorded as a patient window', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 2000, y: 0, width: 20, height: 20 },
+    );
+
+    encounter.player.tryAction('sword_shield.light'); // commitmentMs = 350; Assaltante can't possibly close 1940px in time
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.patience).toEqual([1, 1]);
+  });
+
+  it('an attack started while the Assaltante is mid-telegraph and aimed at the player is recorded as not patient', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+
+    encounter.step(STEP_MS); // Assaltante enters 'attacking', aimed at the player
+    expect(encounter.assaltante.state).toBe('attacking');
+    runFor(encounter, 336); // advance deep into the telegraph (still < TELEGRAPH_MS)
+
+    encounter.player.tryAction('sword_shield.light'); // commitmentMs = 350; telegraph ends within that window
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.patience).toEqual([0, 1]);
+  });
 });

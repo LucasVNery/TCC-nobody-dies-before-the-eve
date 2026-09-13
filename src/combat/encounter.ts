@@ -8,6 +8,8 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { sectorOverlapsBox } from './sector';
 import { ATTACK_REACH } from './movementDefs';
 import type { AABB } from './types';
+import { resolveAction, totalCommitmentMs } from './actionRegistry';
+import { isPatientAttack } from './patience';
 
 export class Encounter {
   readonly bus: EventBus<GameEvents>;
@@ -32,6 +34,10 @@ export class Encounter {
       if (this.assaltante.state === 'attacking') {
         this.assaltante.onPlayerWrongAction(e.actionId);
       }
+
+      const commitmentMs = totalCommitmentMs(resolveAction(e.actionId));
+      const isPatient = isPatientAttack(commitmentMs, [this.assaltante], this.player.hurtbox());
+      this.profile.record('patience', isPatient ? 1 : 0, 1);
     });
 
     this.bus.on('player.dodge', () => {
