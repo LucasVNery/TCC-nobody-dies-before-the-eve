@@ -148,14 +148,14 @@ Só **três das sete** estão conectadas a dados reais do jogo. As três da Fam�
 
 Roadmap oficial de sete passos. A metade de instrumentação está sólida; a metade de adaptação ainda não existe em código.
 
-**3 completos · 1 parcial · 3 não iniciados**
+**4 completos · 3 não iniciados**
 
 | # | Passo | Status | Nota |
 |---|---|---|---|
 | 1 | `opp.open`/`opp.close` com os 4 desfechos e precedência | ✅ Feito | |
 | 2 | Harness verificando que os desfechos fecham com as aberturas | ✅ Feito | |
 | 3 | Acumuladores decaídos + `profile.snapshot` | ✅ Feito | |
-| 4 | Família A — dims 3, 5, 6, 7 | 🟡 Parcial | 3, 5 e 6 ligadas; 7 fora de escopo (sem eixo Z) |
+| 4 | Família A — dims 3, 5, 6, 7 | ✅ Feito no escopo | 3, 5 e 6 ligadas; 7 fora de escopo (sem eixo Z) |
 | 5 | Família B — dims 1, 2, 4 | 🔵 Em spec | Estudo 1 pode rodar ao fim deste passo |
 | 6 | Seleção de déficit-alvo com histerese | ❌ Não iniciado | `snapshot.target` é sempre `null` hoje |
 | 7 | Pesos de regra, boss adaptativo e preditor | ❌ Não iniciado | `snapshot.lambda` é sempre `0` hoje |

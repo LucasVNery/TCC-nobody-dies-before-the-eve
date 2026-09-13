@@ -37,6 +37,11 @@ export class Encounter {
 
       const commitmentMs = totalCommitmentMs(resolveAction(e.actionId));
       const isPatient = isPatientAttack(commitmentMs, [this.assaltante], this.player.hurtbox());
+      // Dim 6's denominator is meant to be "total attacks initiated." Every
+      // ActionType in today's registry is an attack, so this is safe as-is;
+      // if a non-attack action type (e.g. a future 'utility' heal/guard-stance)
+      // is ever added, this handler needs a guard on e.actionType to avoid
+      // polluting the denominator with non-attack actions.
       this.profile.record('patience', isPatient ? 1 : 0, 1);
     });
 

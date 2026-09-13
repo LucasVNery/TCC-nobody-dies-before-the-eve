@@ -1,3 +1,4 @@
+// src/combat/threatPrediction.ts
 import type { AABB, EnemyState, Vec2 } from './types';
 import { normalizeVelocity } from './movement';
 import { directionalSector, sectorOverlapsBox } from './sector';
@@ -67,6 +68,9 @@ export function predictThreatMs(
       const timeToActive = Math.max(0, config.telegraphMs - phaseElapsedMs);
       const timeToRecover = config.telegraphMs + config.swingMs - phaseElapsedMs;
 
+      // A hit landing at exactly the last millisecond of the horizon still
+      // counts as a threat, not as safe — the player is considered locked
+      // through that instant, so `<=` (not `<`) is intentional here.
       if (elapsed + timeToActive <= horizonMs && sectorOverlapsBox(sector, target)) {
         return elapsed + timeToActive;
       }

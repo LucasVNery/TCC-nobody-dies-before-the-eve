@@ -26,7 +26,3 @@ export const POISE_REGEN_PER_SECOND = 50; // recarga total em ~2s depois do dela
 export const STAGGER_MS = 350;
 export const PARRY_WINDOW_MS = 150; // guarda levantada há menos que isso quando o golpe conecta = parry
 export const PARRY_BONUS_RECOVERY_MS = 750; // vs. RECOVERY_MS = 500 em assaltanteController.ts
-
-export function totalDurationMs(t: ActionPhaseTiming): number {
-  return t.startupMs + t.activeMs + t.recoveryMs;
-}
