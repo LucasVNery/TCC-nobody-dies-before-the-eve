@@ -133,10 +133,10 @@ Nenhum corte a priori. As dimensões que sobrevivem são resultado empírico do 
 | 3 | Aproveitamento de punição | A | punições `taken` / `taken+missed+expired` | ✅ Ligada | — |
 | 4 | Repertório defensivo | B | `{esquiva, bloqueio, recuo, contra-ataque}` · **n = 4** | ❌ Não iniciada | só a esquiva existe |
 | 5 | Distância operacional | A | tempo em alcance corpo-a-corpo / tempo total | ✅ Ligada | — |
-| 6 | Paciência / comprometimento | A | ataques em janela segura / total de ataques | 🟡 Bloqueada | "janela segura" sem predicado formal |
+| 6 | Paciência / comprometimento | A | ataques em janela segura / total de ataques | ✅ Ligada | — |
 | 7 | Uso de espaço | A | oportunidades `reposition` `taken` / total | ❌ Fora de escopo | sem `OppType reposition` · sem eixo Z |
 
-Só **duas das sete** estão conectadas a dados reais do jogo. As três da Família B — justamente as que medem vício e criatividade — dependem de conteúdo de jogo que ainda não existe: o jogador tem duas ações e uma arma.
+Só **três das sete** estão conectadas a dados reais do jogo. As três da Família B — justamente as que medem vício e criatividade — dependem de conteúdo de jogo que ainda não existe: o jogador tem duas ações e uma arma.
 
 > **RISCO ACEITO**
 >
@@ -155,7 +155,7 @@ Roadmap oficial de sete passos. A metade de instrumentação está sólida; a me
 | 1 | `opp.open`/`opp.close` com os 4 desfechos e precedência | ✅ Feito | |
 | 2 | Harness verificando que os desfechos fecham com as aberturas | ✅ Feito | |
 | 3 | Acumuladores decaídos + `profile.snapshot` | ✅ Feito | |
-| 4 | Família A — dims 3, 5, 6, 7 | 🟡 Parcial | 3 e 5 ligadas; 6 e 7 bloqueadas por decisões de design |
+| 4 | Família A — dims 3, 5, 6, 7 | 🟡 Parcial | 3, 5 e 6 ligadas; 7 fora de escopo (sem eixo Z) |
 | 5 | Família B — dims 1, 2, 4 | 🔵 Em spec | Estudo 1 pode rodar ao fim deste passo |
 | 6 | Seleção de déficit-alvo com histerese | ❌ Não iniciado | `snapshot.target` é sempre `null` hoje |
 | 7 | Pesos de regra, boss adaptativo e preditor | ❌ Não iniciado | `snapshot.lambda` é sempre `0` hoje |
@@ -173,7 +173,7 @@ Roadmap oficial de sete passos. A metade de instrumentação está sólida; a me
 | `core/` | loop de timestep fixo 60 Hz, PRNG semeado, barramento de eventos tipado | ✅ Completo |
 | `combat/` | hitboxes AABB, ações, estados do jogador e do Assaltante, `Encounter` | ✅ Completo p/ escopo |
 | `opportunity/` | `OpportunitySystem` com 4 desfechos; tipos `dodge` e `punish` | ✅ Completo |
-| `profile/` | `ProfileAccumulator` genérico; 2 de 7 dimensões ligadas | 🟡 Parcial |
+| `profile/` | `ProfileAccumulator` genérico; 3 de 7 dimensões ligadas | 🟡 Parcial |
 | `ai/` | 2 regras fixas do Assaltante; nada lê o perfil | 🟡 Mínimo |
 | `visual/` | projeção isométrica 2:1, tiles reais, entidades como retângulos | ✅ Completo p/ escopo |
 | `debug/` | overlay de oportunidades + HUD de contadores | ✅ Completo |

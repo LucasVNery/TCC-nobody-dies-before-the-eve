@@ -124,8 +124,6 @@ confiança(s) = oportunidades_s / (oportunidades_s + κ)              κ = 10
 
 **Nota sobre 5 e 6:** não passam pelo `OpportunitySystem` — o denominador é tempo ou contagem de ações, não janela anotada. São mais baratas de instrumentar, e por isso devem estabilizar mais rápido no ICC. A confiança delas usa `κ` sobre a mesma contagem (segundos de combate para a 5, ataques para a 6).
 
-**Definição pendente de "janela segura" (dim 6):** ausência de hitbox inimiga ativa ou telegrafada que alcance a posição do jogador dentro do tempo de recuperação da ação escolhida. Precisa virar predicado implementável antes do Estudo 1.
-
 ### 3.2 Família B — entropia de repertório (dims 1, 2, 4)
 
 **Não têm numerador nem denominador de oportunidade.** O valor é a entropia normalizada diretamente:
@@ -318,7 +316,6 @@ O Estudo 1 pode rodar ao fim do passo 5 — não precisa da adaptação funciona
 
 **Novas, criadas por esta especificação:**
 
-- Predicado implementável de "janela segura" (dim 6, §3.1).
 - Dimensionamento do orçamento de oportunidades para 7 dimensões (§5).
 - Conjunto fechado de `InvalidReason` (§2.2 dá 6 casos; confirmar se é exaustivo depois do protótipo).
 - Valores de `base`, `min`, `max` para cada `p_*` da BT do boss (v1 §5.3) — decisão de design, não de análise.
