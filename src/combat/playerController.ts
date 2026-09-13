@@ -12,7 +12,7 @@ import {
   STAGGER_MS,
   PARRY_WINDOW_MS,
 } from './actionDefs';
-import { resolveAction, type ActionDef } from './actionRegistry';
+import { resolveAction, totalCommitmentMs, type ActionDef } from './actionRegistry';
 import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
@@ -275,12 +275,7 @@ export class PlayerController {
     }
 
     this.phaseElapsedMs += stepMs;
-    const totalMs =
-      action.actionType === 'charged'
-        ? action.timing.activeMs + action.timing.recoveryMs
-        : action.timing.startupMs + action.timing.activeMs + action.timing.recoveryMs;
-
-    if (this.phaseElapsedMs >= totalMs) {
+    if (this.phaseElapsedMs >= totalCommitmentMs(action)) {
       this.cancelAction();
     }
   }

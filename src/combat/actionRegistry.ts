@@ -122,3 +122,9 @@ export function findWeaponAction(weaponId: string, actionType: ActionType): Acti
   }
   return undefined;
 }
+
+export function totalCommitmentMs(action: ActionDef): number {
+  return action.actionType === 'charged'
+    ? action.timing.activeMs + action.timing.recoveryMs
+    : action.timing.startupMs + action.timing.activeMs + action.timing.recoveryMs;
+}

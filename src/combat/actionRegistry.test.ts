@@ -8,6 +8,7 @@ import {
   HEAVY_WEAPON_ACTIONS,
   BOW_ACTIONS,
   findWeaponAction,
+  totalCommitmentMs,
 } from './actionRegistry';
 
 describe('actionRegistry', () => {
@@ -42,6 +43,16 @@ describe('actionRegistry', () => {
     expect(ACTION_REGISTRY.size).toBe(
       SWORD_SHIELD_ACTIONS.length + HEAVY_WEAPON_ACTIONS.length + BOW_ACTIONS.length,
     );
+  });
+
+  it('totalCommitmentMs sums startup+active+recovery for a non-charged action', () => {
+    const light = resolveAction('sword_shield.light'); // 100+100+150
+    expect(totalCommitmentMs(light)).toBe(350);
+  });
+
+  it('totalCommitmentMs is active+recovery only for a charged action (startup already spent by hold time)', () => {
+    const charged = resolveAction('sword_shield.charged'); // 140+350, ignoring timing.startupMs
+    expect(totalCommitmentMs(charged)).toBe(490);
   });
 });
 
