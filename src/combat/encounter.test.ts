@@ -679,9 +679,15 @@ describe('Encounter', () => {
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 30, y: 0, width: 20, height: 20 },
     );
+    const hurts: Array<{ dmg: number; hp_after: number; actionId: string }> = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
     encounter.player.takeDamage(90);
     encounter.resetPlayer({ x: 0, y: 0 });
     expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
     expect(encounter.player.state).toBe('idle');
+
+    encounter.player.tryAction('sword_shield.light'); // in range, before the Assaltante's telegraph ends
+    runFor(encounter, 350);
+    expect(hurts).toEqual([{ dmg: 10, hp_after: ASSALTANTE_MAX_HP - 10, actionId: 'sword_shield.light' }]);
   });
 });
