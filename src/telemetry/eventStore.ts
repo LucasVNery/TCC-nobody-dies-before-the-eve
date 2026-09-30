@@ -79,7 +79,22 @@ export class IndexedDbEventStore implements EventStore {
       db.createObjectStore(EVENTS, { keyPath: ['session_id', 'seq'] });
       db.createObjectStore(META);
     };
-    return new IndexedDbEventStore(await request(req));
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      let gaveUp = false;
+      req.onsuccess = () => {
+        // Opened after we gave up on it: don't leak the connection.
+        if (gaveUp) req.result.close();
+        else resolve(req.result);
+      };
+      req.onerror = () => reject(req.error);
+      // Another tab holds an older-version connection open: reject instead of
+      // hanging, so boot falls back to the in-memory store.
+      req.onblocked = () => {
+        gaveUp = true;
+        reject(new Error(`IndexedDB "${name}" open blocked by another connection`));
+      };
+    });
+    return new IndexedDbEventStore(db);
   }
 
   async append(events: readonly LoggedEvent[]): Promise<void> {
