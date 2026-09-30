@@ -227,7 +227,7 @@ O roadmap oficial tem sete passos. A instrumentação dentro do jogo está compl
 |---|---|---|---|
 | 1 | `opp.open`/`opp.close` com os 4 desfechos e precedência | ✅ Feito | |
 | 2 | Harness verificando que os desfechos fecham com as aberturas | ✅ Feito | |
-| 3 | Acumuladores decaídos + `profile.snapshot` | ✅ Feito (como API) | o formato existe e é testado, mas **nenhum código de jogo chama** `applyRoomBoundary()`, `applyEncounterBoundary()`, `snapshot()` ou `resetSession()`, porque ainda não existem salas nem sessões |
+| 3 | Acumuladores decaídos + `profile.snapshot` | ✅ Feito | desde o 5a, o `RunDirector` chama `applyEncounterBoundary()`/`applyRoomBoundary()`/`snapshot('room.exit')` no fim de cada encontro/sala/run; `resetSession()` só pelo F2 (marcador `obs.reset`) |
 | 4 | Família A: dims 3, 5, 6, 7 | ✅ Feito no escopo | 3, 5 e 6 ligadas; 7 fora de escopo |
 | 5 | Família B: dims 1, 2, 4 | ✅ Feito | entropia de repertório de arma/ação/defesa |
 | 6 | Seleção de déficit-alvo com histerese | ❌ Não iniciado | `snapshot.target` é sempre `null` |
@@ -254,7 +254,7 @@ O roadmap oficial tem sete passos. A instrumentação dentro do jogo está compl
 | `visual/` | projeção isométrica 2:1, tiles reais, **sprites 3D pré-renderizados em 8 direções** (idle/walk) | ✅ Completo p/ escopo |
 | `debug/` | overlay de oportunidades, HUD de contadores, desenho de hurtbox/leque/alcance | ✅ Completo |
 | `scenes/` | `ArenaScene`, a única cena e a única camada que enxerga lógica e visual | ✅ |
-| telemetria/persistência | exportação de eventos e snapshots | ❌ Não existe |
+| `game/` + `telemetry/` | `RunDirector` (encontro → sala → run); log em duas camadas (`obs.*` + contexto) em IndexedDB; reconstrução exata do perfil ao abrir; export/import `.ndjson` (F8/F9) | ✅ Completo (5a) |
 
 O determinismo é um ativo de pesquisa deliberado: **um único PRNG semeado**, sem `Math.random()` em nenhuma camada de lógica, e loop de timestep fixo desacoplado do framerate de render. Isso torna qualquer sessão reproduzível por replay. *Observação:* a lógica atual é 100% determinística mesmo sem consumir o PRNG, porque nenhuma regra ainda sorteia nada. O PRNG está pronto para a roleta ponderada do boss (passo 7).
 
@@ -291,7 +291,7 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 | # | Sub-projeto | Entrega | Status |
 |---|---|---|---|
 | — | Correção de direção dos sprites | inversão de linha removida e `ROW_ROTATION_OFFSET = 4`; Assaltante olha para a direção da perseguição; remoção do "manequim fantasma" no Blender | ✅ `7d48c4e` |
-| 5a | **Telemetria persistente e ciclo de runs** | HP, morte, encontros (Assaltante morre), salas (K = 3 encontros), runs (jogador morre); fronteiras de decaimento chamadas pelo jogo; log em duas camadas (observações do perfil + contexto) em IndexedDB; reconstrução do perfil ao abrir; resetar/exportar/importar `.ndjson`. Spec: `docs/superpowers/specs/2026-09-30-telemetria-runs-5a-design.md` | Spec escrita |
+| 5a | **Telemetria persistente e ciclo de runs** | HP, morte, encontros (Assaltante morre), salas (K = 3 encontros), runs (jogador morre); fronteiras de decaimento chamadas pelo jogo; log em duas camadas (observações do perfil + contexto) em IndexedDB; reconstrução do perfil ao abrir; resetar/exportar/importar `.ndjson`. Spec: `docs/superpowers/specs/2026-09-30-telemetria-runs-5a-design.md` | ✅ Implementado |
 | 5b | **Preditor sequencial** | modelo de longo prazo **sem esquecimento** (acumula com o jogo), previsão da próxima ação a partir de sequência + contexto (N-gram, §8.1), **curva de acurácia × tempo de jogo** medida offline sobre o log do 5a | Planejado |
 | 6 | **Boss inteligente** | boss que usa perfil (como joga) + previsões (o que vai fazer); a escolha de qual padrão explorar absorve o antigo passo "déficit-alvo com histerese"; validação por **ablação** (mesmo boss com e sem o modelo) | Planejado |
 

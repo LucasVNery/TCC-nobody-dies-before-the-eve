@@ -1,10 +1,14 @@
 // src/scenes/ArenaScene.ts
 import Phaser from 'phaser';
-import { Encounter } from '../combat/encounter';
 import { OpportunityOverlay } from '../debug/opportunityOverlay';
 import { HudState, type HudCounters } from '../debug/hudState';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
-import { ARENA_BOUNDS } from '../combat/movementDefs';
+import { ARENA_BOUNDS, PLAYER_MAX_HP, ASSALTANTE_MAX_HP, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
+import { createTelemetryStack, type TelemetryStack } from '../telemetry/stack';
+import { IndexedDbEventStore, MemoryEventStore, type EventStore } from '../telemetry/eventStore';
+import { loadProfileState, type BootState } from '../telemetry/bootstrap';
+import { toNdjson, importInto } from '../telemetry/ndjson';
+import { SCHEMA_VERSION, GAME_VERSION } from '../telemetry/schema';
 import { ASSET_KEYS } from '../visual/assetRegistry';
 import {
   generatePlaceholderTextures,
@@ -22,6 +26,17 @@ import type { Vec2, AABB } from '../combat/types';
 import type { AttackSector } from '../combat/sector';
 
 const STEP_MS = 1000 / 60;
+const PERSIST_INTERVAL_MS = 2000;
+
+function downloadText(filename: string, text: string): void {
+  const blob = new Blob([text], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 const HURTBOX_COLOR = 0xffffff;
 const ATTACK_HITBOX_COLOR = 0xffeb3b;
 const ATTACK_RANGE_COLOR = 0xff9800;
@@ -37,7 +52,18 @@ const WEAPON_LABELS: Record<string, string> = {
 };
 
 export class ArenaScene extends Phaser.Scene {
-  private encounter!: Encounter;
+  private stack!: TelemetryStack;
+  private store: EventStore = new MemoryEventStore();
+  private ready = false;
+  private persistWarned = false;
+  private readonly onHide = (): void => {
+    if (document.visibilityState === 'hidden') this.flushAndPersist();
+  };
+  private readonly onPageHide = (): void => this.flushAndPersist();
+
+  private get encounter() {
+    return this.stack.encounter;
+  }
   private loop!: ReturnType<typeof createFixedTimestepLoop>;
   private overlayText!: Phaser.GameObjects.Text;
   private hudText!: Phaser.GameObjects.Text;
@@ -93,10 +119,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.encounter = new Encounter(
-      { x: 100, y: 300, width: ENTITY_SIZE, height: ENTITY_SIZE },
-      { x: 400, y: 300, width: ENTITY_SIZE, height: ENTITY_SIZE },
-    );
+    this.ready = false;
 
     createGroundTilemap(this, ARENA_BOUNDS, ISO_CONFIG);
 
@@ -123,9 +146,6 @@ export class ArenaScene extends Phaser.Scene {
       color: '#ffffff',
     });
     this.overlayText.setScrollFactor(0);
-    new OpportunityOverlay(this.encounter.bus, (lines) => {
-      this.overlayText.setText(lines.length > 0 ? lines : ['(no opportunities open)']);
-    });
 
     this.hudText = this.add.text(10, 400, '', {
       fontFamily: 'monospace',
@@ -133,9 +153,6 @@ export class ArenaScene extends Phaser.Scene {
       color: '#ffffff',
     });
     this.hudText.setScrollFactor(0);
-    new HudState(this.encounter.bus, (counters) => {
-      this.hudCounters = counters;
-    });
 
     this.weaponText = this.add.text(10, 690, '', {
       fontFamily: 'monospace',
@@ -157,12 +174,11 @@ export class ArenaScene extends Phaser.Scene {
         '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
         '  Espaço     - esquiva (use durante o telegraph do boss pra i-frames)',
         '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
+        '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
       ],
       { fontFamily: 'monospace', fontSize: '13px', color: '#ffffff' },
     );
     controlsText.setScrollFactor(0);
-
-    this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => this.encounter.step(stepMs));
 
     this.input.mouse?.disableContextMenu();
 
@@ -180,14 +196,14 @@ export class ArenaScene extends Phaser.Scene {
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
-    this.keys.weapon1.on('down', () => this.encounter.player.switchWeapon('sword_shield'));
-    this.keys.weapon2.on('down', () => this.encounter.player.switchWeapon('bow'));
-    this.keys.weapon3.on('down', () => this.encounter.player.switchWeapon('heavy_weapon'));
+    this.keys.weapon1.on('down', () => this.ready && this.encounter.player.switchWeapon('sword_shield'));
+    this.keys.weapon2.on('down', () => this.ready && this.encounter.player.switchWeapon('bow'));
+    this.keys.weapon3.on('down', () => this.ready && this.encounter.player.switchWeapon('heavy_weapon'));
     this.keys.charged.on('down', () => this.tryEquippedAction('charged'));
-    this.keys.charged.on('up', () => this.encounter.player.releaseAction());
-    this.keys.dodge.on('down', () => this.encounter.player.tryDodge());
-    this.keys.guard.on('down', () => this.encounter.player.startBlock());
-    this.keys.guard.on('up', () => this.encounter.player.stopBlock());
+    this.keys.charged.on('up', () => this.ready && this.encounter.player.releaseAction());
+    this.keys.dodge.on('down', () => this.ready && this.encounter.player.tryDodge());
+    this.keys.guard.on('down', () => this.ready && this.encounter.player.startBlock());
+    this.keys.guard.on('up', () => this.ready && this.encounter.player.stopBlock());
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
@@ -196,6 +212,17 @@ export class ArenaScene extends Phaser.Scene {
         this.tryEquippedAction('heavy');
       }
     });
+
+    keyboard.addCapture([
+      Phaser.Input.Keyboard.KeyCodes.F2,
+      Phaser.Input.Keyboard.KeyCodes.F8,
+      Phaser.Input.Keyboard.KeyCodes.F9,
+    ]);
+    keyboard.on('keydown-F2', () => {
+      if (this.ready) this.stack.recording.resetSession();
+    });
+    keyboard.on('keydown-F8', () => void this.exportHistory());
+    keyboard.on('keydown-F9', () => this.importHistory());
 
     const arenaCorners: Vec2[] = [
       { x: ARENA_BOUNDS.x, y: ARENA_BOUNDS.y },
@@ -215,9 +242,111 @@ export class ArenaScene extends Phaser.Scene {
 
     this.debugGraphics = this.add.graphics();
     this.debugGraphics.setDepth(100000);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      document.removeEventListener('visibilitychange', this.onHide);
+      window.removeEventListener('pagehide', this.onPageHide);
+      this.store.close();
+    });
+    void this.boot();
+  }
+
+  private async boot(): Promise<void> {
+    try {
+      this.store = await IndexedDbEventStore.open();
+    } catch (err) {
+      console.warn('[telemetry] IndexedDB unavailable, history will not survive a reload', err);
+      this.store = new MemoryEventStore();
+    }
+    const boot = await loadProfileState(this.store, () => crypto.randomUUID());
+    this.startGame(boot);
+  }
+
+  private startGame(boot: BootState): void {
+    this.stack = createTelemetryStack({
+      accumulator: boot.accumulator,
+      playerId: boot.playerId,
+      sessionId: crypto.randomUUID(),
+      firstRunIdx: boot.firstRunIdx,
+      nextSeed: () => Math.floor(Math.random() * 0x100000000),
+      entitySize: ENTITY_SIZE,
+      onRunEnd: () => void this.persist(),
+    });
+
+    new OpportunityOverlay(this.encounter.bus, (lines) => {
+      this.overlayText.setText(lines.length > 0 ? lines : ['(no opportunities open)']);
+    });
+    new HudState(this.encounter.bus, (counters) => {
+      this.hudCounters = counters;
+    });
+    this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => this.stack.step(stepMs));
+
+    this.stack.recorder.log('session.start', {
+      wall_clock_iso: new Date().toISOString(),
+      game_version: GAME_VERSION,
+      schema_v: SCHEMA_VERSION,
+      persistent: this.store instanceof IndexedDbEventStore && boot.restored,
+    });
+    this.stack.director.start();
+
+    this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void this.persist() });
+    document.addEventListener('visibilitychange', this.onHide);
+    window.addEventListener('pagehide', this.onPageHide);
+    this.ready = true;
+  }
+
+  private async persist(): Promise<void> {
+    if (!this.stack) return;
+    const batch = this.stack.recorder.drain();
+    if (batch.length === 0) return;
+    try {
+      await this.store.append(batch);
+    } catch (err) {
+      if (!this.persistWarned) {
+        console.warn('[telemetry] failed to persist events; continuing in memory', err);
+        this.persistWarned = true;
+      }
+    }
+  }
+
+  private flushAndPersist(): void {
+    if (!this.ready) return;
+    this.stack.recording.flushPending();
+    void this.persist();
+  }
+
+  private async exportHistory(): Promise<void> {
+    if (!this.ready) return;
+    this.stack.recording.flushPending();
+    await this.persist();
+    const events = await this.store.readAll();
+    const playerId = String(events[events.length - 1]?.player_id ?? 'sem-id').slice(0, 8);
+    const date = new Date().toISOString().slice(0, 10);
+    downloadText(`tcc-historico-${playerId}-${date}.ndjson`, toNdjson(events));
+  }
+
+  private importHistory(): void {
+    if (!this.ready) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ndjson,.jsonl,.txt';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      this.stack.recording.flushPending();
+      await this.persist();
+      const result = await importInto(this.store, await file.text());
+      if (result.invalidLines > 0) {
+        console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
+      }
+      this.scene.restart(); // new session: profile rebuilt from the merged history
+    };
+    input.click();
   }
 
   update(_time: number, delta: number): void {
+    if (!this.ready) return;
+
     const pointer = this.input.activePointer;
     const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const playerScreen = toScreen(this.encounter.player.position, ISO_CONFIG);
@@ -261,6 +390,8 @@ export class ArenaScene extends Phaser.Scene {
     this.weaponText.setText(`Arma: ${WEAPON_LABELS[equippedWeaponId] ?? equippedWeaponId}`);
 
     this.hudText.setText([
+      `HP: ${this.encounter.player.hp}/${PLAYER_MAX_HP} · inimigo: ${this.encounter.assaltante.hp}/${ASSALTANTE_MAX_HP}`,
+      `run ${this.stack.director.runIdx} · sala ${this.stack.director.roomIdx + 1} · encontro ${this.stack.director.encIdx + 1}/${ROOM_ENCOUNTER_COUNT}`,
       `move: (${this.lastMoveInput.dx}, ${this.lastMoveInput.dy})`,
       `dash: ${this.encounter.player.isInvulnerable ? 'active (i-frames)' : 'idle'}`,
       `dashes: ${this.hudCounters.effectiveDashes} effective / ${this.hudCounters.wastedDashes} wasted`,
@@ -274,6 +405,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private tryEquippedAction(actionType: ActionType): boolean {
+    if (!this.ready) return false;
     const action = findWeaponAction(this.encounter.player.equippedWeaponId, actionType);
     if (!action) return false;
     this.encounter.player.tryAction(action.id);
