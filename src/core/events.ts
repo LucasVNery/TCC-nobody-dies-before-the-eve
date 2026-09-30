@@ -39,7 +39,8 @@ export interface RunStartPayload {
 
 export interface RunEndPayload {
   run_idx: number;
-  cause: 'death';
+  /** 'abandoned': closed at the next boot because the tab was closed mid-run. */
+  cause: 'death' | 'abandoned';
   duration_ms: number;
   rooms_cleared: number;
   encounters_cleared: number;

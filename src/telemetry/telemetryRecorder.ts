@@ -107,6 +107,23 @@ export class TelemetryRecorder {
     });
   }
 
+  /**
+   * Runs `fn` with the envelope indices set to `indices` — used to close a
+   * previous session's run under its own run/room/enc indices — then restores
+   * the current ones.
+   */
+  withIndices(indices: { run_idx: number; room_idx: number; enc_idx: number }, fn: () => void): void {
+    const saved = [this.runIdx, this.roomIdx, this.encIdx] as const;
+    this.runIdx = indices.run_idx;
+    this.roomIdx = indices.room_idx;
+    this.encIdx = indices.enc_idx;
+    try {
+      fn();
+    } finally {
+      [this.runIdx, this.roomIdx, this.encIdx] = saved;
+    }
+  }
+
   drain(): LoggedEvent[] {
     const out = this.buffer;
     this.buffer = [];

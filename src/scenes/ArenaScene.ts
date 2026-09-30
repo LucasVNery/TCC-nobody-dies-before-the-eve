@@ -281,13 +281,17 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => this.stack.step(stepMs));
 
-    this.stack.recorder.log('session.start', {
-      wall_clock_iso: new Date().toISOString(),
-      game_version: GAME_VERSION,
-      schema_v: SCHEMA_VERSION,
-      persistent: this.store instanceof IndexedDbEventStore && boot.restored,
-    });
-    this.stack.director.start();
+    // session.start, then the run the previous session left open (tab closed)
+    // is closed under its own indices, then the first run of this session.
+    this.stack.startSession(
+      {
+        wall_clock_iso: new Date().toISOString(),
+        game_version: GAME_VERSION,
+        schema_v: SCHEMA_VERSION,
+        persistent: this.store instanceof IndexedDbEventStore && boot.restored,
+      },
+      boot.abandonedRun,
+    );
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void this.persist() });
     document.addEventListener('visibilitychange', this.onHide);
