@@ -19,6 +19,7 @@ import {
   ISO_CONFIG,
 } from '../visual/placeholderTextures';
 import { createGroundTilemap } from '../visual/groundTilemap';
+import { DEFAULT_ZOOM, zoomAfterWheel } from '../visual/cameraZoom';
 import { DirectionalSprite } from '../visual/directionalSprite';
 import { ATTACK_RANGE } from '../ai/rules/assaltanteRules';
 import { toScreen, fromScreen } from '../visual/isometricProjection';
@@ -262,9 +263,26 @@ export class ArenaScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(minX, minY, maxX - minX, maxY - minY);
     this.cameras.main.startFollow(this.playerSprite.gameObject);
+    this.cameras.main.setZoom(DEFAULT_ZOOM);
+    this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
+      this.cameras.main.setZoom(zoomAfterWheel(this.cameras.main.zoom, dy));
+    });
 
     this.debugGraphics = this.add.graphics();
     this.debugGraphics.setDepth(100000);
+
+    // Camera zoom would also scale and shift the fixed dev texts, so they get
+    // their own unzoomed camera: the main camera draws only the world, the UI
+    // camera only the texts. World objects must all exist by this point.
+    const uiObjects: Phaser.GameObjects.GameObject[] = [
+      this.overlayText,
+      this.hudText,
+      this.weaponText,
+      controlsText,
+    ];
+    this.cameras.main.ignore(uiObjects);
+    const uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    uiCamera.ignore(this.children.list.filter((obj) => !uiObjects.includes(obj)));
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       document.removeEventListener('visibilitychange', this.onHide);
