@@ -3,9 +3,9 @@ import type { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
-import type { ActionId } from '../opportunity/types';
+import type { ActionId, InvalidReason } from '../opportunity/types';
 import { ASSALTANTE_RULES, ATTACK_RANGE, type Blackboard } from '../ai/rules/assaltanteRules';
-import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
+import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD, ASSALTANTE_MAX_HP } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
@@ -18,6 +18,7 @@ const RECOVERY_MS = 500; // = punish window
 
 export class AssaltanteController implements ThreatAssessor {
   state: EnemyState = 'idle';
+  hp = ASSALTANTE_MAX_HP;
   private phaseElapsedMs = 0;
   private activeOppId: string | null = null;
   private _activeRuleId: string | null = null;
@@ -47,6 +48,33 @@ export class AssaltanteController implements ThreatAssessor {
 
   get attackDirection(): Vec2 {
     return { x: this._attackDirection.x, y: this._attackDirection.y };
+  }
+
+  get isDead(): boolean {
+    return this.hp <= 0;
+  }
+
+  takeDamage(amount: number): void {
+    this.hp = Math.max(0, this.hp - amount);
+  }
+
+  /**
+   * Fresh Assaltante at `position`. Any window it still has open is closed as
+   * `invalid` with `reason` so the opportunity denominator never leaks
+   * (conservation law, doc §2.4): 'source_interrupted' when it died,
+   * 'player_dead' when the run ended.
+   */
+  respawn(position: Vec2, reason: InvalidReason): void {
+    if (this.activeOppId) {
+      this.opp.resolve(this.activeOppId, 'invalid', { reason });
+      this.activeOppId = null;
+    }
+    this._position = { x: position.x, y: position.y };
+    this.hp = ASSALTANTE_MAX_HP;
+    this.state = 'idle';
+    this.phaseElapsedMs = 0;
+    this._activeRuleId = null;
+    this.playerWasInRangeDuringPunish = false;
   }
 
   hurtbox(): AABB {
@@ -95,6 +123,7 @@ export class AssaltanteController implements ThreatAssessor {
         this.phaseElapsedMs = 0;
         this._attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this._attackDirection;
         this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
+        this.bus.emit('enemy.attack_start', {});
       } else {
         this.state = 'chasing';
         const direction = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : { x: 0, y: 0 };

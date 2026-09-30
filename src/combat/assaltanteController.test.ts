@@ -6,6 +6,7 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
+import { ASSALTANTE_MAX_HP } from './movementDefs';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
@@ -288,5 +289,47 @@ describe('AssaltanteController', () => {
     expect(enemy.state).toBe('attacking');
     const target = { x: 70, y: 0, width: 20, height: 20 };
     expect(enemy.msUntilThreatens(target, 500)).toBe(384); // TELEGRAPH_MS(400) - phaseElapsedMs(16)
+  });
+
+  it('emits enemy.attack_start when it starts an attack', () => {
+    const { bus, enemy } = makeAssaltante();
+    const started = vi.fn();
+    bus.on('enemy.attack_start', started);
+    enemy.step(16, { x: 110, y: 0 }); // in range -> attacks
+    expect(enemy.state).toBe('attacking');
+    expect(started).toHaveBeenCalledTimes(1);
+  });
+
+  it('takeDamage lowers hp, clamps at 0 and flips isDead', () => {
+    const { enemy } = makeAssaltante();
+    expect(enemy.hp).toBe(ASSALTANTE_MAX_HP);
+    enemy.takeDamage(20);
+    expect(enemy.hp).toBe(ASSALTANTE_MAX_HP - 20);
+    enemy.takeDamage(999);
+    expect(enemy.hp).toBe(0);
+    expect(enemy.isDead).toBe(true);
+  });
+
+  it('respawn() closes its open opportunity as invalid with the given reason and resets hp/state/position', () => {
+    const { bus, enemy } = makeAssaltante();
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    enemy.step(16, { x: 110, y: 0 }); // opens a 'dodge' window
+    enemy.takeDamage(999);
+
+    enemy.respawn({ x: 800, y: 600 }, 'source_interrupted');
+
+    expect(closes).toEqual([{ opp_id: expect.any(String), type: 'dodge', outcome: 'invalid', reason: 'source_interrupted' }]);
+    expect(enemy.hp).toBe(ASSALTANTE_MAX_HP);
+    expect(enemy.state).toBe('idle');
+    expect(enemy.position).toEqual({ x: 800, y: 600 });
+  });
+
+  it('respawn() with no open opportunity closes nothing', () => {
+    const { bus, enemy } = makeAssaltante();
+    const closes = vi.fn();
+    bus.on('opp.close', closes);
+    enemy.respawn({ x: 0, y: 0 }, 'player_dead');
+    expect(closes).not.toHaveBeenCalled();
   });
 });

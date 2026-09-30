@@ -13,7 +13,7 @@ import {
   PARRY_WINDOW_MS,
 } from './actionDefs';
 import { resolveAction, totalCommitmentMs, type ActionDef } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_HALF_ANGLE_RAD } from './movementDefs';
+import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_HALF_ANGLE_RAD, PLAYER_MAX_HP } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
 
@@ -36,6 +36,7 @@ export class PlayerController {
   private committedDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
   poise = POISE_MAX;
+  hp = PLAYER_MAX_HP;
   private blockHeldMs = 0;
   private staggerRemainingMs = 0;
   private poiseRegenDelayRemainingMs = 0;
@@ -67,6 +68,43 @@ export class PlayerController {
 
   get isParryTiming(): boolean {
     return this.state === 'blocking' && this.blockHeldMs < PARRY_WINDOW_MS;
+  }
+
+  get isDead(): boolean {
+    return this.hp <= 0;
+  }
+
+  /** The action currently being performed (null when not acting). Read-only view for Encounter's damage step. */
+  get currentActionDef(): ActionDef | null {
+    return this.currentAction;
+  }
+
+  takeDamage(amount: number): void {
+    this.hp = Math.max(0, this.hp - amount);
+  }
+
+  /**
+   * Start-of-run state: full hp and poise, idle, default weapon, no cooldowns,
+   * any in-progress (including charging) action discarded. Death itself does
+   * not gate behavior — RunDirector calls this in the same tick the player dies.
+   */
+  reset(position: Vec2): void {
+    this._position = { x: position.x, y: position.y };
+    this.hp = PLAYER_MAX_HP;
+    this.poise = POISE_MAX;
+    this.state = 'idle';
+    this.phaseElapsedMs = 0;
+    this.currentAction = null;
+    this.chargeHeldMs = 0;
+    this.chargeTriggered = false;
+    this.equippedWeaponId = 'sword_shield';
+    this.attackLockedMs = 0;
+    this.dodgeCooldownRemainingMs = 0;
+    this.invulnerable = false;
+    this.blockHeldMs = 0;
+    this.staggerRemainingMs = 0;
+    this.poiseRegenDelayRemainingMs = 0;
+    this.moveInput = { x: 0, y: 0 };
   }
 
   hurtbox(): AABB {

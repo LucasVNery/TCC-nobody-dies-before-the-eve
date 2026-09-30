@@ -13,7 +13,7 @@ import {
   STAGGER_MS,
 } from './actionDefs';
 import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, ARENA_BOUNDS } from './movementDefs';
+import { PLAYER_MOVE_SPEED, ARENA_BOUNDS, PLAYER_MAX_HP } from './movementDefs';
 import { sectorOverlapsBox } from './sector';
 
 const LIGHT = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'light')!;
@@ -298,6 +298,52 @@ describe('PlayerController', () => {
     player.tryDodge();
     player.step(DODGE.durationMs);
     expect(player.position.x).toBeGreaterThan(beforeX); // still dashes right (movement dir), not left (aim dir)
+  });
+
+  it('takeDamage lowers hp, clamps at 0 and flips isDead', () => {
+    const { player } = makePlayer();
+    expect(player.hp).toBe(PLAYER_MAX_HP);
+    player.takeDamage(30);
+    expect(player.hp).toBe(PLAYER_MAX_HP - 30);
+    expect(player.isDead).toBe(false);
+    player.takeDamage(999);
+    expect(player.hp).toBe(0);
+    expect(player.isDead).toBe(true);
+  });
+
+  it('reset() restores hp/poise/state/weapon and moves the player', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.takeDamage(50);
+    player.startBlock();
+    player.absorbBlockHit();
+    player.reset({ x: 300, y: 200 });
+    expect(player.hp).toBe(PLAYER_MAX_HP);
+    expect(player.poise).toBe(POISE_MAX);
+    expect(player.state).toBe('idle');
+    expect(player.equippedWeaponId).toBe('sword_shield');
+    expect(player.position).toEqual({ x: 300, y: 200 });
+    expect(player.isInvulnerable).toBe(false);
+  });
+
+  it('reset() mid-charge discards the charge: releasing afterwards emits no player.action', () => {
+    const { bus, player } = makePlayer();
+    const actions = vi.fn();
+    bus.on('player.action', actions);
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.minHoldMs + 50);
+    player.reset({ x: 0, y: 0 });
+    player.releaseAction();
+    player.step(16);
+    expect(actions).not.toHaveBeenCalled();
+    expect(player.currentActionDef).toBeNull();
+  });
+
+  it('currentActionDef exposes the action being performed', () => {
+    const { player } = makePlayer();
+    expect(player.currentActionDef).toBeNull();
+    player.tryAction(LIGHT.id);
+    expect(player.currentActionDef?.id).toBe(LIGHT.id);
   });
 });
 
