@@ -7,6 +7,7 @@ import { ARENA_BOUNDS, PLAYER_MAX_HP, ASSALTANTE_MAX_HP, ROOM_ENCOUNTER_COUNT } 
 import { createTelemetryStack, type TelemetryStack } from '../telemetry/stack';
 import { IndexedDbEventStore, MemoryEventStore, type EventStore } from '../telemetry/eventStore';
 import { loadProfileState, type BootState } from '../telemetry/bootstrap';
+import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { toNdjson, importInto } from '../telemetry/ndjson';
 import { SCHEMA_VERSION, GAME_VERSION } from '../telemetry/schema';
 import { ASSET_KEYS } from '../visual/assetRegistry';
@@ -34,8 +35,27 @@ function downloadText(filename: string, text: string): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.style.display = 'none';
+  // Firefox only follows a click on an anchor that is in the document, and
+  // the URL must outlive the click's navigation task.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * UUID v4. `crypto.randomUUID` only exists in secure contexts (https or
+ * localhost); lab machines may open the game over plain HTTP on a LAN IP, so
+ * fall back to one built from `crypto.getRandomValues` (available everywhere).
+ */
+function newUuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant 10xx
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 const HURTBOX_COLOR = 0xffffff;
 const ATTACK_HITBOX_COLOR = 0xffeb3b;
@@ -56,6 +76,10 @@ export class ArenaScene extends Phaser.Scene {
   private store: EventStore = new MemoryEventStore();
   private ready = false;
   private persistWarned = false;
+  /** Store writes, serialized; the store is closed only after they settle. */
+  private writes: Promise<void> = Promise.resolve();
+  /** Settles once the previous scene instance's last writes are in and its store is closed. */
+  private previousClosed: Promise<void> = Promise.resolve();
   private readonly onHide = (): void => {
     if (document.visibilityState === 'hidden') this.flushAndPersist();
   };
@@ -68,13 +92,11 @@ export class ArenaScene extends Phaser.Scene {
   private overlayText!: Phaser.GameObjects.Text;
   private hudText!: Phaser.GameObjects.Text;
   private weaponText!: Phaser.GameObjects.Text;
-  private hudCounters: HudCounters = {
-    dashAttempts: 0,
-    effectiveDashes: 0,
-    wastedDashes: 0,
-    bossHitsLanded: 0,
-    hitsUnmitigated: 0,
-  };
+  private hudCounters: HudCounters = ArenaScene.emptyHudCounters();
+
+  private static emptyHudCounters(): HudCounters {
+    return { dashAttempts: 0, effectiveDashes: 0, wastedDashes: 0, bossHitsLanded: 0, hitsUnmitigated: 0 };
+  }
   private lastMoveInput = { dx: 0, dy: 0 };
   private playerSprite!: DirectionalSprite;
   private assaltanteSprite!: DirectionalSprite;
@@ -120,6 +142,7 @@ export class ArenaScene extends Phaser.Scene {
 
   create(): void {
     this.ready = false;
+    this.hudCounters = ArenaScene.emptyHudCounters();
 
     createGroundTilemap(this, ARENA_BOUNDS, ISO_CONFIG);
 
@@ -246,27 +269,51 @@ export class ArenaScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       document.removeEventListener('visibilitychange', this.onHide);
       window.removeEventListener('pagehide', this.onPageHide);
-      this.store.close();
+      const wasRunning = this.ready;
+      this.ready = false;
+      if (wasRunning) this.stack.recording.flushPending();
+      // Final flush, then close only after every in-flight append settled.
+      const store = this.store;
+      this.previousClosed = this.persist().finally(() => store.close());
     });
     void this.boot();
   }
 
   private async boot(): Promise<void> {
+    await this.previousClosed; // after a restart: the previous session's last events are stored
     try {
-      this.store = await IndexedDbEventStore.open();
+      try {
+        this.store = await IndexedDbEventStore.open();
+      } catch (err) {
+        console.warn('[telemetry] IndexedDB unavailable, history will not survive a reload', err);
+        this.store = new MemoryEventStore();
+      }
+      const boot = await loadProfileState(this.store, newUuid);
+      this.startGame(boot);
     } catch (err) {
-      console.warn('[telemetry] IndexedDB unavailable, history will not survive a reload', err);
-      this.store = new MemoryEventStore();
+      // The game must still start: fresh in-memory profile, nothing persisted.
+      console.error('[telemetry] boot failed, starting on a fresh in-memory profile', err);
+      try {
+        this.store.close();
+        this.store = new MemoryEventStore();
+        this.startGame({
+          accumulator: new ProfileAccumulator(),
+          playerId: newUuid(),
+          firstRunIdx: 0,
+          restored: false,
+          abandonedRun: null,
+        });
+      } catch (fatal) {
+        console.error('[telemetry] could not start the game', fatal);
+      }
     }
-    const boot = await loadProfileState(this.store, () => crypto.randomUUID());
-    this.startGame(boot);
   }
 
   private startGame(boot: BootState): void {
     this.stack = createTelemetryStack({
       accumulator: boot.accumulator,
       playerId: boot.playerId,
-      sessionId: crypto.randomUUID(),
+      sessionId: newUuid(),
       firstRunIdx: boot.firstRunIdx,
       nextSeed: () => Math.floor(Math.random() * 0x100000000),
       entitySize: ENTITY_SIZE,
@@ -299,18 +346,30 @@ export class ArenaScene extends Phaser.Scene {
     this.ready = true;
   }
 
-  private async persist(): Promise<void> {
-    if (!this.stack) return;
-    const batch = this.stack.recorder.drain();
-    if (batch.length === 0) return;
-    try {
-      await this.store.append(batch);
-    } catch (err) {
-      if (!this.persistWarned) {
-        console.warn('[telemetry] failed to persist events; continuing in memory', err);
-        this.persistWarned = true;
+  /**
+   * Drains the recorder into the store. Writes are chained, so `writes`
+   * tells when all of them settled; the returned promise never rejects. A
+   * failed batch goes back to the front of the recorder buffer and is retried
+   * by the next persist.
+   */
+  private persist(): Promise<void> {
+    if (!this.stack) return this.writes;
+    const recorder = this.stack.recorder;
+    const store = this.store;
+    const batch = recorder.drain();
+    if (batch.length === 0) return this.writes;
+    this.writes = this.writes.then(async () => {
+      try {
+        await store.append(batch);
+      } catch (err) {
+        recorder.requeue(batch);
+        if (!this.persistWarned) {
+          console.warn('[telemetry] failed to persist events; continuing in memory', err);
+          this.persistWarned = true;
+        }
       }
-    }
+    });
+    return this.writes;
   }
 
   private flushAndPersist(): void {
@@ -321,12 +380,16 @@ export class ArenaScene extends Phaser.Scene {
 
   private async exportHistory(): Promise<void> {
     if (!this.ready) return;
-    this.stack.recording.flushPending();
-    await this.persist();
-    const events = await this.store.readAll();
-    const playerId = String(events[events.length - 1]?.player_id ?? 'sem-id').slice(0, 8);
-    const date = new Date().toISOString().slice(0, 10);
-    downloadText(`tcc-historico-${playerId}-${date}.ndjson`, toNdjson(events));
+    try {
+      this.stack.recording.flushPending();
+      await this.persist();
+      const events = await this.store.readAll();
+      const playerId = String(events[events.length - 1]?.player_id ?? 'sem-id').slice(0, 8);
+      const date = new Date().toISOString().slice(0, 10);
+      downloadText(`tcc-historico-${playerId}-${date}.ndjson`, toNdjson(events));
+    } catch (err) {
+      console.warn('[telemetry] export failed', err);
+    }
   }
 
   private importHistory(): void {
@@ -336,20 +399,32 @@ export class ArenaScene extends Phaser.Scene {
     input.accept = '.ndjson,.jsonl,.txt';
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file) return;
-      this.stack.recording.flushPending();
-      await this.persist();
-      const result = await importInto(this.store, await file.text());
-      if (result.invalidLines > 0) {
-        console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
+      if (!file || !this.ready) return;
+      // Stop the simulation (and with it every new event) before the awaits,
+      // so nothing is produced between the last persist and the restart.
+      this.ready = false;
+      let merged = false;
+      try {
+        this.stack.recording.flushPending();
+        await this.persist();
+        const result = await importInto(this.store, await file.text());
+        merged = true;
+        if (result.invalidLines > 0) {
+          console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
+        }
+        if (result.foreignPlayerIds.length > 0) {
+          console.warn(
+            `[telemetry] import brought events of other player(s) (${result.foreignPlayerIds.join(', ')}); ` +
+              `adopted player ${result.playerId} — only that player's events are replayed`,
+          );
+        }
+        this.stack.recording.flushPending();
+        await this.persist();
+      } catch (err) {
+        console.warn('[telemetry] import failed', err);
       }
-      if (result.foreignPlayerIds.length > 0) {
-        console.warn(
-          `[telemetry] import brought events of other player(s) (${result.foreignPlayerIds.join(', ')}); ` +
-            `adopted player ${result.playerId} — only that player's events are replayed`,
-        );
-      }
-      this.scene.restart(); // new session: profile rebuilt from the merged history
+      if (merged) this.scene.restart(); // new session: profile rebuilt from the merged history
+      else this.ready = true; // nothing was merged: keep playing this session
     };
     input.click();
   }
@@ -401,7 +476,7 @@ export class ArenaScene extends Phaser.Scene {
 
     this.hudText.setText([
       `HP: ${this.encounter.player.hp}/${PLAYER_MAX_HP} · inimigo: ${this.encounter.assaltante.hp}/${ASSALTANTE_MAX_HP}`,
-      `run ${this.stack.director.runIdx} · sala ${this.stack.director.roomIdx + 1} · encontro ${this.stack.director.encIdx + 1}/${ROOM_ENCOUNTER_COUNT}`,
+      `run ${this.stack.director.runIdx + 1} · sala ${this.stack.director.roomIdx + 1} · encontro ${this.stack.director.encIdx + 1}/${ROOM_ENCOUNTER_COUNT}`,
       `move: (${this.lastMoveInput.dx}, ${this.lastMoveInput.dy})`,
       `dash: ${this.encounter.player.isInvulnerable ? 'active (i-frames)' : 'idle'}`,
       `dashes: ${this.hudCounters.effectiveDashes} effective / ${this.hudCounters.wastedDashes} wasted`,

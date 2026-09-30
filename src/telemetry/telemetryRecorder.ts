@@ -130,6 +130,11 @@ export class TelemetryRecorder {
     return out;
   }
 
+  /** Puts a drained batch whose write failed back in front of the buffer, so the next drain retries it. */
+  requeue(events: readonly LoggedEvent[]): void {
+    this.buffer = [...events, ...this.buffer];
+  }
+
   private logWithCtx(type: string, payload: unknown): void {
     const fields: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
     // opp.* payloads carry their own `type` ('dodge' | 'punish'); keep it

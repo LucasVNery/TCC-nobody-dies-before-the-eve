@@ -164,6 +164,19 @@ describe('TelemetryRecorder', () => {
     });
   });
 
+  it('requeue puts a failed batch back in front of the buffer, so the next drain retries it in order', () => {
+    const stack = makeStack();
+    stack.director.start();
+    const failed = stack.recorder.drain();
+    stack.step(300); // more events arrive while the write was failing (pos.sample at 250ms)
+    stack.recorder.requeue(failed);
+    const retried = stack.recorder.drain();
+    expect(retried.slice(0, failed.length)).toEqual(failed);
+    expect(retried.length).toBeGreaterThan(failed.length);
+    retried.forEach((e, i) => expect(e.seq).toBe(i));
+    expect(stack.recorder.drain()).toEqual([]);
+  });
+
   it('flushPending before drain puts the pending aggregated record in the buffer', () => {
     const stack = makeStack();
     stack.director.start();
