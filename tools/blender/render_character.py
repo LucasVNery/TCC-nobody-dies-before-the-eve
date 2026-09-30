@@ -155,6 +155,26 @@ def render_animation(character_fbx, anim_fbx, action_name, frame_numbers, out_di
         available = [a.name for a in bpy.data.actions]
         raise RuntimeError(f"no action ending in {wanted_suffix!r}; available: {available}")
 
+    # The animation-only FBX (Rig_Medium_MovementBasic.fbx etc.) ships its own
+    # bundled reference mesh ("Mannequin_*") skinned to its own second
+    # armature object (renamed e.g. "Rig_Medium.001" on import, since the
+    # name "Rig_Medium" is already taken by the character's armature). That
+    # second armature never gets an action assigned (only `armature`, the
+    # character's, does below) so it stays in the rest pose (T-pose) forever
+    # — and its mesh was rendering right on top of the real, correctly
+    # animated character mesh in every frame. Delete every object that isn't
+    # the character's armature or skinned to it before rendering.
+    for obj in list(bpy.data.objects):
+        if obj is armature:
+            continue
+        if obj.type == 'ARMATURE':
+            bpy.data.objects.remove(obj, do_unlink=True)
+            continue
+        if obj.type == 'MESH':
+            armature_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+            if armature_mod is None or armature_mod.object is not armature:
+                bpy.data.objects.remove(obj, do_unlink=True)
+
     if armature.animation_data is None:
         armature.animation_data_create()
     # FBX import sometimes leaves an NLA track around, which can take

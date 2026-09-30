@@ -98,6 +98,7 @@ export class AssaltanteController implements ThreatAssessor {
       } else {
         this.state = 'chasing';
         const direction = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : { x: 0, y: 0 };
+        if (distanceToPlayer > 0) this._attackDirection = direction;
         this._position = clampToArena(
           applyMovement(this._position, direction, ASSALTANTE_CHASE_SPEED, stepMs),
           this.width,

@@ -11,26 +11,57 @@ export interface DirectionalSpriteTextures {
 
 /**
  * Maps a directionBucket() index (0=east, clockwise, per spriteDirection.ts)
- * to the sprite sheet's actual row. tools/blender/render_character.py's
- * compose step writes direction d to image row (DIRECTION_COUNT-1-d) from
- * the top (Blender's pixel buffer origin is bottom-left, so the composer
- * flips vertically to land in a normal top-down PNG) — that part is a known,
- * provable fact from the render script, not a guess. ROW_ROTATION_OFFSET is
- * the empirical part: which of the 8 rendered rows lines up with
- * directionBucket's "east" (0) doesn't follow from the flip math alone.
- * Calibrated 2026-09-07 by pausing the scene and driving syncDirection()
- * directly for all 4 cardinal directions, screenshotting each: offset 6
- * makes south (0,1) show the front of the character, north (0,-1) the
- * back, and east/west mirror each other — confirmed correct and
- * consistent, not just "one direction looks okay". Re-verify this if the
- * render pipeline's camera azimuth convention
- * (tools/blender/render_character.py) ever changes.
+ * to the sprite sheet's actual row.
+ *
+ * **image_row_from_top(render_direction) == render_direction, directly, no
+ * reversal.** This was the actual bug behind three straight miscalibrations
+ * (2026-09-07 through 2026-09-13): every earlier version of this function
+ * (and its doc comment) assumed `render_character.py`'s compose step writes
+ * render direction `d` to image row `(DIRECTION_COUNT-1-d)` — i.e. reversed
+ * top-to-bottom — and built a `DIRECTION_COUNT-1-rotated` flip into this
+ * function to match. That assumption was wrong. Re-derived directly from
+ * `compose_sheet()`: `row_from_bottom = (DIRECTIONS-1)-direction` is a count
+ * of rows *up from the bottom of the final saved PNG* (Blender's
+ * `image.pixels` array is bottom-up, and pixel-array row index 0 always
+ * lands at the bottom of whatever gets saved to disk) — converting that
+ * "from bottom" count to a normal "from top" row index requires a SECOND
+ * `(DIRECTION_COUNT-1) - row_from_bottom` flip, which cancels the first
+ * one out: `(D-1) - ((D-1)-d) == d`. Confirmed empirically too, independent
+ * of that derivation: the composited `idle.png` row unambiguously showing
+ * the character's back (bare cape, zero face — no room for misjudgment)
+ * is row 2, and the individual per-direction render at azimuth 90°
+ * (render direction 2) is *also* the unambiguous back view — same index,
+ * no flip between them.
+ *
+ * A `DIRECTION_COUNT-1-X` reversal happens to preserve any single
+ * antipodal pair's own front/back symmetry (which is why the front/back
+ * axis kept looking approximately plausible across every wrong version of
+ * this code) while silently swapping which *pair* of opposite rows lines
+ * up with which screen axis — which is why every previous calibration
+ * attempt (offsets 6, then 7) still showed the character facing screen-
+ * right when the mouse was on the left. Removing the reversal and rotating
+ * directly fixes it for every axis at once, not just front/back.
+ *
+ * ROW_ROTATION_OFFSET = 4, derived 2026-09-13 with a deterministic method
+ * (no pixel-judgment): a one-off Blender script projected the character's
+ * own world-space forward vector into each camera's screen space, and
+ * separately, 512px renders of the 4 cardinal render directions were
+ * visually inspected directly (not through the composited sheet) to
+ * confirm render direction 0 = character facing screen-left, direction 4 =
+ * screen-right, direction 2 = back, direction 6 = front, with zero room
+ * for misjudgment at that resolution. Solving `(bucket + OFFSET) % 8 ==
+ * render_direction` for all four cardinal buckets gives OFFSET = 4
+ * consistently, and the four diagonal buckets check out too.
+ *
+ * Re-verify this (both the offset AND the no-reversal formula shape) if
+ * `render_character.py`'s camera azimuth convention or `compose_sheet()`'s
+ * row-write logic ever changes — see tools/blender/README.md's
+ * "Direction-row convention" section for the full history.
  */
-const ROW_ROTATION_OFFSET = 6;
+const ROW_ROTATION_OFFSET = 4;
 
 function spriteRowForDirection(bucket: number): number {
-  const rotated = (bucket + ROW_ROTATION_OFFSET) % DIRECTION_COUNT;
-  return DIRECTION_COUNT - 1 - rotated;
+  return (bucket + ROW_ROTATION_OFFSET) % DIRECTION_COUNT;
 }
 
 export class DirectionalSprite {

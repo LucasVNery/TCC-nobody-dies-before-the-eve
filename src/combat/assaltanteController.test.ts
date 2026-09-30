@@ -26,6 +26,17 @@ describe('AssaltanteController', () => {
     expect(enemy.state).toBe('chasing');
   });
 
+  it('attackDirection (used for sprite facing) tracks the chase direction while chasing, not a stale attack direction', () => {
+    const { enemy } = makeAssaltante(); // starts at x=100, y=0
+    enemy.step(16, { x: -100, y: 0 }); // player far to the left -> chases left
+    expect(enemy.state).toBe('chasing');
+    expect(enemy.attackDirection).toEqual({ x: -1, y: 0 });
+
+    enemy.step(16, { x: 300, y: 0 }); // player now far to the right -> chases right
+    expect(enemy.state).toBe('chasing');
+    expect(enemy.attackDirection).toEqual({ x: 1, y: 0 });
+  });
+
   it('attacks and opens a dodge opportunity when in range', () => {
     const { bus, enemy } = makeAssaltante();
     const openHandler = vi.fn();
