@@ -1,6 +1,6 @@
 # Instrumento de Perfil Adaptativo — Documento de Referência
 
-**Atualizado:** 28/09/2026 (revisão completa: stack, arquitetura, algoritmos, metodologia e cronologia)
+**Atualizado:** 30/09/2026 (reenquadramento da §1, D4 revisada, trilha 5a/5b/6, Estudos pendentes de redesenho) · revisão completa anterior em 28/09/2026
 **Stack:** Phaser 3.90 · TypeScript 5.9 · Vite 5.4 · Vitest 2.1 · Node.js 24 · Blender 5.2 (pipeline de assets)
 **Estágio:** instrumentação no jogo completa (passos 1–5 de 7, 6 de 7 dimensões ligadas). Ainda faltam a estrutura de sala/sessão e a exportação de telemetria para o Estudo 1. A adaptação (passos 6–7) ainda não começou.
 
@@ -62,6 +62,12 @@ São perguntas de pesquisa diferentes, com experimentos diferentes, mas existe u
 > O preditor do boss **não existe para maximizar dano**. Ele existe para fazer com que *previsível = ineficaz*: quando o modelo prevê a ação do jogador com alta confiança, o boss escolhe a resposta que **nega aquele padrão**, forçando o jogador a sair do vício.
 >
 > "Abrir janela de ataque para o boss" e "criar oportunidade de prática da habilidade evitada" passam a ser **a mesma operação, vista dos dois lados**. Isso preserva a tese original e entrega a sensação de um boss inteligente que pune repetição.
+
+> **REENQUADRAMENTO (30/09/2026, autor) — substitui a ênfase pedagógica acima como foco central**
+>
+> **O sistema de análise é o produto.** Ele analisa o jogador em duas camadas complementares: **como ele joga** (as dimensões de perfil, §2–§3) e **o que ele vai fazer** (um preditor sequencial, sub-projeto 5b). O boss usa as duas para ficar mais inteligente, e **a eficácia do boss é a validação** de que o jogador foi bem analisado. Um perfil "bem desenvolvido" é aquele com o qual o sistema consegue prever ações e intenções do jogador, e **quanto mais o jogador joga, mais o sistema aprende**.
+>
+> A melhora do jogador passa a ser **produto do sistema**, discutida como consequência, e não mais a variável central (a pergunta de transferência acima deixa de ser a pergunta da tese). A leitura "previsível = ineficaz" continua válida como *uma* das estratégias do boss. Spec de origem: `docs/superpowers/specs/2026-09-30-telemetria-runs-5a-design.md` §1.1. **Pendente:** reescrever o texto desta seção e da §1.3 à luz do reenquadramento, e revisar a função das referências pedagógicas (§8.3).
 
 ### 1.2 Quem adapta, e quem não adapta
 
@@ -140,7 +146,7 @@ As duas famílias usam **contagens decaídas** em vez de EWMA sobre a razão. Is
 contagem ← γ · contagem + novas_contagens_desde_a_última_fronteira
 ```
 
-O perfil **persiste entre runs e reseta entre sessões**, porque é do jogador e não da tentativa. Num roguelike com mortes frequentes, resetar por run faria a confiança nunca cruzar o gate de 0,6, e a adaptação nunca ligaria (o grupo adaptativo viraria, sem ninguém perceber, um segundo grupo controle).
+O perfil **persiste entre runs e entre sessões** (D4 revisada em 30/09/2026; antes resetava por sessão), porque é do jogador e não da tentativa. Só é zerado por ação explícita, que grava um marcador sem apagar o histórico. Num roguelike com mortes frequentes, resetar por run faria a confiança nunca cruzar o gate de 0,6, e a adaptação nunca ligaria (o grupo adaptativo viraria, sem ninguém perceber, um segundo grupo controle).
 
 Implementação: a evidência nova fica em contadores "pendentes" e só é dobrada (*folded*) na próxima chamada de `decay(γ)`. O `snapshot()` só expõe dimensões que já passaram por pelo menos uma fronteira de sala.
 
@@ -280,10 +286,14 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 
 | # | Sub-projeto | Entrega | Status |
 |---|---|---|---|
-| — | *(em andamento, não commitado)* Correção de direção dos sprites | inversão de linha removida e `ROW_ROTATION_OFFSET = 4`; Assaltante olha para a direção da perseguição; remoção do "manequim fantasma" no Blender | 🟡 No working tree |
-| 5a | **Telemetria mínima para o Estudo 1** *(novo, identificado nesta revisão)* | salas/encontros chamando fronteiras de decaimento; `session.start`; exportação NDJSON de eventos e snapshots | Planejar |
-| 5 | Seleção de déficit-alvo com histerese | primeira vez que o perfil influencia alguma coisa | Planejado |
-| 6 | Boss adaptativo: pesos de regra + preditor N-gram | a contribuição central da tese em código | Planejado |
+*Trilha revisada em 30/09/2026 após o reenquadramento da §1.*
+
+| # | Sub-projeto | Entrega | Status |
+|---|---|---|---|
+| — | Correção de direção dos sprites | inversão de linha removida e `ROW_ROTATION_OFFSET = 4`; Assaltante olha para a direção da perseguição; remoção do "manequim fantasma" no Blender | ✅ `7d48c4e` |
+| 5a | **Telemetria persistente e ciclo de runs** | HP, morte, encontros (Assaltante morre), salas (K = 3 encontros), runs (jogador morre); fronteiras de decaimento chamadas pelo jogo; log em duas camadas (observações do perfil + contexto) em IndexedDB; reconstrução do perfil ao abrir; resetar/exportar/importar `.ndjson`. Spec: `docs/superpowers/specs/2026-09-30-telemetria-runs-5a-design.md` | Spec escrita |
+| 5b | **Preditor sequencial** | modelo de longo prazo **sem esquecimento** (acumula com o jogo), previsão da próxima ação a partir de sequência + contexto (N-gram, §8.1), **curva de acurácia × tempo de jogo** medida offline sobre o log do 5a | Planejado |
+| 6 | **Boss inteligente** | boss que usa perfil (como joga) + previsões (o que vai fazer); a escolha de qual padrão explorar absorve o antigo passo "déficit-alvo com histerese"; validação por **ablação** (mesmo boss com e sem o modelo) | Planejado |
 
 ### 5.3 Decisões de design do repertório
 
@@ -308,7 +318,7 @@ Não mudam sem discussão explícita. Cada uma tem um documento de origem citáv
 | D1 | Corte de dimensões | Nenhum corte a priori: mantêm-se as 7. Dimensões com `ICC(1,1) < 0,50` no Estudo 1 são removidas antes do Estudo 2. *O corte vira resultado do trabalho, com justificativa estatística.* |
 | D2 | `missed` vs. `expired` | Ambos contam no denominador. A distinção é diagnóstica, não aritmética. |
 | D3 | `invalid` | Excluído de numerador *e* denominador. |
-| D4 | Persistência do perfil | Continua entre runs, reseta entre sessões. O perfil é do jogador, não da tentativa. |
+| D4 | Persistência do perfil | **Revisada em 30/09/2026:** acumula entre runs **e entre sessões**; o histórico de eventos é persistido localmente e o perfil é reconstruído dele ao abrir o jogo. Só é zerado por ação explícita (marcador `obs.reset`), sem apagar o histórico. *(Antes: "continua entre runs, reseta entre sessões".)* O perfil é do jogador, não da tentativa. |
 | D5 | Retenção / 2ª sessão | Não decidido. Esquema instrumentado para suportar, sem compromisso de execução. |
 | D6 | Suavização | Contagens decaídas, não EWMA sobre a razão. |
 | D9 | Taxonomia da dim 2 | Remove `aéreo`. Conjunto passa a `{leve, pesado, carregado, arremesso, utilitário}`, `n = 5`. Consequência da decisão "combate 100% planar". |
@@ -932,6 +942,8 @@ Ver §14.3.
 | run | tentativa completa (`run_id` + `seed`) | não reseta o perfil |
 | sessão | uma visita do participante: calibração → treino → transferência | unidade de reset |
 | participante | pessoa ou agente sintético | — |
+
+> **PENDENTE (30/09/2026): redesenho dos Estudos 1 e 2.** Com a D4 revisada (perfil não reseta por sessão) e o reenquadramento da §1, o desenho abaixo não se sustenta como está: o `ICC(1,1)` sobre sessões independentes pressupõe reset por sessão, e a transferência deixou de ser a variável central. Eixos candidatos: **acurácia de previsão ao longo do tempo de jogo** (5b) e **ablação do boss** (6). O texto abaixo fica como registro do desenho anterior até o redesenho.
 
 ### 17.2 Estudo 1: validação do instrumento
 
