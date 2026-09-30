@@ -32,7 +32,7 @@ describe('ndjson', () => {
     const first = await importInto(store, text);
     const second = await importInto(store, text);
 
-    expect(first).toEqual({ imported: 2, invalidLines: 0, playerId: 'imported-id' });
+    expect(first).toEqual({ imported: 2, invalidLines: 0, playerId: 'imported-id', foreignPlayerIds: ['imported-id'] });
     expect(second.imported).toBe(2);
     expect((await store.readAll()).map((e) => `${e.session_id}#${e.seq}`).sort()).toEqual(['local#0', 'remote#0', 'remote#1']);
     expect(await store.getMeta('player_id')).toBe('imported-id');
@@ -41,7 +41,20 @@ describe('ndjson', () => {
   it('importing an empty or all-invalid file changes nothing', async () => {
     const store = new MemoryEventStore();
     await store.setMeta('player_id', 'keep');
-    expect(await importInto(store, 'garbage\n')).toEqual({ imported: 0, invalidLines: 1, playerId: undefined });
+    expect(await importInto(store, 'garbage\n')).toEqual({ imported: 0, invalidLines: 1, playerId: undefined, foreignPlayerIds: [] });
     expect(await store.getMeta('player_id')).toBe('keep');
+  });
+
+  it('reports the player_ids of the file that differ from the store\'s previous player', async () => {
+    const store = new MemoryEventStore();
+    await store.setMeta('player_id', 'me');
+    const same = await importInto(store, toNdjson([ev('backup', 0, 'me')]));
+    expect(same.foreignPlayerIds).toEqual([]);
+
+    const mixed = await importInto(store, toNdjson([ev('x', 0, 'a'), ev('x', 1, 'me'), ev('y', 0, 'b'), ev('y', 1, 'a')]));
+    expect(mixed.foreignPlayerIds.sort()).toEqual(['a', 'b']);
+
+    const fresh = new MemoryEventStore(); // no previous player: nothing is foreign
+    expect((await importInto(fresh, toNdjson([ev('z', 0, 'a')]))).foreignPlayerIds).toEqual([]);
   });
 });

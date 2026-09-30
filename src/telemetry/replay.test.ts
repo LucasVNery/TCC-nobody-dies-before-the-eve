@@ -4,7 +4,7 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { Clock } from '../profile/types';
 import { findWeaponAction } from '../combat/actionRegistry';
 import { createTelemetryStack, type TelemetryStack } from './stack';
-import { orderEvents, rebuildProfile, nextRunIdx } from './replay';
+import { orderEvents, rebuildProfile, rebuildProfileWithStats, nextRunIdx } from './replay';
 import type { LoggedEvent } from './schema';
 
 const SKILLS = ['punish', 'distance', 'patience', 'weapon_repertoire', 'action_repertoire', 'defensive_repertoire'];
@@ -115,6 +115,76 @@ describe('replay', () => {
     const earlier = ev('aaa', 0, 'session.start', { wall_clock_iso: '2026-09-01T00:00:00.000Z' });
     const ordered = orderEvents([ev('zzz', 1), later, ev('aaa', 1), earlier]);
     expect(ordered.map((e) => `${e.session_id}#${e.seq}`)).toEqual(['aaa#0', 'aaa#1', 'zzz#0', 'zzz#1']);
+  });
+
+  describe('filtering by player_id', () => {
+    const ev = (player_id: string, seq: number, type: string, extra: Record<string, unknown> = {}): LoggedEvent => ({
+      v: 2, seq, t_ms: 0, player_id, session_id: `s-${player_id}`, run_idx: 0, room_idx: 0, enc_idx: 0, type, ...extra,
+    });
+
+    it('rebuildProfile replays only the given player, and only that player\'s obs.reset counts', () => {
+      const log = [
+        ev('me', 0, 'obs.action', { actionType: 'light', weaponId: 'sword_shield' }),
+        ev('me', 1, 'obs.action', { actionType: 'heavy', weaponId: 'bow' }),
+        ev('other', 0, 'obs.action', { actionType: 'heavy', weaponId: 'bow' }),
+        ev('other', 1, 'obs.reset'), // sorts after all of 'me' — must not wipe 'me'
+        ev('other', 2, 'obs.action', { actionType: 'charged', weaponId: 'heavy_weapon' }),
+        ev('me', 2, 'obs.boundary', { kind: 'room' }),
+        ev('other', 3, 'obs.boundary', { kind: 'room' }),
+      ];
+      const expected = new ProfileAccumulator();
+      expected.recordAction('light', 'sword_shield');
+      expected.recordAction('heavy', 'bow');
+      expected.applyRoomBoundary();
+      expectSameProfile(rebuildProfile(log, 'me'), expected);
+      expect(rebuildProfile(log, 'me').snapshot('room.exit').counts.action_repertoire).toEqual([2, 2]);
+
+      const other = new ProfileAccumulator();
+      other.recordAction('charged', 'heavy_weapon');
+      other.applyRoomBoundary();
+      expectSameProfile(rebuildProfile(log, 'other'), other);
+    });
+
+    it('nextRunIdx counts only the given player\'s runs', () => {
+      const log = [ev('me', 0, 'run.start', { run_idx: 2 }), ev('other', 0, 'run.start', { run_idx: 9 })];
+      expect(nextRunIdx(log, 'me')).toBe(3);
+      expect(nextRunIdx(log, 'other')).toBe(10);
+      expect(nextRunIdx(log, 'nobody')).toBe(0);
+      expect(nextRunIdx(log)).toBe(10); // no player given: every run counts
+    });
+  });
+
+  it('malformed obs.* events are skipped and counted instead of corrupting the profile', () => {
+    const ev = (seq: number, type: string, extra: Record<string, unknown>): LoggedEvent => ({
+      v: 2, seq, t_ms: 0, player_id: 'p', session_id: 's', run_idx: 0, room_idx: 0, enc_idx: 0, type, ...extra,
+    });
+    const good = [
+      ev(0, 'obs.record', { skill: 'distance', num: 1, den: 2 }),
+      ev(1, 'obs.outcome', { skill: 'punish', outcome: 'taken' }),
+      ev(2, 'obs.action', { actionType: 'light', weaponId: 'sword_shield' }),
+      ev(3, 'obs.action', { actionType: 'heavy' }),
+      ev(4, 'obs.defense', { label: 'dodge' }),
+      ev(20, 'obs.boundary', { kind: 'encounter' }),
+      ev(21, 'obs.boundary', { kind: 'room' }),
+    ];
+    // seq 10–17: replayed before the boundaries, so any bad value that got
+    // applied would show up in the folded snapshot
+    const bad = [
+      ev(10,'obs.record', { skill: 'distance', num: '1', den: 2 }),
+      ev(11, 'obs.record', { skill: 'distance', num: 1, den: null }),
+      ev(12, 'obs.record', { num: 1, den: 1 }),
+      ev(13, 'obs.outcome', { skill: 'punish', outcome: 'won' }),
+      ev(14, 'obs.action', { actionType: 'kick' }),
+      ev(15, 'obs.action', { actionType: 'light', weaponId: 'laser' }),
+      ev(16, 'obs.defense', { label: 'teleport' }),
+      ev(17, 'obs.boundary', { kind: 'floor' }),
+    ];
+    const clean = rebuildProfileWithStats(good);
+    const dirty = rebuildProfileWithStats([...good, ...bad]);
+    expect(clean.skipped).toBe(0);
+    expect(dirty.skipped).toBe(bad.length);
+    expectSameProfile(dirty.accumulator, clean.accumulator);
+    expect(Number.isFinite(dirty.accumulator.domain('distance', 'trait') ?? 0)).toBe(true);
   });
 
   it('nextRunIdx continues after the highest run.start, or 0 for an empty log', () => {

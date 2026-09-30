@@ -1,7 +1,7 @@
 // src/telemetry/bootstrap.ts
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { EventStore } from './eventStore';
-import { rebuildProfile, nextRunIdx } from './replay';
+import { rebuildProfileWithStats, nextRunIdx } from './replay';
 
 export interface BootState {
   accumulator: ProfileAccumulator;
@@ -25,7 +25,13 @@ export async function loadProfileState(store: EventStore, newId: () => string): 
       await store.setMeta('player_id', playerId);
     }
     const events = await store.readAll();
-    return { accumulator: rebuildProfile(events), playerId, firstRunIdx: nextRunIdx(events), restored: true };
+    // Only the current player's events count: an import can leave other
+    // players' history in the store (spec §5.3).
+    const { accumulator, skipped } = rebuildProfileWithStats(events, playerId);
+    if (skipped > 0) {
+      console.warn(`[telemetry] skipped ${skipped} malformed observation(s) while rebuilding the profile`);
+    }
+    return { accumulator, playerId, firstRunIdx: nextRunIdx(events, playerId), restored: true };
   } catch (err) {
     console.warn('[telemetry] could not load history, starting with a fresh in-memory profile', err);
     return { accumulator: new ProfileAccumulator(), playerId: newId(), firstRunIdx: 0, restored: false };

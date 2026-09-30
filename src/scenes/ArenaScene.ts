@@ -339,6 +339,12 @@ export class ArenaScene extends Phaser.Scene {
       if (result.invalidLines > 0) {
         console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
       }
+      if (result.foreignPlayerIds.length > 0) {
+        console.warn(
+          `[telemetry] import brought events of other player(s) (${result.foreignPlayerIds.join(', ')}); ` +
+            `adopted player ${result.playerId} — only that player's events are replayed`,
+        );
+      }
       this.scene.restart(); // new session: profile rebuilt from the merged history
     };
     input.click();

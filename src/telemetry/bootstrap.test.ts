@@ -44,6 +44,40 @@ describe('loadProfileState', () => {
     expect(boot.accumulator.snapshot('room.exit').counts.action_repertoire).toEqual([1, 1]); // only the post-reset action
   });
 
+  it('ignores other players\' events (after an import) for the profile and the run numbering', async () => {
+    const store = new MemoryEventStore();
+    await store.setMeta('player_id', 'me');
+    const base = { v: 2 as const, t_ms: 0, room_idx: 0, enc_idx: 0 };
+    await store.append([
+      { ...base, seq: 0, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.start' },
+      { ...base, seq: 1, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.action', actionType: 'light', weaponId: 'bow' },
+      { ...base, seq: 2, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.boundary', kind: 'room' },
+      { ...base, seq: 3, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.end', cause: 'death' },
+      { ...base, seq: 0, player_id: 'other', session_id: 's-other', run_idx: 7, type: 'run.start' },
+      { ...base, seq: 1, player_id: 'other', session_id: 's-other', run_idx: 7, type: 'obs.reset' },
+    ]);
+
+    const boot = await loadProfileState(store, () => 'unused');
+
+    expect(boot.firstRunIdx).toBe(2);
+    expect(boot.accumulator.snapshot('room.exit').counts.action_repertoire).toEqual([1, 1]);
+  });
+
+  it('warns once when malformed observations were skipped', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = new MemoryEventStore();
+    await store.setMeta('player_id', 'me');
+    const base = { v: 2 as const, t_ms: 0, player_id: 'me', session_id: 's', run_idx: 0, room_idx: 0, enc_idx: 0 };
+    await store.append([
+      { ...base, seq: 0, type: 'obs.record', skill: 'distance', num: '1', den: 1 },
+      { ...base, seq: 1, type: 'obs.defense', label: 'teleport' },
+    ]);
+    await loadProfileState(store, () => 'unused');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('2');
+    warn.mockRestore();
+  });
+
   it('a store that throws degrades to a fresh in-memory profile instead of crashing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const broken: EventStore = {

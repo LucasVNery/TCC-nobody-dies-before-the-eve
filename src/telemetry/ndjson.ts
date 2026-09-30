@@ -40,20 +40,33 @@ export function parseNdjson(text: string): { events: LoggedEvent[]; invalidLines
   return { events, invalidLines };
 }
 
+export interface ImportResult {
+  imported: number;
+  invalidLines: number;
+  /** player_id adopted from the file (undefined when nothing was imported). */
+  playerId: string | undefined;
+  /**
+   * player_ids in the file that differ from the store's previous player_id
+   * (empty when the store had none). Their events stay in the store, but only
+   * the adopted player's are replayed.
+   */
+  foreignPlayerIds: string[];
+}
+
 /**
  * Merges an exported history into `store` (idempotent: the store keys events
  * by (session_id, seq)) and adopts the player_id of the file's most recent
  * event, so the rebuilt profile is the imported player's.
  */
-export async function importInto(
-  store: EventStore,
-  text: string,
-): Promise<{ imported: number; invalidLines: number; playerId: string | undefined }> {
+export async function importInto(store: EventStore, text: string): Promise<ImportResult> {
   const { events, invalidLines } = parseNdjson(text);
-  if (events.length === 0) return { imported: 0, invalidLines, playerId: undefined };
+  if (events.length === 0) return { imported: 0, invalidLines, playerId: undefined, foreignPlayerIds: [] };
+  const previous = await store.getMeta<string>('player_id');
+  const foreignPlayerIds =
+    previous === undefined ? [] : [...new Set(events.map((e) => e.player_id))].filter((id) => id !== previous);
   await store.append(events);
   const ordered = orderEvents(events);
   const playerId = ordered[ordered.length - 1].player_id;
   await store.setMeta('player_id', playerId);
-  return { imported: events.length, invalidLines, playerId };
+  return { imported: events.length, invalidLines, playerId, foreignPlayerIds };
 }
