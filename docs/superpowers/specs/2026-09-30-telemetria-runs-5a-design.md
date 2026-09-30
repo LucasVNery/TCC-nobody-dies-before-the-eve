@@ -58,7 +58,7 @@ Entregar a infraestrutura de dados sobre a qual 5b (preditor) e 6 (boss) serão 
   - `ndjson.ts` — exportação/importação com deduplicação.
 - `combat/encounter.ts`: passa a **receber** o perfil (`ProfileSink`) pelo construtor em vez de criá-lo; ganha `respawnEnemy(pos)` e `resetPlayer(pos)`; emite os eventos de combate novos (§4.3).
 - `core/events.ts`: eventos novos do bus (`player.hurt`, `enemy.hurt`, `enemy.death`, `enemy.attack_start`, `player.defense`, `player.death`).
-- `scenes/ArenaScene.ts`: instancia `IndexedDbEventStore` → reconstrói o perfil → cria `RunDirector` e `TelemetryRecorder`; HP e "Run N · Sala M · Encontro k/3" no HUD de dev; teclas F7 (resetar perfil), F8 (exportar), F9 (importar) listadas no texto de controles.
+- `scenes/ArenaScene.ts`: instancia `IndexedDbEventStore` → reconstrói o perfil → cria `RunDirector` e `TelemetryRecorder`; HP e "Run N · Sala M · Encontro k/3" no HUD de dev; teclas F2 (resetar perfil), F8 (exportar), F9 (importar) listadas no texto de controles.
 - Dependência de desenvolvimento nova: `fake-indexeddb` (só para testes).
 - Atualizações no documento consolidado (§8).
 
@@ -79,7 +79,7 @@ Entregar a infraestrutura de dados sobre a qual 5b (preditor) e 6 (boss) serão 
 3. Após cada `applyRoomBoundary()`, um `profile.snapshot` com `at: 'room.exit'` é gravado no log.
 4. **Equivalência de reconstrução:** o perfil reconstruído a partir do log (`rebuildProfile`) é idêntico ao perfil ao vivo — mesmo `snapshot()`, mesmos `domain`/`confidence`/`omission` em ambos os relógios — num teste que roda várias runs completas simuladas.
 5. Recarregar a página reconstrói o perfil e o jogo continua a numeração de runs de onde parou.
-6. F7 grava `obs.reset`; a reconstrução seguinte parte do último marcador; o histórico anterior continua no store e na exportação.
+6. F2 grava `obs.reset`; a reconstrução seguinte parte do último marcador; o histórico anterior continua no store e na exportação.
 7. Exportar → limpar store → importar produz um store com os mesmos eventos (ida e volta sem perda, sem duplicatas mesmo importando duas vezes).
 8. Suite completa + typecheck limpos.
 
@@ -102,7 +102,7 @@ Constantes novas em `combat/movementDefs.ts` (valores iniciais, ajustáveis — 
 - `PlayerController.hp`, `takeDamage(n)`, `isDead`; `AssaltanteController.hp`, `takeDamage(n)`, `isDead`.
 - **Dano do jogador é aplicado no máximo uma vez por ação**: hoje `Encounter.step()` testa a sobreposição do leque do jogador com o hurtbox do Assaltante a cada tick durante toda a fase ativa. Um guarda `hitAppliedThisAction` (resetado a cada `player.action`) impede que um golpe aplique dano 9 vezes. O `onPlayerHitLanded()` existente (resolução de `punish`) continua sendo chamado como hoje; o dano se soma a ele, não o substitui.
 - O dano no jogador acontece no ramo `else` já existente de `Encounter.step()` (golpe não mitigado, que hoje chama `enterStagger()` + emite `player.hit_unmitigated`).
-- Um Assaltante morto não ataca nem se move; um jogador morto não aceita input. `RunDirector` trata a morte no mesmo tick (§3.2), então esses estados duram no máximo o tick em que ocorrem.
+- Os controllers **não** ganham bloqueio de comportamento por morte (`isDead` só é consultado): `RunDirector` trata a morte no mesmo tick (§3.2), então o estado "morto" nunca sobrevive a um tick. Isso também mantém intactos os testes existentes de `Encounter`, que rodam sem `RunDirector` e podem passar de 5 golpes não mitigados.
 
 ### 3.2 `RunDirector`
 
@@ -140,7 +140,7 @@ se player.isDead:
 
 - Construtor: `new Encounter(playerHurtbox, assaltanteHurtbox, profile: ProfileSink)`. `readonly profile` passa a ser do tipo `ProfileSink`.
 - Testes existentes que usam `encounter.profile` para leitura (`snapshot()`, `domain()` etc.) passam um `ProfileAccumulator` real e leem dele diretamente.
-- `respawnEnemy(pos)`: HP cheio, estado `idle`, fecha qualquer oportunidade aberta pelo Assaltante (desfecho `invalid`, `reason: 'source_interrupted'` — motivo já existente em `InvalidReason`) para não vazar denominador; reseta `defenseRecordedThisAttack`.
+- `respawnEnemy(pos, reason)`: HP cheio, estado `idle`, fecha qualquer oportunidade aberta pelo Assaltante como `invalid` com o `reason` dado — `'source_interrupted'` quando o Assaltante morre, `'player_dead'` quando a run acaba (ambos já existem em `InvalidReason`) — para não vazar denominador; reseta `defenseRecordedThisAttack`.
 - `resetPlayer(pos)`: HP cheio, poise cheio, estado `idle`, arma padrão.
 
 ---
@@ -172,13 +172,13 @@ Fonte da verdade para reconstrução. Uma linha por chamada de escrita no perfil
 | `obs.action` | `{actionType, weaponId?}` | `recordAction()` |
 | `obs.defense` | `{label}` | `recordDefense()` |
 | `obs.boundary` | `{kind: 'encounter' \| 'room'}` | `applyEncounterBoundary()` / `applyRoomBoundary()` |
-| `obs.reset` | `{}` | `resetSession()` (disparado só pelo F7) |
+| `obs.reset` | `{}` | `resetSession()` (disparado só pelo F2) |
 
 **Por que gravar observações e não só eventos brutos:** algumas entradas do perfil são calculadas com estado ao vivo que não está num evento — a dim 6 roda `isPatientAttack()` com a previsão de ameaça daquele instante. Reaplicar as observações reproduz o perfil **exatamente**, e reanalisar com outros γ/κ ou sem uma dimensão (corte D1) sai direto delas. Reanálises que mudam *o que conta* (ex.: nova definição de paciência) usam a camada B, com os limites dos dados gravados.
 
 **Captura:** `ProfileSink` é a interface com os 7 métodos de escrita acima. `ProfileAccumulator implements ProfileSink` (sem mudança de comportamento). `RecordingProfile implements ProfileSink` recebe o acumulador real e o recorder, grava a `obs.*` e repassa a chamada. O `Encounter` só conhece `ProfileSink`.
 
-**Agregação de alta frequência:** a dim 5 (`distance`) chama `record()` a cada tick (60/s). `RecordingProfile` acumula `num`/`den` por `skill` e grava **um** `obs.record` somado quando: (a) passam 250 ms de simulação desde o último flush daquela skill, ou (b) antes de repassar qualquer `applyEncounterBoundary`/`applyRoomBoundary`/`resetSession`. Como `DecayedRatio.add()` só soma em contadores pendentes até a próxima fronteira, somar antes ou depois é aritmeticamente idêntico — **desde que o flush aconteça antes de toda fronteira**, que é exatamente a regra (b). O repasse ao acumulador real continua imediato (o perfil ao vivo não fica atrasado); só a gravação é agregada.
+**Agregação de alta frequência:** a dim 5 (`distance`) chama `record()` a cada tick (60/s). `RecordingProfile` acumula `num`/`den` por `skill` e grava **um** `obs.record` somado quando: (a) passam 250 ms de simulação desde o último flush daquela skill, ou (b) antes de repassar qualquer `applyEncounterBoundary`/`applyRoomBoundary`/`resetSession`. Como `DecayedRatio.add()` só soma em contadores pendentes até a próxima fronteira, somar antes ou depois é aritmeticamente idêntico — **desde que o flush aconteça antes de toda fronteira**, que é exatamente a regra (b). O **repasse** ao acumulador real também é agregado e acontece no mesmo flush (revisado ao escrever o plano): evidência pendente é inobservável — `domain()`/`confidence()`/`snapshot()` só leem contadores já dobrados por uma fronteira —, então atrasar o repasse até o flush não muda nenhuma leitura, e faz o acumulador ao vivo e a reconstrução executarem **exatamente as mesmas somas de ponto flutuante na mesma ordem** (igualdade bit a bit, sem tolerância). Restrição que isso impõe: uma mesma `skill` não pode ser alimentada ao mesmo tempo por `record()` (agregado) e por `recordOutcome()` (imediato) — hoje não é (`distance`/`patience` vs. `punish`).
 
 ### 4.3 Camada B — contexto
 
@@ -248,7 +248,7 @@ Perda máxima numa queda abrupta ≈ 2 s. Falha de escrita (cota, modo privado s
 
 ### 5.4 Resetar, exportar, importar (teclas de dev)
 
-- **F7 — resetar perfil:** repassa `resetSession()` via `RecordingProfile` (gera `obs.reset`). Nada é apagado do store.
+- **F2 — resetar perfil** (F7 descartada: abre o diálogo de *caret browsing* no Chrome/Firefox): repassa `resetSession()` via `RecordingProfile` (gera `obs.reset`). Nada é apagado do store.
 - **F8 — exportar:** `readAll()` → `.ndjson` (uma linha JSON por evento) baixado como `tcc-historico-<player_id-curto>-<data>.ndjson`.
 - **F9 — importar:** seletor de arquivo; valida cada linha (`v === 2`, campos do envelope presentes), **mescla** com o store atual (a chave `[session_id, seq]` descarta duplicatas), adota o `player_id` do arquivo, e reconstrói o perfil. Linhas inválidas são contadas e reportadas em `console.warn`, sem abortar a importação.
 
