@@ -3,6 +3,7 @@ import type { SkillId, Clock, ProfileSnapshotPayload, ProfileOutcome } from './t
 import { DecayedRatio } from './decayedRatio';
 import { EntropyAccumulator } from './entropyAccumulator';
 import { ACTION_TYPES, WEAPON_IDS, type ActionType } from '../combat/actionRegistry';
+import type { ProfileSink } from './profileSink';
 
 export const DEFENSIVE_LABELS = ['dodge', 'block', 'parry', 'retreat'] as const;
 export type DefensiveLabel = (typeof DEFENSIVE_LABELS)[number];
@@ -29,7 +30,7 @@ interface EntropyDim {
   everRecorded: boolean;
 }
 
-export class ProfileAccumulator {
+export class ProfileAccumulator implements ProfileSink {
   private trait = new Map<SkillId, SkillRatios>();
   private state = new Map<SkillId, SkillRatios>();
   private entropyDims = new Map<SkillId, EntropyDim>();

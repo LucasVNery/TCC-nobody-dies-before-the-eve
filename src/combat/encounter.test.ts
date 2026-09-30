@@ -4,6 +4,7 @@ import { Encounter } from './encounter';
 import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';
+import type { ProfileSink } from '../profile/profileSink';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -586,5 +587,31 @@ describe('Encounter', () => {
       expect(hitEvents.length).toBeGreaterThan(0);
       expect(prediction !== null).toBe(hitEvents.length > 0);
     });
+  });
+
+  it('forwards profile writes to an injected ProfileSink instead of creating its own', () => {
+    const calls: string[] = [];
+    const sink: ProfileSink = {
+      record: (skill) => calls.push(`record:${skill}`),
+      recordOutcome: (skill, outcome) => calls.push(`outcome:${skill}:${outcome}`),
+      recordAction: (actionType) => calls.push(`action:${actionType}`),
+      recordDefense: (label) => calls.push(`defense:${label}`),
+      applyEncounterBoundary: () => calls.push('boundary:encounter'),
+      applyRoomBoundary: () => calls.push('boundary:room'),
+      resetSession: () => calls.push('reset'),
+    };
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 500, y: 500, width: 20, height: 20 },
+      sink,
+    );
+    expect(encounter.profile).toBe(sink);
+
+    encounter.player.tryAction('sword_shield.light');
+    encounter.step(STEP_MS);
+
+    expect(calls).toContain('action:light');
+    expect(calls).toContain('record:patience');
+    expect(calls).toContain('record:distance');
   });
 });

@@ -5,29 +5,36 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { PlayerController } from './playerController';
 import { AssaltanteController } from './assaltanteController';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
+import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
 import { ATTACK_REACH } from './movementDefs';
 import type { AABB } from './types';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';
 import { isPatientAttack } from './patience';
 
-export class Encounter {
+export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly bus: EventBus<GameEvents>;
   readonly opportunities: OpportunitySystem;
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
-  readonly profile: ProfileAccumulator;
+  /**
+   * Write side of the profile. Defaults to a fresh `ProfileAccumulator` so
+   * existing call sites (and tests that read `encounter.profile.domain(...)`)
+   * keep working; `RunDirector`/telemetry inject a `RecordingProfile` so the
+   * profile outlives encounters and runs.
+   */
+  readonly profile: P;
   // Guards dim 4: at most one recordDefense() (or unmitigated-hit event) per
   // attack window. Reset whenever the Assaltante opens a new 'dodge'
   // opportunity (i.e. starts a new attack).
   private defenseRecordedThisAttack = false;
 
-  constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB) {
+  constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB, profile?: P) {
     this.bus = new EventBus<GameEvents>();
     this.opportunities = new OpportunitySystem(this.bus);
     this.player = new PlayerController(this.bus, playerHurtbox);
     this.assaltante = new AssaltanteController(this.bus, this.opportunities, assaltanteHurtbox);
-    this.profile = new ProfileAccumulator();
+    this.profile = profile ?? (new ProfileAccumulator() as unknown as P);
 
     this.bus.on('player.action', (e) => {
       this.profile.recordAction(e.actionType, e.weaponId);
