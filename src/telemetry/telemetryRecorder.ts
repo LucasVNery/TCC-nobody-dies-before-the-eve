@@ -12,6 +12,14 @@ const CONTEXT_EVENTS = [
   'player.death', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'opp.open', 'opp.close',
 ] as const;
 
+/**
+ * Every recorder subscription runs before the game's own handlers (Encounter
+ * subscribes first, in its constructor), so an event is always logged before
+ * anything its handlers cause — e.g. player.dodge before the player.defense /
+ * obs.defense it produces — and its ctx describes the moment of the trigger.
+ */
+const FIRST = { prepend: true } as const;
+
 export interface TelemetryRecorderOptions {
   playerId: string;
   sessionId: string;
@@ -47,7 +55,7 @@ export class TelemetryRecorder {
     const bus = encounter.bus;
 
     for (const type of CONTEXT_EVENTS) {
-      bus.on(type, (payload: unknown) => this.logWithCtx(type, payload));
+      bus.on(type, (payload: unknown) => this.logWithCtx(type, payload), FIRST);
     }
     bus.on('run.start', (e) => {
       this.runIdx = e.run_idx;
@@ -55,22 +63,22 @@ export class TelemetryRecorder {
       this.encIdx = 0;
       this.lastActionT = null;
       this.log('run.start', { ...e });
-    });
+    }, FIRST);
     bus.on('room.enter', (e) => {
       this.roomIdx = e.room_idx;
       this.encIdx = 0;
       this.log('room.enter', { ...e });
-    });
+    }, FIRST);
     bus.on('encounter.start', (e) => {
       this.encIdx = e.enc_idx;
       this.log('encounter.start', { ...e });
-    });
-    bus.on('encounter.end', (e) => this.log('encounter.end', { ...e }));
-    bus.on('profile.snapshot', (e) => this.log('profile.snapshot', { partial: e.partial, ...e.snapshot }));
+    }, FIRST);
+    bus.on('encounter.end', (e) => this.log('encounter.end', { ...e }), FIRST);
+    bus.on('profile.snapshot', (e) => this.log('profile.snapshot', { partial: e.partial, ...e.snapshot }), FIRST);
     bus.on('run.end', (e) => {
       this.log('run.end', { ...e });
       this.opts.onRunEnd?.();
-    });
+    }, FIRST);
   }
 
   /** Call once per fixed step, before the simulation step. */

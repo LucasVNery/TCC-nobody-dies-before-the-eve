@@ -122,8 +122,9 @@ export class AssaltanteController implements ThreatAssessor {
         this.state = 'attacking';
         this.phaseElapsedMs = 0;
         this._attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this._attackDirection;
-        this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
+        // attack start first: it is the cause of the dodge window (log order = causal order)
         this.bus.emit('enemy.attack_start', {});
+        this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
       } else {
         this.state = 'chasing';
         const direction = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : { x: 0, y: 0 };

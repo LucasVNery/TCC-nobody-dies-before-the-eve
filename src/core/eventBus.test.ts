@@ -47,4 +47,23 @@ describe('EventBus', () => {
     const bus = new EventBus<TestEvents>();
     expect(() => bus.emit('ping', { n: 5 })).not.toThrow();
   });
+
+  it('prepend: true runs the handler before handlers registered earlier', () => {
+    const bus = new EventBus<TestEvents>();
+    const calls: string[] = [];
+    bus.on('ping', () => calls.push('first-registered'));
+    bus.on('ping', () => calls.push('prepended'), { prepend: true });
+    bus.on('ping', () => calls.push('last-registered'));
+    bus.emit('ping', { n: 6 });
+    expect(calls).toEqual(['prepended', 'first-registered', 'last-registered']);
+  });
+
+  it('a prepended handler can be unsubscribed', () => {
+    const bus = new EventBus<TestEvents>();
+    const handler = vi.fn();
+    const unsubscribe = bus.on('ping', handler, { prepend: true });
+    unsubscribe();
+    bus.emit('ping', { n: 7 });
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

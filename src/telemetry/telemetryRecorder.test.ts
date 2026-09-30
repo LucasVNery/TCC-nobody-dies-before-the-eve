@@ -102,6 +102,68 @@ describe('TelemetryRecorder', () => {
     expect(runStarts[runStarts.length - 1].run_idx).toBe(1);
   });
 
+  describe('log order is causal order (triggers before their effects)', () => {
+    const idx = (events: LoggedEvent[], pred: (e: LoggedEvent) => boolean) => events.findIndex(pred);
+
+    it('player.dodge precedes the player.defense (and obs.defense) it causes', () => {
+      const stack = makeStack();
+      stack.director.start();
+      stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      stack.step(16); // Assaltante starts its attack
+      stack.encounter.player.tryDodge();
+      const events = stack.recorder.drain();
+      const dodge = idx(events, (e) => e.type === 'player.dodge');
+      const defense = idx(events, (e) => e.type === 'player.defense' && e.label === 'dodge');
+      const obs = idx(events, (e) => e.type === 'obs.defense' && e.label === 'dodge');
+      expect(dodge).toBeGreaterThanOrEqual(0);
+      expect(defense).toBeGreaterThan(dodge);
+      expect(obs).toBeGreaterThan(dodge);
+      // ctx describes the moment of the dodge itself
+      expect((events[dodge].ctx as Record<string, unknown>).e_state).toBe('attacking');
+    });
+
+    it('player.action precedes the opp.close{missed} it causes', () => {
+      const stack = makeStack();
+      stack.director.start();
+      stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      stack.step(16); // Assaltante starts its attack -> dodge window open
+      stack.encounter.player.tryAction('sword_shield.light');
+      const events = stack.recorder.drain();
+      const action = idx(events, (e) => e.type === 'player.action');
+      const missed = idx(events, (e) => e.type === 'opp.close' && e.outcome === 'missed');
+      expect(action).toBeGreaterThanOrEqual(0);
+      expect(missed).toBeGreaterThan(action);
+      expect(idx(events, (e) => e.type === 'obs.action')).toBeGreaterThan(action);
+    });
+
+    it('enemy.attack_start precedes its opp.open', () => {
+      const stack = makeStack();
+      stack.director.start();
+      stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      stack.step(16);
+      const events = stack.recorder.drain();
+      const start = idx(events, (e) => e.type === 'enemy.attack_start');
+      const open = idx(events, (e) => e.type === 'opp.open' && e.opp_type === 'dodge');
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(open).toBeGreaterThan(start);
+    });
+
+    it('an expired dodge window precedes the retreat defense it causes', () => {
+      const stack = makeStack();
+      stack.director.start();
+      stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      stack.step(16); // attack starts
+      // walk away so the swing misses and the dodge window expires
+      stack.encounter.setPlayerMoveInput(-1, 0);
+      for (let i = 0; i < 120; i++) stack.step(16);
+      const events = stack.recorder.drain();
+      const expired = idx(events, (e) => e.type === 'opp.close' && e.opp_type === 'dodge' && e.outcome === 'expired');
+      const retreat = idx(events, (e) => e.type === 'player.defense' && e.label === 'retreat');
+      expect(expired).toBeGreaterThanOrEqual(0);
+      expect(retreat).toBeGreaterThan(expired);
+    });
+  });
+
   it('flushPending before drain puts the pending aggregated record in the buffer', () => {
     const stack = makeStack();
     stack.director.start();
