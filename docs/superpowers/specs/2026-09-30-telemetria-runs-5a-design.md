@@ -54,7 +54,8 @@ Entregar a infraestrutura de dados sobre a qual 5b (preditor) e 6 (boss) serão 
   - `recordingProfile.ts` — `RecordingProfile implements ProfileSink`: grava `obs.*` e repassa ao acumulador real; agrega `record()` de alta frequência (§4.2).
   - `telemetryRecorder.ts` — assina o `EventBus`, monta envelope + `ctx`, amostra posição a 4 Hz, mantém o buffer.
   - `eventStore.ts` — interface `EventStore` + `IndexedDbEventStore`.
-  - `replay.ts` — `rebuildProfile(events): ProfileAccumulator`.
+  - `replay.ts` — `rebuildProfile(events, playerId?): ProfileAccumulator` (e `rebuildProfileWithStats`, que também conta as `obs.*` malformadas puladas).
+  - `abandonedRun.ts` — `findAbandonedRun(events, playerId)`: detecta a run deixada aberta ao fechar a aba (§3.2).
   - `ndjson.ts` — exportação/importação com deduplicação.
 - `combat/encounter.ts`: passa a **receber** o perfil (`ProfileSink`) pelo construtor em vez de criá-lo; ganha `respawnEnemy(pos)` e `resetPlayer(pos)`; emite os eventos de combate novos (§4.3).
 - `core/events.ts`: eventos novos do bus (`player.hurt`, `enemy.hurt`, `enemy.death`, `enemy.attack_start`, `player.defense`, `player.death`).
@@ -109,27 +110,32 @@ Constantes novas em `combat/movementDefs.ts` (valores iniciais, ajustáveis — 
 TypeScript puro, sem Phaser, testável isolado. É dono do `Encounter` e da contagem de índices. Após cada `encounter.step(stepMs)`, verifica:
 
 ```
-se assaltante.isDead:
-    emite encounter.end + enemy.death
+se player.isDead:                              // verificado primeiro: vence a morte simultânea
+    emite player.death
+    encounter.respawnEnemy(posAtual, 'player_dead')   // fecha as janelas abertas como invalid, dentro da run
+    emite encounter.end
+    profile.applyEncounterBoundary()           // encontro interrompido conta
+    profile.applyRoomBoundary()                // sala interrompida conta
+    grava profile.snapshot('room.exit') com partial: true
+    emite run.end {cause: 'death', duration_ms, rooms_cleared, encounters_cleared}
+    runIdx += 1 ; novo seed
+    encounter.resetPlayer(posInicial) ; encounter.respawnEnemy(pontoDeSpawn(), 'source_interrupted')
+    emite run.start, room.enter, encounter.start
+
+senão, se assaltante.isDead:
+    emite enemy.death
+    encounter.respawnEnemy(pontoDeSpawn(), 'source_interrupted')  // longe do jogador; fecha janelas como invalid
+    emite encounter.end
     profile.applyEncounterBoundary()
     encIdx += 1
     se encIdx == K:
         profile.applyRoomBoundary()
         grava profile.snapshot('room.exit') com partial: false
         roomIdx += 1 ; encIdx = 0 ; emite room.enter
-    encounter.respawnEnemy(pontoDeSpawn())      // longe do jogador
     emite encounter.start
-
-se player.isDead:
-    emite player.death
-    profile.applyEncounterBoundary()           // encontro interrompido conta
-    profile.applyRoomBoundary()                // sala interrompida conta
-    grava profile.snapshot('room.exit') com partial: true
-    emite run.end {cause: 'death', duration_ms, rooms, encounters}
-    runIdx += 1 ; novo seed
-    encounter.resetPlayer(posInicial) ; encounter.respawnEnemy(...)
-    emite run.start, room.enter, encounter.start
 ```
+
+**Run abandonada (fechar a aba no meio da run).** É o fim mais comum de uma sessão, e deixaria a última run sem `run.end`, sem fronteiras e sem snapshot parcial — com a evidência pendente vazando para a primeira sala da sessão seguinte (exatamente o vazamento que a regra da sala parcial evita). Por isso, na abertura do jogo (§5.3), se a última run do `player_id` atual tem `run.start` sem `run.end` correspondente, ela é fechada **antes** de `director.start()`, via `RecordingProfile` (as fronteiras entram no log como `obs.*` comuns e a reconstrução continua exata): `encounter.end` → `obs.boundary {kind: 'encounter'}` → `obs.boundary {kind: 'room'}` → `profile.snapshot {partial: true}` → `run.end {cause: 'abandoned', …}`. Esses eventos pertencem à sessão nova (novo `session_id`/`seq`, `t_ms` da sessão nova), mas o envelope leva o `run_idx`/`room_idx`/`enc_idx` **da run antiga** (os do último evento gravado dela). Os demais campos de `run.end` são derivados dos eventos gravados daquela run, todos na sessão do seu `run.start`: `duration_ms` = `t_ms` do último evento − `t_ms` do `run.start` (a cauda perdida com a aba, ≤ um intervalo de gravação, não conta); `rooms_cleared` = snapshots com `partial: false`; `encounters_cleared` = número de `enemy.death`. Implementação: `telemetry/abandonedRun.ts` (`findAbandonedRun`, pura) + `TelemetryStack.closeAbandonedRun()`.
 
 - **Por que a sala parcial conta:** evidência pendente não aplicada ficaria "vazando" para a primeira sala da run seguinte, misturando runs no snapshot. Marcar `partial: true` preserva a informação para análise sem descartar dados.
 - **Ponto de spawn:** escolhido com `createPrng(seed)` da run (primeiro uso real do PRNG em jogo), entre posições candidatas nas bordas da arena, a pelo menos `MIN_SPAWN_DISTANCE` (300 px) do jogador. O `seed` vai no `run.start` — é o que torna uma run reproduzível para análise.
@@ -159,7 +165,8 @@ Toda linha gravada:
 - `t_ms`: **tempo de simulação** (soma dos `stepMs` do loop fixo), não relógio de parede — determinístico e imune a pausa/aba em segundo plano.
 - `player_id`: UUID gerado na primeira execução e guardado no store; identidade do perfil de longo prazo. Sobrevive a "resetar perfil".
 - `session_id`: UUID novo a cada abertura do jogo. **Apenas rótulo** — não reseta nada.
-- `run_idx`: contador global de runs do `player_id` (continua após recarregar a página; lido do último `run.start` no store).
+- `run_idx`: contador global de runs do `player_id` (continua após recarregar a página; lido do último `run.start` desse `player_id` no store).
+- **Ordem do log = ordem causal:** todo evento do bus é gravado **antes** de qualquer coisa que os seus handlers causem. O `TelemetryRecorder` assina o bus com `on(type, handler, { prepend: true })`, ficando à frente dos handlers do `Encounter` (registrados antes, no construtor dele). Ex.: `player.dodge` → `obs.defense` → `player.defense {dodge}`; `player.action` → `obs.action` → `opp.close {missed}`; `opp.close {dodge, expired}` → `obs.defense` → `player.defense {retreat}`; `enemy.attack_start` → `opp.open {dodge}` (o Assaltante emite o início do ataque antes de abrir a janela). O `ctx` descreve o instante do evento gatilho.
 
 ### 4.2 Camada A — observações do perfil (`obs.*`)
 
@@ -182,7 +189,11 @@ Fonte da verdade para reconstrução. Uma linha por chamada de escrita no perfil
 
 ### 4.3 Camada B — contexto
 
-**Ciclo de vida:** `session.start {wall_clock_iso, game_version, schema_v}` · `run.start {seed}` · `run.end {cause, duration_ms, rooms_cleared, encounters_cleared}` · `room.enter` · `encounter.start` · `encounter.end` · `profile.snapshot {partial, ...ProfileSnapshotPayload}`
+**Ciclo de vida:** `session.start {wall_clock_iso, game_version, schema_v, persistent}` · `run.start {seed}` · `run.end {cause, duration_ms, rooms_cleared, encounters_cleared}` · `room.enter` · `encounter.start` · `encounter.end` · `profile.snapshot {partial, ...ProfileSnapshotPayload}`
+
+- `persistent` (`session.start`): `true` quando a sessão grava num `IndexedDbEventStore` e o histórico foi restaurado; `false` quando degradou para memória (nada desta sessão sobrevive a um recarregamento).
+- `cause` (`run.end`): `'death'` (o jogador morreu) ou `'abandoned'` (run deixada aberta ao fechar a aba, fechada na abertura seguinte — §3.2).
+- `partial` (`profile.snapshot`): `true` quando a sala foi interrompida (morte do jogador ou run abandonada), `false` quando a sala terminou com K encontros.
 
 **Combate** (todos com `ctx`):
 
@@ -197,7 +208,9 @@ Fonte da verdade para reconstrução. Uma linha por chamada de escrita no perfil
 | `enemy.attack_start` | `{}` | novo — início do telegraph |
 | `enemy.hurt` | `{dmg, hp_after, actionId}` | novo |
 | `enemy.death` | `{}` | novo |
-| `opp.open` / `opp.close` | como hoje | bus (existe) |
+| `opp.open` / `opp.close` | como hoje, mas o `type` do payload (`'dodge' \| 'punish'`) é gravado como **`opp_type`** (o `type` do envelope é o tipo do evento) | bus (existe) |
+
+A ordem de gravação desses eventos segue a ordem causal (§4.1).
 
 ```ts
 ctx = { dist, p_pos: [x, y], e_pos: [x, y], aim: [x, y], p_state, e_state,
@@ -219,14 +232,15 @@ Posições arredondadas a 1 casa decimal; `aim` normalizado a 3 casas. `ms_since
 ```ts
 interface EventStore {
   append(events: readonly LoggedEvent[]): Promise<void>;
-  readAll(): Promise<LoggedEvent[]>;          // ordenado por (sessão em ordem de início, seq)
-  getMeta(key: string): Promise<unknown>;     // player_id, etc.
+  readAll(): Promise<LoggedEvent[]>;          // ordenado por (session.start wall_clock_iso, seq)
+  getMeta<T>(key: string): Promise<T | undefined>;   // player_id, etc.
   setMeta(key: string, value: unknown): Promise<void>;
-  clear(): Promise<void>;                      // só usado por testes e pela importação
+  clear(): Promise<void>;                      // só usado por testes
+  close(): void;                               // a cena fecha só depois que as gravações pendentes terminam
 }
 ```
 
-`IndexedDbEventStore`: banco `tcc-telemetry`, object store `events` com chave `[session_id, seq]` (garante a deduplicação por construção) e índice por ordem de gravação; object store `meta`. Implementado sobre a API nativa (sem wrapper de terceiros). Uma implementação em memória (`MemoryEventStore`) serve aos testes de lógica que não precisam de IndexedDB.
+`IndexedDbEventStore`: banco `tcc-telemetry`, object store `events` com chave `[session_id, seq]` (garante a deduplicação por construção); object store `meta`. Não há índice por ordem de gravação: a ordem cronológica é aplicada na leitura (`orderEvents`: sessões pela `wall_clock_iso` do seu `session.start`, depois `seq`). Implementado sobre a API nativa (sem wrapper de terceiros); uma abertura bloqueada por outra conexão (`onblocked`) é rejeitada, e a abertura do jogo cai para memória. Uma implementação em memória (`MemoryEventStore`) serve aos testes de lógica que não precisam de IndexedDB e de fallback quando o IndexedDB não está disponível.
 
 ### 5.2 Gravação em lote
 
@@ -239,10 +253,10 @@ Perda máxima numa queda abrupta ≈ 2 s. Falha de escrita (cota, modo privado s
 
 ### 5.3 Abertura do jogo
 
-1. `store.getMeta('player_id')` ou gera e grava um UUID novo.
-2. `store.readAll()` → `rebuildProfile(events)`: cria `ProfileAccumulator` novo e reaplica, em ordem, as `obs.*` **posteriores ao último `obs.reset`**, com os parâmetros atuais do código.
-3. `run_idx` inicial = último `run.start.run_idx` + 1 (ou 0).
-4. Grava `session.start` e inicia a primeira run.
+1. `store.getMeta('player_id')` ou gera e grava um UUID novo (o `player_id` atual; depois de uma importação, o adotado do arquivo).
+2. `store.readAll()` → `rebuildProfile(events, playerId)`: cria `ProfileAccumulator` novo e reaplica, em ordem, as `obs.*` **do `player_id` atual posteriores ao último `obs.reset` desse mesmo `player_id`**, com os parâmetros atuais do código. Eventos de outros `player_id` (que uma importação pode deixar no store) são ignorados. Uma `obs.*` malformada (ex.: `num: "1"`, `outcome`/`label`/`actionType`/`weaponId`/`kind` desconhecido) é pulada e contada; se houver alguma, um único `console.warn` informa quantas.
+3. `run_idx` inicial = maior `run.start.run_idx` **do `player_id` atual** + 1 (ou 0).
+4. Grava `session.start`; se a última run do `player_id` atual ficou sem `run.end` (aba fechada), fecha-a como `abandoned` (§3.2); inicia a primeira run.
 
 `resetSession()` deixa de ser chamado na abertura (D4 revisada). Com dezenas de milhares de observações a reaplicação leva milissegundos; checkpoint de perfil fica fora do escopo até ser necessário.
 
@@ -280,6 +294,14 @@ A conservação de desfechos (§2.4 do doc) continua valendo: o harness existent
 | Histórico crescer indefinidamente | Estimativa < 1 MB/h; revisitar com checkpoint/compactação só se necessário |
 | Navegador sem IndexedDB (modo privado) | Degrada para memória com aviso; jogo não quebra |
 | K = 3 e HPs mal calibrados deixam salas curtas/longas demais para o gate de confiança | Constantes centralizadas; calibrar em playtest, sem mudar a arquitetura |
+
+**Determinismo e fronteira de I/O.** A regra "nenhuma API de navegador (`Math.random`, `Date`, `crypto`, DOM) fora da cena" existe para manter a **lógica** determinística e testável (`combat/`, `profile/`, `game/`, e a parte lógica de `telemetry/`). `telemetry/eventStore.ts` é a fronteira de I/O de armazenamento designada e pode usar IndexedDB; ids e sementes continuam injetados pela cena.
+
+### 7.1 Limitações conhecidas
+
+- **Duas abas abertas ao mesmo tempo** gravam duas sessões intercaladas no mesmo store, mas a reconstrução reaplica sessões em sequência (pela ordem de início), não intercaladas: o perfil reconstruído na abertura seguinte é um perfil que nenhuma das duas abas tinha ao vivo. Aceito; não é travado neste sub-projeto.
+- **Crescimento do log sem compactação:** o histórico só cresce (estimativa < 1 MB/h); checkpoint/compactação ficam para quando for necessário.
+- **Run aberta ao importar:** F9 reinicia a cena sem encerrar a run corrente; ela é fechada como `abandoned` na próxima abertura em que o seu `player_id` for o atual.
 
 ---
 
