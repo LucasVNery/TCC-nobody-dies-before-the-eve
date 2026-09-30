@@ -5,6 +5,7 @@ import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';
 import type { ProfileSink } from '../profile/profileSink';
+import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP } from './movementDefs';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -613,5 +614,74 @@ describe('Encounter', () => {
     expect(calls).toContain('action:light');
     expect(calls).toContain('record:patience');
     expect(calls).toContain('record:distance');
+  });
+
+  it('a connecting player action damages the Assaltante exactly once, even across several active frames', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    const hurts: Array<{ dmg: number; hp_after: number; actionId: string }> = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
+
+    encounter.player.tryAction('sword_shield.light'); // active 100..200ms, well before the 400ms telegraph ends
+    runFor(encounter, 350);
+
+    expect(hurts).toEqual([{ dmg: 10, hp_after: ASSALTANTE_MAX_HP - 10, actionId: 'sword_shield.light' }]);
+    expect(encounter.assaltante.hp).toBe(ASSALTANTE_MAX_HP - 10);
+  });
+
+  it('an unmitigated Assaltante hit costs the player hp and emits player.hurt once', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    const hurts = vi.fn();
+    encounter.bus.on('player.hurt', hurts);
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - 20);
+    expect(hurts).toHaveBeenCalledTimes(1);
+    expect(hurts).toHaveBeenCalledWith({ dmg: 20, hp_after: PLAYER_MAX_HP - 20 });
+  });
+
+  it('a blocked hit costs no hp and emits player.defense {label: block}', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 20, y: 0, width: 20, height: 20 },
+    );
+    const defenses: Array<{ label: string }> = [];
+    encounter.bus.on('player.defense', (e) => defenses.push(e));
+    encounter.player.startBlock();
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
+    expect(defenses).toEqual([{ label: 'block' }]);
+  });
+
+  it('respawnEnemy closes the open dodge window as invalid with the given reason', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    encounter.bus.on('opp.close', (e) => closes.push(e));
+    encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('attacking');
+
+    encounter.respawnEnemy({ x: 800, y: 600 }, 'source_interrupted');
+
+    expect(closes.map((c) => [c.type, c.outcome, c.reason])).toEqual([['dodge', 'invalid', 'source_interrupted']]);
+    expect(encounter.assaltante.state).toBe('idle');
+    expect(encounter.assaltante.position).toEqual({ x: 800, y: 600 });
+  });
+
+  it('resetPlayer restores the player and a new action can damage again', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    encounter.player.takeDamage(90);
+    encounter.resetPlayer({ x: 0, y: 0 });
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
+    expect(encounter.player.state).toBe('idle');
   });
 });
