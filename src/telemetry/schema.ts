@@ -7,7 +7,7 @@ export const SCHEMA_VERSION = 2 as const;
  * Bump whenever gameplay/balance changes make older logs non-comparable
  * (hp, damage, timings, hitbox geometry). Written into every session.start.
  */
-export const GAME_VERSION = '0.0.1+5a';
+export const GAME_VERSION = '0.0.2+combatB';
 
 export interface Envelope {
   v: typeof SCHEMA_VERSION;

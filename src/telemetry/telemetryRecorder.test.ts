@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
-import type { LoggedEvent } from './schema';
+import { GAME_VERSION, type LoggedEvent } from './schema';
 import { PLAYER_START } from '../game/runDirector';
 
 function makeStack(onRunEnd?: () => void) {
@@ -162,6 +162,24 @@ describe('TelemetryRecorder', () => {
       expect(expired).toBeGreaterThanOrEqual(0);
       expect(retreat).toBeGreaterThan(expired);
     });
+
+    it('player.cancel is logged with ctx and precedes the player.dodge it causes', () => {
+      const stack = makeStack();
+      stack.director.start();
+      const player = stack.encounter.player;
+      player.tryAction('sword_shield.light');
+      stack.step(16 * 13); // past lockedMs (200ms) and into the recovery
+      expect(player.isInRecovery).toBe(true);
+      player.tryDodge();
+      const events = stack.recorder.drain();
+      const cancel = idx(events, (e) => e.type === 'player.cancel');
+      const dodge = idx(events, (e) => e.type === 'player.dodge');
+      expect(cancel).toBeGreaterThanOrEqual(0);
+      expect(dodge).toBeGreaterThan(cancel);
+      expect(events[cancel].by).toBe('dash');
+      expect(events[cancel].actionId).toBe('sword_shield.light');
+      expect(events[cancel].ctx).toBeDefined();
+    });
   });
 
   it('requeue puts a failed batch back in front of the buffer, so the next drain retries it in order', () => {
@@ -185,5 +203,11 @@ describe('TelemetryRecorder', () => {
     stack.recording.flushPending();
     const records = ofType(stack.recorder.drain(), 'obs.record');
     expect(records.map((r) => r.skill)).toContain('distance');
+  });
+});
+
+describe('game version', () => {
+  it('declares the combat B game version', () => {
+    expect(GAME_VERSION).toBe('0.0.2+combatB');
   });
 });
