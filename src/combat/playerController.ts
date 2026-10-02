@@ -185,7 +185,8 @@ export class PlayerController {
     if (action.weaponId !== this.equippedWeaponId) return;
     if (this.canStartAttack()) {
       this.startAction(action);
-    } else if (this.isBufferable()) {
+    } else if (this.isBufferable() && action.actionType !== 'charged') {
+      // the charged attack (Q) is never buffered: it needs a held press
       this.inputBuffer.push({ kind: 'attack', actionId }, this.clockMs);
     }
   }
@@ -214,7 +215,8 @@ export class PlayerController {
   tryDodge(): void {
     if (this.canDash()) {
       this.startDash();
-    } else if (this.isBufferable()) {
+    } else if (this.isBufferable() || this.dodgeCooldownRemainingMs > 0) {
+      // a dash blocked by the cooldown is buffered even from blocking/charging; the cooldown clears on its own
       this.inputBuffer.push({ kind: 'dash' }, this.clockMs);
     }
   }
@@ -224,8 +226,8 @@ export class PlayerController {
   }
 
   private canDash(): boolean {
-    if (this.isCharging || this.isInRecovery || this.state === 'blocking') return true;
-    return this.state === 'idle' && this.dodgeCooldownRemainingMs <= 0;
+    if (this.dodgeCooldownRemainingMs > 0) return false;
+    return this.isCharging || this.isInRecovery || this.state === 'blocking' || this.state === 'idle';
   }
 
   /** Inputs that cannot run now but will become runnable on their own (locked, stagger, dash, cooldowns). */
@@ -234,6 +236,7 @@ export class PlayerController {
   }
 
   private startAction(action: ActionDef): void {
+    this.inputBuffer.clear();
     if (this.isInRecovery) {
       this.bus.emit('player.cancel', { by: 'attack', actionId: this.currentAction!.id });
     }
@@ -249,6 +252,7 @@ export class PlayerController {
   }
 
   private startDash(): void {
+    this.inputBuffer.clear();
     if (this.isInRecovery) {
       this.bus.emit('player.cancel', { by: 'dash', actionId: this.currentAction!.id });
     }
@@ -293,6 +297,8 @@ export class PlayerController {
       this.bus.emit('player.cancel', { by: 'move', actionId: this.currentAction!.id });
       this.cancelAction();
     }
+    // Move-cancel is evaluated before advance(); the buffer is taken after it, so an input
+    // buffered earlier fires on the tick the state becomes executable.
     this.advance(stepMs);
     const input = this.inputBuffer.take((i) => this.canExecute(i), this.clockMs);
     if (input?.kind === 'attack') this.startAction(resolveAction(input.actionId));

@@ -671,4 +671,76 @@ describe('combat B: responsive combat', () => {
     player.step(500);
     expect(player.state).toBe('idle');
   });
+
+  it('Q tapped during the locked phase is never buffered: no charged action fires afterwards', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(100);
+    player.tryAction(CHARGED.id);
+    player.step(16);
+    player.releaseAction();
+    player.step(1000);
+    expect(log.filter((e) => e.type === 'player.action')).toHaveLength(1);
+    expect(player.currentActionDef).toBeNull();
+  });
+
+  it('the dash cooldown applies when blocking: dash is buffered and fires when the cooldown ends', () => {
+    const { player } = makePlayer();
+    player.tryDodge();
+    player.step(DODGE.durationMs); // cooldown starts
+    player.step(DODGE.cooldownMs - 100); // 100ms left
+    player.startBlock();
+    player.tryDodge();
+    expect(player.state).toBe('blocking');
+    player.step(100);
+    expect(player.state).toBe('dodging');
+  });
+
+  it('a dash buffered from blocking is dropped if the cooldown outlasts INPUT_BUFFER_MS', () => {
+    const { player } = makePlayer();
+    player.tryDodge();
+    player.step(DODGE.durationMs);
+    player.startBlock();
+    player.tryDodge(); // full cooldown left, > INPUT_BUFFER_MS
+    player.step(DODGE.cooldownMs);
+    expect(player.state).toBe('blocking');
+  });
+
+  it('the dash cooldown applies while charging: dash waits, then cancels the charge when the cooldown ends', () => {
+    const { player } = makePlayer();
+    player.tryDodge();
+    player.step(DODGE.durationMs);
+    player.step(DODGE.cooldownMs - 100);
+    player.tryAction(CHARGED.id);
+    player.tryDodge();
+    expect(player.state).toBe('acting');
+    player.step(100);
+    expect(player.state).toBe('dodging');
+  });
+
+  it('the dash cooldown applies in recovery: no cancel, buffered dash fires when it ends', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryDodge();
+    player.step(DODGE.durationMs);
+    player.step(DODGE.cooldownMs - 250); // 250ms left
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED); // recovery, ~50ms of cooldown left
+    player.tryDodge();
+    expect(player.state).toBe('acting');
+    expect(log.map((e) => e.type)).toEqual(['player.dodge', 'player.action']);
+    player.step(50);
+    expect(player.state).toBe('dodging');
+  });
+
+  it('a direct execution discards an older pending input', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED - 10);
+    player.tryAction(HEAVY.id); // buffered
+    player.step(10); // fires HEAVY directly from the buffer, clearing it
+    player.step(HEAVY.timing.startupMs); // no stale input must remain
+    expect(player.currentActionDef?.id).toBe(HEAVY.id);
+  });
 });

@@ -20,7 +20,7 @@ export interface PlayerCancelPayload {
   actionId: string;
 }
 
-export type PlayerHitUnmitigatedPayload= Record<string, never>;
+export type PlayerHitUnmitigatedPayload = Record<string, never>;
 
 export type EmptyPayload = Record<string, never>;
 
