@@ -207,7 +207,7 @@ Nenhum corte a priori. As dimensões que sobrevivem são resultado empírico do 
 | 3 | `opp.close` do tipo `punish` com desfecho ≠ `invalid` | `Encounter` → `profile.recordOutcome('punish', …)` | janela de punição = fase de recuperação do Assaltante (500 ms; 750 ms após parry) |
 | 4 | colisão do golpe inimigo + estado do jogador | `Encounter.step()` | `dodge` via evento `player.dodge` durante o ataque; `parry`/`block` resolvidos na colisão; `retreat` inferido quando a janela de esquiva expira sem contato e sem defesa. **No máximo um rótulo por ataque** (guarda `defenseRecordedThisAttack`) |
 | 5 | todo passo de simulação | `Encounter.step()` | `record('distance', emAlcance ? Δt : 0, Δt)` em **segundos** (correção de 18/08: antes era ms, o que distorcia a confiança) |
-| 6 | `player.action` | `Encounter` → `isPatientAttack()` | janela segura = nenhum inimigo consegue atingir o jogador durante o **comprometimento total** da ação (ver §12.6) |
+| 6 | `player.action` | `Encounter` → `isPatientAttack()` | janela segura = nenhum inimigo consegue atingir o jogador durante a parte **não cancelável** da ação, `lockedMs` (ver §12.6; até 12/09 era o comprometimento total, redefinido em 30/09/2026 pelo combate B) |
 
 > **RISCO ACEITO**
 >
@@ -216,6 +216,8 @@ Nenhum corte a priori. As dimensões que sobrevivem são resultado empírico do 
 > **ATENÇÃO: COMPARABILIDADE DE DADOS**
 >
 > A troca do hitbox retangular de 4 quadrantes pelo leque angular (07/09/2026, §16.3) mudou quando os ataques conectam (cobertura lateral de ±10 px para ±55 px no alcance máximo). Qualquer dado de playtest coletado **antes** dessa correção **não é comparável** com os dados posteriores, especialmente para as dims 3, 4 e 6.
+>
+> **Idem para o combate B (30/09/2026 a 01/10/2026).** A revisão de combate fluido (recuperação cancelável, movimento 160→220, dash 80→120, esquiva 250/200/300→180/150/200, stagger 350→250 ms, buffer de input, perseguição do Assaltante 90→125) mudou o ritmo do combate e **redefiniu a exposição da dim 6** (§12.6). Logs com `game_version` anterior a `0.0.2+combatB` **não são comparáveis** com os posteriores para as dims 4, 5 e 6 (mesmo tratamento da troca do leque, 07/09). O `game_version` é gravado no log de telemetria (`GAME_VERSION` em `telemetry/schema.ts`).
 
 ---
 
@@ -281,6 +283,8 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 | 07/09 | Kit defensivo + barra de postura (**dim 4**) | bloqueio, parry, recuo, postura, stagger |
 | 07/09 | Leque de ataque em ângulo livre | `AttackSector` substitui o AABB de 4 quadrantes (corrige falso `retreat` na dim 4) |
 | 12/09 | Predicado de janela segura (**dim 6**) | `ThreatAssessor`, `predictThreatMs`, `isPatientAttack` |
+| 30/09 | Revisão de combate A: câmera e escala | zoom da câmera do mundo e personagens maiores, com câmera de UI sem zoom (`1f0aa4f`) |
+| 01/10 | Revisão de combate B: combate fluido | recuperação cancelável por andar/dash/ataque, dash responsivo (também durante o carregamento), andar bloqueando a 50%, buffer de input de 120 ms, evento `player.cancel`, `lockedMs`; dim 6 redefinida (§12.6); `game_version` `0.0.2+combatB`. Spec: `docs/superpowers/specs/2026-09-30-combate-fluido-b-design.md` |
 
 ### 5.2 Próximos passos
 
@@ -291,6 +295,9 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 | # | Sub-projeto | Entrega | Status |
 |---|---|---|---|
 | — | Correção de direção dos sprites | inversão de linha removida e `ROW_ROTATION_OFFSET = 4`; Assaltante olha para a direção da perseguição; remoção do "manequim fantasma" no Blender | ✅ `7d48c4e` |
+| A | **Revisão de combate A** | zoom da câmera do mundo e personagens maiores, com câmera de UI sem zoom | ✅ Implementado (`1f0aa4f`) |
+| B | **Revisão de combate B: combate fluido** | recuperação cancelável, movimento/dash mais rápidos, buffer de input, `player.cancel`; dim 6 redefinida (§12.6); parâmetros na §13.3 | ✅ Implementado em 01/10/2026 (playtest manual pendente) |
+| C | **Revisão de combate C: animações** | animações do jogador alinhadas às fases do combate fluido | ⏭ Próximo (antes do 5b) |
 | 5a | **Telemetria persistente e ciclo de runs** | HP, morte, encontros (Assaltante morre), salas (K = 3 encontros), runs (jogador morre); fronteiras de decaimento chamadas pelo jogo; log em duas camadas (observações do perfil + contexto) em IndexedDB; reconstrução do perfil ao abrir; resetar/exportar/importar `.ndjson`. Spec: `docs/superpowers/specs/2026-09-30-telemetria-runs-5a-design.md` | ✅ Implementado |
 | 5b | **Preditor sequencial** | modelo de longo prazo **sem esquecimento** (acumula com o jogo), previsão da próxima ação a partir de sequência + contexto (N-gram, §8.1), **curva de acurácia × tempo de jogo** medida offline sobre o log do 5a | Planejado |
 | 6 | **Boss inteligente** | boss que usa perfil (como joga) + previsões (o que vai fazer); a escolha de qual padrão explorar absorve o antigo passo "déficit-alvo com histerese"; validação por **ablação** (mesmo boss com e sem o modelo) | Planejado |
@@ -300,7 +307,7 @@ Cada passo é um ciclo completo: spec → plano → implementação TDD → revi
 | Questão | Decisão | Consequência de medição |
 |---|---|---|
 | Acesso às armas | Carrega as 3, troca livre em combate (teclas 1/2/3) | dim 1 com `n=3` fixo dentro da run; o vício aparece como distribuição enviesada |
-| Custo da troca | 250 ms de recovery, cancelável por esquiva | a troca vira decisão tática, não reflexo, e gera janela previsível que o boss pode aprender a punir |
+| Custo da troca | 150 ms de recovery (250 ms até o combate B), cancelável por esquiva | a troca vira decisão tática, não reflexo, e gera janela previsível que o boss pode aprender a punir |
 | Ação carregada | Não é ação à parte: é `actionType: 'charged'` com campo `charge`; alcance interpola linearmente com o tempo segurado | uma entrada na tabela de ações, não um estado novo na máquina |
 | Defesas | Bloqueio e parry universais (mesma tecla, timing decide) | dim 4 com `n=4` fixo e **sem efeito de loadout**, o que a deixa mais limpa para o ICC |
 | Custo do bloqueio | Barra de postura exclusiva do bloqueio; sem stamina global | stamina global acoplaria ofensiva e defensiva e contaminaria as dims 2 e 4 de uma vez |
@@ -610,7 +617,7 @@ A trilha de repertório fechou as três dimensões da Família B, o que resolveu
 | `core/prng.ts` | PRNG Mulberry32 semeado (`next()`, `nextInt()`) |
 | `core/fixedTimestepLoop.ts` | Acumulador de tempo real → passos fixos de 1000/60 ms |
 | `core/eventBus.ts` | Barramento publish/subscribe genérico e tipado; `on()` devolve função de cancelamento; `emit` itera sobre cópia (seguro contra reentrância) |
-| `core/events.ts` | Mapa de eventos do jogo: `opp.open`, `opp.close`, `player.action`, `player.dodge`, `player.hit_unmitigated` |
+| `core/events.ts` | Mapa de eventos do jogo: `opp.open`, `opp.close`, `player.action`, `player.dodge`, `player.cancel`, `player.hit_unmitigated` |
 | `opportunity/types.ts` | `OppType`, `OppOutcome`, `InvalidReason`, payloads |
 | `opportunity/opportunitySystem.ts` | Abre, resolve e expira janelas; gancho `onExpire` decide `expired` ou `invalid` |
 | `combat/actionRegistry.ts` | Registro data-driven de ações por arma, com validação (IDs duplicados, arma desconhecida); `totalCommitmentMs` |
@@ -724,8 +731,10 @@ linha_da_sheet = (bucket + 4) mod 8               calibrado empiricamente (§14.
 
 ```
 isPatientAttack(comprometimento, ameaças, alvo) = ∀ a ∈ ameaças: a.msUntilThreatens(alvo, comprometimento) = null
-comprometimento = startup + active + recovery        (ação carregada: active + recovery, pois o evento só sai ao soltar)
+comprometimento = lockedMs = startup + active       (ação carregada: só active, pois o evento só sai ao soltar)
 ```
+
+**Mudança de definição (30/09/2026, combate B).** Até 12/09 a exposição era o **comprometimento total** (`totalCommitmentMs = startup + active + recovery`; carregada: `active + recovery`), escolha do autor. Com o combate B a recuperação passou a ser **cancelável** por andar, dash ou novo ataque, então o jogador não está mais preso nela. A exposição passa a ser só a parte não cancelável, `lockedMs`: preparação + golpe (`startup + active`); na ação carregada, apenas a janela de golpe após soltar. A pergunta "atacou quando era seguro?" continua a mesma, mas a janela encurta, e a dim 6 tende a subir; se perder variância entre jogadores, os dados dirão (D1). Logs anteriores a `0.0.2+combatB` não são comparáveis (§3.1).
 
 Contrato: `null` significa **seguro**, nunca "desconhecido". O modelo contínuo tem **viés de até ~1 passo (≈16 ms)** em relação ao jogo discreto, sempre na direção conservadora; isso está documentado e coberto por um teste de equivalência simulação-vs-realidade.
 
@@ -737,7 +746,7 @@ Ver §2. Fórmulas implementadas literalmente em `entropyAccumulator.ts` e `prof
 
 ```
 alcance_carregado = interpolação linear entre reach (minHold) e reachMax (maxHold)
-postura: 100 máx; −40 por bloqueio (3 bloqueios seguidos quebram) → stagger 350 ms
+postura: 100 máx; −40 por bloqueio (3 bloqueios seguidos quebram) → stagger 250 ms (350 ms até o combate B)
          regenera 50/s após 1 s parado em idle
 parry ⇔ guarda levantada há < 150 ms quando o golpe conecta
         → o inimigo pula o resto do golpe e abre punição de 750 ms (vs. 500 ms normal)
@@ -789,12 +798,15 @@ O tipo `utility` existe no conjunto da dim 2 (n = 5), mas **nenhuma ação o usa
 
 | Parâmetro | Valor |
 |---|---|
-| Esquiva | 250 ms de duração, 200 ms de i-frames, 300 ms de cooldown, 80 de deslocamento |
-| Velocidade do jogador / Assaltante | 160 / 90 unidades por segundo |
+| Esquiva (dash) | 180 ms de duração, 150 ms de i-frames, 200 ms de cooldown, 120 de deslocamento (combate B; antes 250 / 200 / 300 ms e 80) |
+| Velocidade do jogador / Assaltante (perseguição) | 220 / 125 unidades por segundo (combate B; antes 160 / 90) |
+| Velocidade ao bloquear | 50% da velocidade do jogador (`BLOCK_MOVE_SPEED_FACTOR = 0,5`) |
+| Buffer de input | 120 ms (`INPUT_BUFFER_MS`), slot único para ataque/dash; ataque carregado não entra no buffer |
+| Stagger | 250 ms (antes 350) |
 | Arena | 1600 × 1200 unidades (25 × 19 tiles) |
 | Hurtbox das entidades | 20 × 20 |
 | Assaltante | alcance de decisão 60; telegraph 400 ms (= janela de esquiva); swing 150 ms; recuperação 500 ms (= janela de punição) |
-| Troca de arma | 250 ms de bloqueio de ataque |
+| Troca de arma | 150 ms de bloqueio de ataque (antes 250) |
 
 ### 13.4 O inimigo: Assaltante
 
@@ -964,7 +976,7 @@ Ver §14.3.
 
 Envelope `{v: 2, t_ms, session_id, run_id, room_id, seq}` e eventos `session.start`, `run.start`, `room.enter`, `enemy.spawn`, `opp.open` (+`n_options`), `opp.close` (+`reason`, +`attempt`), `profile.snapshot`, `player.action`, `player.hurt`, `boss.attempt`, `transfer`.
 
-**Implementado hoje:** `opp.open`, `opp.close` (com `reason` e `attempt`), `player.action` (com `actionId`, `actionType`, `weaponId`), `player.dodge`, `player.hit_unmitigated`, além do formato de `profile.snapshot` como retorno de função. **Não implementado:** envelope, sessão/run/sala, persistência.
+**Implementado hoje:** `opp.open`, `opp.close` (com `reason` e `attempt`), `player.action` (com `actionId`, `actionType`, `weaponId`), `player.dodge`, `player.cancel` (com `by` = `move`/`dash`/`attack` e `actionId`; desde o combate B), `player.hit_unmitigated`, além do formato de `profile.snapshot` como retorno de função. **Não implementado:** envelope, sessão/run/sala, persistência.
 
 ### 17.5 Parâmetros consolidados
 
@@ -996,6 +1008,7 @@ Envelope `{v: 2, t_ms, session_id, run_id, room_id, seq}` e eventos `session.sta
 | 12/09/2026 | **Janela segura, dim 6**; teste de equivalência simulação-vs-realidade; revisão final; reconciliação do documento (dims 1/2/4 ligadas); correção do manequim fantasma no pipeline |
 | 13/09/2026 | Causa raiz da direção dos sprites encontrada (não commitado) |
 | 28/09/2026 | Esta revisão completa do documento |
+| 30/09/2026 a 01/10/2026 | Combate A e **combate B** (combate fluido); dim 6 redefinida; `game_version` `0.0.2+combatB`; próximo: combate C (animações) |
 
 ---
 
