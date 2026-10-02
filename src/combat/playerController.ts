@@ -11,11 +11,20 @@ import {
   POISE_REGEN_PER_SECOND,
   STAGGER_MS,
   PARRY_WINDOW_MS,
+  INPUT_BUFFER_MS,
 } from './actionDefs';
-import { resolveAction, totalCommitmentMs, type ActionDef } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, DASH_DISTANCE, ARENA_BOUNDS, ATTACK_HALF_ANGLE_RAD, PLAYER_MAX_HP } from './movementDefs';
+import { resolveAction, totalCommitmentMs, lockedMs, type ActionDef } from './actionRegistry';
+import {
+  PLAYER_MOVE_SPEED,
+  BLOCK_MOVE_SPEED_FACTOR,
+  DASH_DISTANCE,
+  ARENA_BOUNDS,
+  ATTACK_HALF_ANGLE_RAD,
+  PLAYER_MAX_HP,
+} from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
+import { InputBuffer, type BufferedInput } from './inputBuffer';
 
 export class PlayerController {
   state: PlayerState = 'idle';
@@ -31,7 +40,6 @@ export class PlayerController {
   private readonly width: number;
   private readonly height: number;
   private moveInput: Vec2 = { x: 0, y: 0 };
-  private lastMoveDirection: Vec2 = { x: 1, y: 0 };
   private aimDirection: Vec2 = { x: 1, y: 0 };
   private committedDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
@@ -40,6 +48,8 @@ export class PlayerController {
   private blockHeldMs = 0;
   private staggerRemainingMs = 0;
   private poiseRegenDelayRemainingMs = 0;
+  private clockMs = 0;
+  private readonly inputBuffer = new InputBuffer(INPUT_BUFFER_MS);
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -68,6 +78,20 @@ export class PlayerController {
 
   get isParryTiming(): boolean {
     return this.state === 'blocking' && this.blockHeldMs < PARRY_WINDOW_MS;
+  }
+
+  /** Past the non-cancelable part of an action: any input ends it. */
+  get isInRecovery(): boolean {
+    return (
+      this.state === 'acting' &&
+      this.currentAction !== null &&
+      this.chargeTriggered &&
+      this.phaseElapsedMs >= lockedMs(this.currentAction)
+    );
+  }
+
+  private get isCharging(): boolean {
+    return this.state === 'acting' && this.currentAction?.actionType === 'charged' && !this.chargeTriggered;
   }
 
   get isDead(): boolean {
@@ -105,6 +129,8 @@ export class PlayerController {
     this.staggerRemainingMs = 0;
     this.poiseRegenDelayRemainingMs = 0;
     this.moveInput = { x: 0, y: 0 };
+    this.clockMs = 0;
+    this.inputBuffer.clear();
   }
 
   hurtbox(): AABB {
@@ -155,18 +181,12 @@ export class PlayerController {
   }
 
   tryAction(actionId: string): void {
-    if (this.state !== 'idle' || this.attackLockedMs > 0) return;
     const action = resolveAction(actionId); // throws for unknown ids, before any state mutation
     if (action.weaponId !== this.equippedWeaponId) return;
-
-    this.state = 'acting';
-    this.phaseElapsedMs = 0;
-    this.currentAction = action;
-    this.committedDirection = { x: this.aimDirection.x, y: this.aimDirection.y };
-    this.chargeHeldMs = 0;
-    this.chargeTriggered = action.actionType !== 'charged';
-    if (action.actionType !== 'charged') {
-      this.emitActionEvent(action);
+    if (this.canStartAttack()) {
+      this.startAction(action);
+    } else if (this.isBufferable()) {
+      this.inputBuffer.push({ kind: 'attack', actionId }, this.clockMs);
     }
   }
 
@@ -192,11 +212,53 @@ export class PlayerController {
   }
 
   tryDodge(): void {
-    if (this.state !== 'idle' || this.dodgeCooldownRemainingMs > 0) return;
+    if (this.canDash()) {
+      this.startDash();
+    } else if (this.isBufferable()) {
+      this.inputBuffer.push({ kind: 'dash' }, this.clockMs);
+    }
+  }
+
+  private canStartAttack(): boolean {
+    return this.isInRecovery || (this.state === 'idle' && this.attackLockedMs <= 0);
+  }
+
+  private canDash(): boolean {
+    if (this.isCharging || this.isInRecovery || this.state === 'blocking') return true;
+    return this.state === 'idle' && this.dodgeCooldownRemainingMs <= 0;
+  }
+
+  /** Inputs that cannot run now but will become runnable on their own (locked, stagger, dash, cooldowns). */
+  private isBufferable(): boolean {
+    return this.state !== 'blocking' && !this.isCharging;
+  }
+
+  private startAction(action: ActionDef): void {
+    if (this.isInRecovery) {
+      this.bus.emit('player.cancel', { by: 'attack', actionId: this.currentAction!.id });
+    }
+    this.state = 'acting';
+    this.phaseElapsedMs = 0;
+    this.currentAction = action;
+    this.committedDirection = { x: this.aimDirection.x, y: this.aimDirection.y };
+    this.chargeHeldMs = 0;
+    this.chargeTriggered = action.actionType !== 'charged';
+    if (action.actionType !== 'charged') {
+      this.emitActionEvent(action);
+    }
+  }
+
+  private startDash(): void {
+    if (this.isInRecovery) {
+      this.bus.emit('player.cancel', { by: 'dash', actionId: this.currentAction!.id });
+    }
+    if (this.state === 'acting') this.cancelAction(); // recovery, or a charge in progress (silent)
+    this.blockHeldMs = 0;
+    const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
+    this.dashDirection = direction.x !== 0 || direction.y !== 0 ? direction : this.aimDirection;
     this.state = 'dodging';
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
-    this.dashDirection = this.lastMoveDirection;
     this.attackLockedMs = 0;
     this.bus.emit('player.dodge', {});
   }
@@ -226,6 +288,23 @@ export class PlayerController {
   }
 
   step(stepMs: number): void {
+    this.clockMs += stepMs;
+    if (this.isInRecovery && (this.moveInput.x !== 0 || this.moveInput.y !== 0)) {
+      this.bus.emit('player.cancel', { by: 'move', actionId: this.currentAction!.id });
+      this.cancelAction();
+    }
+    this.advance(stepMs);
+    const input = this.inputBuffer.take((i) => this.canExecute(i), this.clockMs);
+    if (input?.kind === 'attack') this.startAction(resolveAction(input.actionId));
+    else if (input?.kind === 'dash') this.startDash();
+  }
+
+  private canExecute(input: BufferedInput): boolean {
+    if (input.kind === 'dash') return this.canDash();
+    return resolveAction(input.actionId).weaponId === this.equippedWeaponId && this.canStartAttack();
+  }
+
+  private advance(stepMs: number): void {
     if (this.dodgeCooldownRemainingMs > 0) {
       this.dodgeCooldownRemainingMs = Math.max(0, this.dodgeCooldownRemainingMs - stepMs);
     }
@@ -236,7 +315,6 @@ export class PlayerController {
     if (this.state === 'idle') {
       const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
       if (direction.x !== 0 || direction.y !== 0) {
-        this.lastMoveDirection = direction;
         this._position = clampToArena(
           applyMovement(this._position, direction, PLAYER_MOVE_SPEED, stepMs),
           this.width,
@@ -266,6 +344,15 @@ export class PlayerController {
 
     if (this.state === 'blocking') {
       this.blockHeldMs += stepMs;
+      const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
+      if (direction.x !== 0 || direction.y !== 0) {
+        this._position = clampToArena(
+          applyMovement(this._position, direction, PLAYER_MOVE_SPEED * BLOCK_MOVE_SPEED_FACTOR, stepMs),
+          this.width,
+          this.height,
+          ARENA_BOUNDS,
+        );
+      }
       return;
     }
 

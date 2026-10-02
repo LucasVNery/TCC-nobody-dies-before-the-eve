@@ -11,9 +11,10 @@ import {
   POISE_REGEN_DELAY_MS,
   PARRY_WINDOW_MS,
   STAGGER_MS,
+  INPUT_BUFFER_MS,
 } from './actionDefs';
-import { SWORD_SHIELD_ACTIONS } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, ARENA_BOUNDS, PLAYER_MAX_HP } from './movementDefs';
+import { SWORD_SHIELD_ACTIONS, lockedMs, totalCommitmentMs } from './actionRegistry';
+import { PLAYER_MOVE_SPEED, ARENA_BOUNDS, PLAYER_MAX_HP, BLOCK_MOVE_SPEED_FACTOR } from './movementDefs';
 import { sectorOverlapsBox } from './sector';
 
 const LIGHT = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'light')!;
@@ -221,23 +222,12 @@ describe('PlayerController', () => {
     expect(player.position.x).toBe(ARENA_BOUNDS.x);
   });
 
-  it('ignores moveInput while acting', () => {
+  it('ignores moveInput during the locked phase', () => {
     const { player } = makePlayer();
     player.tryAction(LIGHT.id);
     player.setMoveInput(1, 0);
-    player.step(500);
+    player.step(lockedMs(LIGHT) - 1);
     expect(player.position).toEqual({ x: 0, y: 0 });
-  });
-
-  it('dash displaces the player in the last movement direction', () => {
-    const { player } = makePlayer();
-    player.setMoveInput(1, 0);
-    player.step(16);
-    player.setMoveInput(0, 0);
-    const beforeX = player.position.x;
-    player.tryDodge();
-    player.step(DODGE.durationMs);
-    expect(player.position.x).toBeGreaterThan(beforeX);
   });
 
   it('dash defaults to facing right if the player never moved', () => {
@@ -286,18 +276,6 @@ describe('PlayerController', () => {
     const hitbox = player.attackHitbox();
     expect(hitbox).not.toBeNull();
     expect(hitbox!.direction).toEqual({ x: 0, y: -1 }); // still using the "aim up" direction committed at tryAction() time
-  });
-
-  it('dash still uses the last movement direction, not the aim direction', () => {
-    const { player } = makePlayer();
-    player.setMoveInput(1, 0);
-    player.step(16);
-    player.setMoveInput(0, 0);
-    player.setAimDirection({ x: -1, y: 0 }); // aiming the opposite way from the dash
-    const beforeX = player.position.x;
-    player.tryDodge();
-    player.step(DODGE.durationMs);
-    expect(player.position.x).toBeGreaterThan(beforeX); // still dashes right (movement dir), not left (aim dir)
   });
 
   it('takeDamage lowers hp, clamps at 0 and flips isDead', () => {
@@ -495,5 +473,202 @@ describe('PlayerController — diagonal attacks', () => {
     expect(hitbox).not.toBeNull();
     const targetBox = { x: 30, y: 30, width: 20, height: 20 }; // on the same diagonal, within reach (LIGHT.reach=45 + 10)
     expect(sectorOverlapsBox(hitbox!, targetBox)).toBe(true);
+  });
+});
+
+const LIGHT_LOCKED = lockedMs(LIGHT); // 200
+const LIGHT_TOTAL = totalCommitmentMs(LIGHT); // 350
+
+function collect(bus: EventBus<GameEvents>) {
+  const log: Array<{ type: string; payload: unknown }> = [];
+  bus.on('player.cancel', (p) => log.push({ type: 'player.cancel', payload: p }));
+  bus.on('player.action', (p) => log.push({ type: 'player.action', payload: p }));
+  bus.on('player.dodge', (p) => log.push({ type: 'player.dodge', payload: p }));
+  return log;
+}
+
+describe('combat B: responsive combat', () => {
+  it('is locked (no movement, no dash) during startup+active, recovery starts at lockedMs', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.setMoveInput(1, 0);
+    player.step(LIGHT_LOCKED - 1);
+    expect(player.isInRecovery).toBe(false);
+    expect(player.position).toEqual({ x: 0, y: 0 });
+    player.tryDodge(); // buffered, does not fire while locked
+    expect(player.state).toBe('acting');
+    player.step(1); // recovery starts: the buffered dash fires right away
+    expect(player.state).toBe('dodging');
+
+    const other = makePlayer().player;
+    other.tryAction(LIGHT.id);
+    other.step(LIGHT_LOCKED);
+    expect(other.isInRecovery).toBe(true);
+  });
+
+  it('without input the recovery ends by itself at totalCommitmentMs with no player.cancel', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_TOTAL);
+    expect(player.state).toBe('idle');
+    expect(log.filter((e) => e.type === 'player.cancel')).toHaveLength(0);
+  });
+
+  it('movement input cancels the recovery and moves in the same tick, emitting player.cancel{move}', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED); // enter recovery
+    player.setMoveInput(1, 0);
+    player.step(100);
+    expect(player.state).toBe('idle');
+    expect(player.position.x).toBeCloseTo((PLAYER_MOVE_SPEED * 100) / 1000);
+    expect(log.map((e) => e.type)).toEqual(['player.action', 'player.cancel']);
+    expect(log[1].payload).toEqual({ by: 'move', actionId: LIGHT.id });
+  });
+
+  it('holding movement from before the attack does not move during the locked phase, only from recovery on', () => {
+    const { player } = makePlayer();
+    player.setMoveInput(1, 0);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED);
+    expect(player.position).toEqual({ x: 0, y: 0 });
+    player.step(16);
+    expect(player.state).toBe('idle');
+    expect(player.position.x).toBeGreaterThan(0);
+  });
+
+  it('dash cancels the recovery: player.cancel{dash} comes before player.dodge', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED);
+    player.tryDodge();
+    expect(player.state).toBe('dodging');
+    expect(log.map((e) => e.type)).toEqual(['player.action', 'player.cancel', 'player.dodge']);
+    expect(log[1].payload).toEqual({ by: 'dash', actionId: LIGHT.id });
+  });
+
+  it('a new attack cancels the recovery: player.cancel{attack} (previous action id) comes before the new player.action', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED);
+    player.tryAction(HEAVY.id);
+    expect(player.currentActionDef?.id).toBe(HEAVY.id);
+    expect(log.map((e) => e.type)).toEqual(['player.action', 'player.cancel', 'player.action']);
+    expect(log[1].payload).toEqual({ by: 'attack', actionId: LIGHT.id });
+    expect((log[2].payload as { actionId: string }).actionId).toBe(HEAVY.id);
+  });
+
+  it('a dash pressed during the locked phase is buffered and fires when the recovery starts', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs); // 100ms in, still locked
+    player.tryDodge(); // buffered
+    expect(player.state).toBe('acting');
+    player.step(LIGHT.timing.activeMs); // recovery begins; age = 100ms <= INPUT_BUFFER_MS
+    expect(player.state).toBe('dodging');
+    expect(log.map((e) => e.type)).toEqual(['player.action', 'player.cancel', 'player.dodge']);
+  });
+
+  it('an attack pressed during the locked phase is buffered and fires when the recovery starts', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT.timing.startupMs);
+    player.tryAction(HEAVY.id);
+    player.step(LIGHT.timing.activeMs);
+    expect(player.currentActionDef?.id).toBe(HEAVY.id);
+  });
+
+  it('a buffered input older than INPUT_BUFFER_MS is dropped', () => {
+    expect(LIGHT_LOCKED).toBeGreaterThan(INPUT_BUFFER_MS);
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.tryDodge(); // pressed at t=0 of a 200ms lock
+    player.step(LIGHT_LOCKED); // age 200 > 120
+    expect(player.state).toBe('acting'); // in recovery, dash was dropped
+    expect(player.isInRecovery).toBe(true);
+  });
+
+  it('dash is buffered during stagger and fires when it ends', () => {
+    const { player } = makePlayer();
+    player.enterStagger();
+    player.step(STAGGER_MS - 50);
+    player.tryDodge();
+    expect(player.state).toBe('staggered');
+    player.step(50);
+    expect(player.state).toBe('dodging');
+  });
+
+  it('an attack of the newly equipped weapon pressed during the switch lock is buffered and fires when it ends', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.step(50);
+    player.tryAction('bow.shot'); // buffered, 100ms of lock left
+    expect(player.state).toBe('idle');
+    player.step(SWITCH_RECOVERY_MS - 50);
+    expect(player.currentActionDef?.id).toBe('bow.shot');
+  });
+
+  it('dash direction follows the movement input; with no input it follows the aim', () => {
+    const a = makePlayer().player;
+    a.setAimDirection({ x: -1, y: 0 });
+    a.setMoveInput(0, 1);
+    a.tryDodge();
+    a.step(DODGE.durationMs);
+    expect(a.position.y).toBeGreaterThan(0);
+    expect(a.position.x).toBeCloseTo(0);
+
+    const b = makePlayer().player;
+    b.reset({ x: 300, y: 300 }); // away from the arena edge so the upward dash is not clamped
+    b.setAimDirection({ x: 0, y: -1 });
+    b.tryDodge();
+    b.step(DODGE.durationMs);
+    expect(b.position.y).toBeLessThan(300);
+  });
+
+  it('dash cancels a charge in progress without emitting player.action; releasing afterwards does nothing', () => {
+    const { bus, player } = makePlayer();
+    const log = collect(bus);
+    player.tryAction(CHARGED.id);
+    player.step(400); // still charging
+    player.tryDodge();
+    expect(player.state).toBe('dodging');
+    player.step(DODGE.durationMs);
+    player.releaseAction();
+    expect(log.map((e) => e.type)).toEqual(['player.dodge']);
+  });
+
+  it('dash exits blocking and works during the weapon-switch lock', () => {
+    const a = makePlayer().player;
+    a.startBlock();
+    a.tryDodge();
+    expect(a.state).toBe('dodging');
+
+    const b = makePlayer().player;
+    b.switchWeapon('bow');
+    b.tryDodge();
+    expect(b.state).toBe('dodging');
+  });
+
+  it('moves at half speed while blocking', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.setMoveInput(1, 0);
+    player.step(1000);
+    expect(player.state).toBe('blocking');
+    expect(player.position.x).toBeCloseTo(PLAYER_MOVE_SPEED * BLOCK_MOVE_SPEED_FACTOR);
+  });
+
+  it('reset() clears a pending buffered input', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.tryDodge(); // buffered
+    player.reset({ x: 0, y: 0 });
+    player.step(500);
+    expect(player.state).toBe('idle');
   });
 });

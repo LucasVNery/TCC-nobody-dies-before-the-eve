@@ -13,7 +13,14 @@ export interface PlayerActionPayload {
 
 export type PlayerDodgePayload = Record<string, never>;
 
-export type PlayerHitUnmitigatedPayload = Record<string, never>;
+export interface PlayerCancelPayload {
+  /** What ended the recovery early. */
+  by: 'move' | 'dash' | 'attack';
+  /** The action whose recovery was cancelled. */
+  actionId: string;
+}
+
+export type PlayerHitUnmitigatedPayload= Record<string, never>;
 
 export type EmptyPayload = Record<string, never>;
 
@@ -65,6 +72,7 @@ export type GameEvents = {
   'opp.close': OppClosePayload;
   'player.action': PlayerActionPayload;
   'player.dodge': PlayerDodgePayload;
+  'player.cancel': PlayerCancelPayload;
   'player.hit_unmitigated': PlayerHitUnmitigatedPayload;
   'player.defense': PlayerDefensePayload;
   'player.hurt': PlayerHurtPayload;
