@@ -10,7 +10,7 @@ import { sectorOverlapsBox } from './sector';
 import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
-import { resolveAction, totalCommitmentMs } from './actionRegistry';
+import { resolveAction, lockedMs } from './actionRegistry';
 import { isPatientAttack } from './patience';
 
 export class Encounter<P extends ProfileSink = ProfileAccumulator> {
@@ -50,8 +50,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
         this.assaltante.onPlayerWrongAction(e.actionId);
       }
 
-      const commitmentMs = totalCommitmentMs(resolveAction(e.actionId));
-      const isPatient = isPatientAttack(commitmentMs, [this.assaltante], this.player.hurtbox());
+      const exposureMs = lockedMs(resolveAction(e.actionId));
+      const isPatient = isPatientAttack(exposureMs, [this.assaltante], this.player.hurtbox());
       // Dim 6's denominator is meant to be "total attacks initiated." Every
       // ActionType in today's registry is an attack, so this is safe as-is;
       // if a non-attack action type (e.g. a future 'utility' heal/guard-stance)

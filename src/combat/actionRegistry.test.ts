@@ -9,6 +9,7 @@ import {
   BOW_ACTIONS,
   findWeaponAction,
   totalCommitmentMs,
+  lockedMs,
 } from './actionRegistry';
 
 describe('actionRegistry', () => {
@@ -105,5 +106,17 @@ describe('findWeaponAction', () => {
 
   it('returns undefined for an unknown weaponId', () => {
     expect(findWeaponAction('unknown_weapon', 'light')).toBeUndefined();
+  });
+});
+
+describe('lockedMs', () => {
+  it('lockedMs is startup+active for a non-charged action', () => {
+    const light = resolveAction('sword_shield.light');
+    expect(lockedMs(light)).toBe(200);
+  });
+
+  it('lockedMs is active only for a charged action (charging itself is dash-cancelable)', () => {
+    const charged = resolveAction('sword_shield.charged');
+    expect(lockedMs(charged)).toBe(140);
   });
 });

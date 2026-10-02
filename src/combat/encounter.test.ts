@@ -522,20 +522,39 @@ describe('Encounter', () => {
     expect(snap.counts.patience).toEqual([0, 1]);
   });
 
+  it('dim 6 uses the non-cancelable window: a threat that lands only in the cancelable recovery still counts as patient', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+
+    encounter.step(STEP_MS); // Assaltante enters 'attacking'; its swing activates ~TELEGRAPH_MS - STEP_MS from now
+    expect(encounter.assaltante.state).toBe('attacking');
+
+    // sword_shield.light: lockedMs = 200, totalCommitmentMs = 350. The threat lands at ~384ms,
+    // after both windows -> patient either way; so advance until the threat falls between them.
+    runFor(encounter, 150); // threat now lands ~234ms ahead: after lockedMs (200) but before totalCommitmentMs (350)
+    encounter.player.tryAction('sword_shield.light');
+
+    encounter.profile.applyRoomBoundary();
+    const snap = encounter.profile.snapshot('room.exit');
+    expect(snap.counts.patience).toEqual([1, 1]);
+  });
+
   describe('predictThreatMs vs. the real loop (spec §2.3 criterion 4)', () => {
     // Assaltante starts at distance 150, outside ATTACK_RANGE (60), so it
     // must CHASE before it can telegraph — this is the branch of
     // predictThreatMs that a pure telegraph-only test (like the two above)
-    // never exercises. With ASSALTANTE_CHASE_SPEED=90px/s:
-    //   closeMs = (150 - 60) / 90 * 1000 = 1000ms
-    //   predictThreatMs = closeMs + TELEGRAPH_MS = 1000 + 400 = 1400ms
+    // never exercises. With ASSALTANTE_CHASE_SPEED=125px/s:
+    //   closeMs = (150 - 60) / 125 * 1000 = 720ms
+    //   predictThreatMs = closeMs + TELEGRAPH_MS = 720 + 400 = 1120ms
     // The real 16ms-step loop re-checks distance (and only *then* moves)
-    // every tick, so it crosses into ATTACK_RANGE one tick later than the
-    // continuous model assumes, and its telegraph clock starts a tick after
-    // that — the discrete loop's attack actually goes active at 1408ms, 8ms
-    // (about half a step) after the continuous prediction. This is the
-    // "conservative" discretization bias documented in spec §10: the
-    // predictor never claims *more* safety than the real loop delivers.
+    // every tick. At 125px/s each tick covers exactly 2px, so 90px closes in
+    // exactly 45 ticks (720ms) and the observed first unmitigated hit lands
+    // on the 1120ms step boundary — zero discretization bias with these
+    // constants (it was +8ms at chase speed 90, where 1000ms is not a whole
+    // number of 16ms ticks). The predictor still never claims *more* safety
+    // than the real loop delivers (spec §10).
     const DISTANCE = 150;
 
     it('agrees with reality when neither model reaches the threat within the horizon (negative case)', () => {
@@ -544,7 +563,7 @@ describe('Encounter', () => {
         { x: DISTANCE, y: 0, width: 20, height: 20 },
       );
       // A real registry action: sword_shield.heavy = 220+120+300 = 640ms,
-      // far short of the ~1400-1408ms it'd take the Assaltante to threaten —
+      // far short of the ~1120ms it'd take the Assaltante to threaten —
       // this exercises predictThreatMs's CHASE-branch early return
       // (`elapsed + closeMs > horizonMs`) without ever reaching the
       // attacking-phase / sector-overlap logic.
@@ -567,8 +586,8 @@ describe('Encounter', () => {
         { x: 0, y: 0, width: 20, height: 20 },
         { x: DISTANCE, y: 0, width: 20, height: 20 },
       );
-      // Comfortably above both the continuous prediction (1400ms) and the
-      // real loop's actual active-at time (1408ms), with margin well beyond
+      // Comfortably above both the continuous prediction (1120ms) and the
+      // real loop's actual active-at time (1120ms), with margin well beyond
       // the one-step discretization bias — not a knife's-edge horizon that
       // would make this test flaky.
       const horizonMs = 1500;
@@ -584,7 +603,7 @@ describe('Encounter', () => {
       // the branch that would catch it: a wrong reach could make the
       // predicted sector miss the target (flipping this to null) or the real
       // sweep miss/hit differently than predicted.
-      expect(prediction).toBe(1400);
+      expect(prediction).toBe(1120);
       expect(hitEvents.length).toBeGreaterThan(0);
       expect(prediction !== null).toBe(hitEvents.length > 0);
     });

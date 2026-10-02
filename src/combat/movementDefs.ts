@@ -1,9 +1,10 @@
 import type { AABB } from './types';
 import type { ActionType } from './actionRegistry';
 
-export const PLAYER_MOVE_SPEED = 160; // px/s
-export const ASSALTANTE_CHASE_SPEED = 90; // px/s, slower than the player
-export const DASH_DISTANCE = 80; // px, total displacement over DODGE.durationMs
+export const PLAYER_MOVE_SPEED = 220; // px/s
+export const BLOCK_MOVE_SPEED_FACTOR = 0.5; // fraction of PLAYER_MOVE_SPEED while blocking
+export const ASSALTANTE_CHASE_SPEED = 125; // px/s, slower than the player
+export const DASH_DISTANCE = 120; // px, total displacement over DODGE.durationMs
 export const ARENA_BOUNDS: AABB = { x: 0, y: 0, width: 1600, height: 1200 };
 export const ATTACK_REACH = 45;
 export const ATTACK_HALF_ANGLE_RAD = Math.PI / 4; // 45° pra cada lado da mira — leque de 90° total

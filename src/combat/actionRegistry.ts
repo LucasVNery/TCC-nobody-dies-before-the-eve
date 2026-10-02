@@ -128,3 +128,10 @@ export function totalCommitmentMs(action: ActionDef): number {
     ? action.timing.activeMs + action.timing.recoveryMs
     : action.timing.startupMs + action.timing.activeMs + action.timing.recoveryMs;
 }
+
+/** Non-cancelable part of an action: the player cannot move, dash or act. */
+export function lockedMs(action: ActionDef): number {
+  return action.actionType === 'charged'
+    ? action.timing.activeMs // after release; charging itself is dash-cancelable
+    : action.timing.startupMs + action.timing.activeMs;
+}
