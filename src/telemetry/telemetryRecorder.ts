@@ -42,11 +42,28 @@ export class TelemetryRecorder {
   private encIdx = 0;
   private lastActionT: number | null = null;
   private encounter: Encounter<ProfileSink> | null = null;
+  private listeners = new Set<(e: LoggedEvent) => void>();
 
   constructor(private readonly opts: TelemetryRecorderOptions) {}
 
   get nowMs(): number {
     return this.tMs;
+  }
+
+  get bufferedCount(): number {
+    return this.buffer.length;
+  }
+
+  get nextSeq(): number {
+    return this.seq;
+  }
+
+  /** Called at the end of every log() with the enveloped event. Returns the unsubscribe function. */
+  subscribe(listener: (e: LoggedEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   attach(encounter: Encounter<ProfileSink>): void {
@@ -93,7 +110,7 @@ export class TelemetryRecorder {
 
   log(type: string, payload: Record<string, unknown>): void {
     // Envelope last so a payload field can never overwrite it.
-    this.buffer.push({
+    const event: LoggedEvent = {
       ...payload,
       v: SCHEMA_VERSION,
       seq: this.seq++,
@@ -104,7 +121,9 @@ export class TelemetryRecorder {
       room_idx: this.roomIdx,
       enc_idx: this.encIdx,
       type,
-    });
+    };
+    this.buffer.push(event);
+    for (const l of [...this.listeners]) l(event);
   }
 
   /**

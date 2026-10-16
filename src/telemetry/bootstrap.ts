@@ -2,6 +2,7 @@
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { EventStore } from './eventStore';
 import { rebuildProfileWithStats, nextRunIdx } from './replay';
+import type { LoggedEvent } from './schema';
 import { findAbandonedRun, type AbandonedRun } from './abandonedRun';
 
 export interface BootState {
@@ -12,6 +13,8 @@ export interface BootState {
   restored: boolean;
   /** The current player's last run when the previous session left it open (tab closed); close it before starting. */
   abandonedRun: AbandonedRun | null;
+  /** The current player's stored events (empty on fallback). */
+  history: LoggedEvent[];
 }
 
 /**
@@ -41,9 +44,10 @@ export async function loadProfileState(store: EventStore, newId: () => string): 
       firstRunIdx: nextRunIdx(events, playerId),
       restored: true,
       abandonedRun: findAbandonedRun(events, playerId),
+      history: events.filter((e) => e.player_id === playerId),
     };
   } catch (err) {
     console.warn('[telemetry] could not load history, starting with a fresh in-memory profile', err);
-    return { accumulator: new ProfileAccumulator(), playerId: newId(), firstRunIdx: 0, restored: false, abandonedRun: null };
+    return { accumulator: new ProfileAccumulator(), playerId: newId(), firstRunIdx: 0, restored: false, abandonedRun: null, history: [] };
   }
 }

@@ -4,6 +4,7 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
 import { GAME_VERSION, type LoggedEvent } from './schema';
 import { PLAYER_START } from '../game/runDirector';
+import { TelemetryRecorder } from './telemetryRecorder';
 
 function makeStack(onRunEnd?: () => void) {
   let seed = 1;
@@ -209,5 +210,30 @@ describe('TelemetryRecorder', () => {
 describe('game version', () => {
   it('declares the combat B game version', () => {
     expect(GAME_VERSION).toBe('0.0.2+combatB');
+  });
+
+  it('subscribe delivers every logged event in order and unsubscribe stops it', () => {
+    const rec = new TelemetryRecorder({ playerId: 'p', sessionId: 's' });
+    const seen: LoggedEvent[] = [];
+    const unsubscribe = rec.subscribe((e) => seen.push(e));
+    rec.log('x', {});
+    rec.log('x', {});
+    expect(seen.map((e) => e.seq)).toEqual([0, 1]);
+    unsubscribe();
+    rec.log('x', {});
+    expect(seen).toHaveLength(2);
+  });
+
+  it('bufferedCount and nextSeq follow log, drain and requeue', () => {
+    const rec = new TelemetryRecorder({ playerId: 'p', sessionId: 's' });
+    rec.log('x', {});
+    rec.log('x', {});
+    expect(rec.bufferedCount).toBe(2);
+    expect(rec.nextSeq).toBe(2);
+    const batch = rec.drain();
+    expect(rec.bufferedCount).toBe(0);
+    expect(rec.nextSeq).toBe(2);
+    rec.requeue(batch);
+    expect(rec.bufferedCount).toBe(2);
   });
 });

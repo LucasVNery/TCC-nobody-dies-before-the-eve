@@ -5,6 +5,7 @@ import { MemoryEventStore, type EventStore } from './eventStore';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
 import { rebuildProfile } from './replay';
+import type { LoggedEvent } from './schema';
 
 describe('loadProfileState', () => {
   it('first launch: creates and saves a player_id, starts at run 0 with an empty profile', async () => {
@@ -157,6 +158,30 @@ describe('loadProfileState', () => {
     const boot = await loadProfileState(broken, () => 'fallback-id');
     expect(boot).toMatchObject({ playerId: 'fallback-id', firstRunIdx: 0, restored: false, abandonedRun: null });
     expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('history holds only the current player events and is empty on fallback', async () => {
+    const store = new MemoryEventStore();
+    await store.setMeta('player_id', 'me');
+    const mk = (player_id: string, seq: number) => ({
+      v: 2, seq, t_ms: 0, player_id, session_id: 's-' + player_id, run_idx: 0, room_idx: 0, enc_idx: 0, type: 'x',
+    }) as unknown as LoggedEvent;
+    await store.append([mk('me', 0), mk('other', 0), mk('me', 1), mk('other', 1)]);
+    const boot = await loadProfileState(store, () => 'unused');
+    expect(boot.history).toHaveLength(2);
+    expect(boot.history.every((e) => e.player_id === 'me')).toBe(true);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const broken: EventStore = {
+      append: async () => {},
+      readAll: async () => { throw new Error('blocked'); },
+      getMeta: async <T>() => 'me' as T,
+      setMeta: async () => {},
+      clear: async () => {},
+      close: () => {},
+    };
+    expect((await loadProfileState(broken, () => 'x')).history).toEqual([]);
     warn.mockRestore();
   });
 });

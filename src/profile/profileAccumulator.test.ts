@@ -297,4 +297,22 @@ describe('ProfileAccumulator — defensive repertoire (Família B, dim 4)', () =
     expect('defensive_repertoire' in snap.domain).toBe(true);
     expect(snap.counts.defensive_repertoire).toEqual([1, 1]);
   });
+
+  it('sampleSize is the folded denominator for ratios and the total count for entropy skills, per clock', () => {
+    const acc = new ProfileAccumulator();
+    acc.record('punish', 1, 1);
+    acc.record('punish', 1, 1);
+    expect(acc.sampleSize('punish', 'trait')).toBe(0);
+    acc.applyRoomBoundary();
+    expect(acc.sampleSize('punish', 'trait')).toBe(2);
+    expect(acc.sampleSize('punish', 'state')).toBe(0);
+    acc.applyEncounterBoundary();
+    expect(acc.sampleSize('punish', 'state')).toBeGreaterThan(0);
+
+    const acc2 = new ProfileAccumulator();
+    for (let i = 0; i < 3; i++) acc2.recordAction('light', 'sword_shield');
+    acc2.applyRoomBoundary();
+    expect(acc2.sampleSize('action_repertoire', 'trait')).toBe(3);
+    expect(acc2.sampleSize('nope', 'trait')).toBe(0);
+  });
 });

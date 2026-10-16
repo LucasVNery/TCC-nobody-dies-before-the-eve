@@ -4,6 +4,7 @@ import { DecayedRatio } from './decayedRatio';
 import { EntropyAccumulator } from './entropyAccumulator';
 import { ACTION_TYPES, WEAPON_IDS, type ActionType } from '../combat/actionRegistry';
 import type { ProfileSink } from './profileSink';
+import type { ProfileView } from './profileView';
 
 export const DEFENSIVE_LABELS = ['dodge', 'block', 'parry', 'retreat'] as const;
 export type DefensiveLabel = (typeof DEFENSIVE_LABELS)[number];
@@ -30,7 +31,7 @@ interface EntropyDim {
   everRecorded: boolean;
 }
 
-export class ProfileAccumulator implements ProfileSink {
+export class ProfileAccumulator implements ProfileSink, ProfileView {
   private trait = new Map<SkillId, SkillRatios>();
   private state = new Map<SkillId, SkillRatios>();
   private entropyDims = new Map<SkillId, EntropyDim>();
@@ -132,6 +133,12 @@ export class ProfileAccumulator implements ProfileSink {
   deficit(skill: SkillId, clock: Clock): number | null {
     const d = this.domain(skill, clock);
     return d === null ? null : 1 - d;
+  }
+
+  sampleSize(skill: SkillId, clock: Clock): number {
+    const dim = this.entropyDims.get(skill);
+    if (dim) return dim.acc.totalCount(clock);
+    return this.clockFor(clock).get(skill)?.domain.den ?? 0;
   }
 
   /**

@@ -320,6 +320,7 @@ export class ArenaScene extends Phaser.Scene {
           firstRunIdx: 0,
           restored: false,
           abandonedRun: null,
+          history: [],
         });
       } catch (fatal) {
         console.error('[telemetry] could not start the game', fatal);
