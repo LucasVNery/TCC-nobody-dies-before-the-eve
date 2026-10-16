@@ -1,6 +1,7 @@
 # E1: HUD de análise e cena modularizada — Design
 
 **Data:** 16/10/2026
+**Status:** implementado em 2026-10-16, commits 18e1778..6c3622d + o commit de limpeza e documentação (Task 13).
 **Sub-projeto:** E1 do ambiente de gameplay v2 (ver `Contexto_pesquisa/documento-tecnico-mestre.md` §3.5 e §3.8). Sequência: E1 → E2 arena procedural → E3 herói e inimigo comum animados → E4 chefe.
 **Depende de:** `telemetry/telemetryRecorder.ts`, `telemetry/stack.ts`, `telemetry/bootstrap.ts`, `telemetry/eventStore.ts`, `telemetry/ndjson.ts`, `profile/profileAccumulator.ts`, `scenes/ArenaScene.ts`, `visual/cameraZoom.ts`, `debug/hudState.ts`, `debug/opportunityOverlay.ts`.
 **Pré-requisito de branch:** `combat-b` mesclada em `master` (ou o E1 parte de `combat-b`): a cena e os valores do combate B são a base.

@@ -331,7 +331,9 @@ Para o **chefe**, a decisão espera o design do boss. Existem animações para o
 | Inimigo comum | idle, walk; **telegrafia (400 ms), golpe (150 ms), recuperação (500 ms)** com poses distintas; dano; morte | ⬜ |
 | Chefe | a definir depois do design do boss | 🔵 |
 
-## 3.5 HUD de análise e HUD de jogador
+## 3.5 HUD de análise e HUD de jogador ✅
+
+**Status:** ✅ implementado em 16/10/2026 no E1 (commits `8920fab` a `6c3622d`): painel de análise em DOM com atualização limitada (*throttled*), alimentado por `MetricsAggregator`, `ProfileView` e fita de eventos; `ArenaScene` reduzida a orquestradora. O texto abaixo é a proposta original; o painel de preditor segue ⬜ (5b).
 
 Hoje há um painel de texto único. A proposta separa dois modos:
 
@@ -596,23 +598,25 @@ Princípio (autor, 16/10): toda métrica que precisa ser **combinada com outra p
 
 | ID | Métrica | Fórmula | Brutos | Janela | Status |
 |---|---|---|---|---|---|
-| M1 | **Velocidade média** | Σ (distância percorrida entre amostras consecutivas) ÷ Σ Δt; variante "em movimento" exclui amostras paradas | B1, B2 | encontro, run, histórico | ⬜ |
-| M2 | Distância média ponderada pelo tempo | Σ (dist · Δt) ÷ Σ Δt | B3, B2 | idem | ⬜ |
-| M3 | Fração do tempo ao alcance corpo a corpo | tempo com dist ≤ alcance ÷ tempo de combate | B3, B2 | idem | ✅ (**dim 5**) |
-| M4 | Taxa de ações e intervalo médio entre ações | nº de `player.action` ÷ minuto de combate; média de `ms_since_last_action` | B4, B11, B2 | idem | ⬜ |
+| M1 | **Velocidade média** | Σ (distância percorrida entre amostras consecutivas) ÷ Σ Δt; variante "em movimento" exclui amostras paradas | B1, B2 | encontro, run, histórico | ✅ |
+| M2 | Distância média ponderada pelo tempo | Σ (dist · Δt) ÷ Σ Δt | B3, B2 | idem | ✅ |
+| M3 | Fração do tempo ao alcance corpo a corpo | tempo com dist ≤ alcance ÷ tempo de combate | B3, B2 | idem | ✅ (**dim 5**; lida do `ProfileView`, com rótulo do relógio estado/traço) |
+| M4 | Taxa de ações e intervalo médio entre ações | nº de `player.action` ÷ minuto de combate; média de `ms_since_last_action` | B4, B11, B2 | idem | ✅ |
 | M5 | Distribuição e entropia de ações e de armas | contagens por tipo e por arma; entropia normalizada | B4 | idem | ✅ (**dims 1 e 2**) |
 | M6 | Distribuição e entropia defensiva | contagens por rótulo; entropia | B6 | idem | ✅ (**dim 4**) |
-| M7 | Aproveitamento por tipo de janela | `taken ÷ (taken + missed + expired)` | B8 | idem | ✅ punição (**dim 3**) / ⬜ esquiva |
-| M8 | Omissão | `expired ÷ (expired + missed)` por tipo | B8 | idem | ✅ calculada, não consumida |
-| M9 | **Latência de reação** | t(primeira esquiva ou defesa depois de `enemy.attack_start`) − t(`enemy.attack_start`); mediana | B9, B6, B2 | idem | ⬜ |
-| M10 | Taxa de cancelamento | `player.cancel ÷ player.action`, e por `by` | B5, B4 | idem | ⬜ |
-| M11 | Razão de troca de dano | dano causado ÷ dano sofrido; dano por minuto | B7, B2 | idem | ⬜ |
-| M12 | Duração do encontro, da run e salas por run | `encounter.end − encounter.start`; `run.end.duration_ms` | B12, B2 | run, histórico | ⬜ |
-| M13 | Fração de ataques pacientes | ataques em janela segura ÷ total | B4 + previsão de ameaça | idem | ✅ (**dim 6**) |
-| M14 | **Ociosidade** (ideia do autor) | tempo com `ms_since_last_action > L` ÷ tempo de combate; `L` a definir 🔵 | B11, B2 | idem | ⬜ |
-| M15 | Cobertura espacial (opcional) | células visitadas ÷ células da arena; entropia espacial | B1 | run, histórico | ⬜ |
+| M7 | Aproveitamento por tipo de janela | `taken ÷ (taken + missed + expired)` | B8 | idem | ✅ punição (**dim 3**) e esquiva |
+| M8 | Omissão | `expired ÷ (expired + missed)` por tipo | B8 | idem | ✅ exibida na HUD |
+| M9 | **Latência de reação** | t(primeira esquiva ou defesa depois de `enemy.attack_start`) − t(`enemy.attack_start`); mediana | B9, B6, B2 | idem | ✅ só esquiva |
+| M10 | Taxa de cancelamento | `player.cancel ÷ player.action`, e por `by` | B5, B4 | idem | ✅ |
+| M11 | Razão de troca de dano | dano causado ÷ dano sofrido; dano por minuto | B7, B2 | idem | ✅ |
+| M12 | Duração do encontro, da run e salas por run | `encounter.end − encounter.start`; `run.end.duration_ms` | B12, B2 | run, histórico | ✅ |
+| M13 | Fração de ataques pacientes | ataques em janela segura ÷ total | B4 + previsão de ameaça | idem | ✅ (**dim 6**; lida do `ProfileView`, com rótulo do relógio estado/traço) |
+| M14 | **Ociosidade** (ideia do autor) | tempo com `ms_since_last_action > L` ÷ tempo de combate; `L` a definir 🔵 | B11, B2 | idem | ✅ |
+| M15 | Cobertura espacial (opcional) | células visitadas ÷ células da arena; entropia espacial | B1 | run, histórico | ✅ |
 | M16 | Previsibilidade | acurácia top-1 móvel; entropia condicional da próxima ação | log de ações (5b) | histórico | ⬜ |
 | M17 | Progresso até o limiar de confiança | `confiança(dim) ÷ 0,60` | perfil | atual | ⬜ (só HUD) |
+
+**Implementação (E1, 16/10/2026):** M1 a M15 estão implementadas no `MetricsAggregator` e exibidas no painel. M9 mede só a esquiva (a latência de defesa fica de fora). M3 e M13 não são recalculadas: vêm do `ProfileView` e a HUD mostra o rótulo do relógio (estado ou traço). Em M10 (`byCause`) e M11 (campos por minuto) o agregador já calcula os campos, mas nem todos são renderizados no painel. M16 e M17 continuam ⬜ (5b e HUD de confiança).
 
 **Regras de agregação:** toda métrica mostra a **amostra** (*n*) junto do valor; sem amostra, o valor é "—" e nunca 0 (mesmo critério do domínio `null`); janelas possíveis: encontro, sala, run, sessão e histórico; unidades em unidades de mundo e milissegundos.
 
@@ -624,13 +628,13 @@ O autor pediu que o trabalho do novo ambiente também deixe **mais completo o qu
 |---|---|---|---|
 | Regra de ≥ 8 ações por segmento para calcular `H` (spec v2 §3.3 b) não implementada | Entropia instável com poucas amostras; só a confiança `κ_H` atenua | Implementar ou justificar a omissão no texto. **Fora do E1:** muda os dados (nova `GAME_VERSION`) e depende de decisão do autor | 🔵 |
 | Nenhuma ação usa o tipo `utility` | A dim 2 nunca atinge entropia máxima | Definir uma ação utilitária ou retirar o tipo | 🔵 |
-| Omissão calculada, mas não consumida | Sinal diagnóstico invisível | Exibir na HUD (M8) | E1 |
-| Relógio `state` (γ = 0,55) sem consumidor | Código sem uso | Exibir na HUD; usar no boss, se couber | E1 |
+| Omissão calculada, mas não consumida | Sinal diagnóstico invisível | Exibir na HUD (M8) | ✅ E1 (exibida no painel) |
+| Relógio `state` (γ = 0,55) sem consumidor | Código sem uso | Exibir na HUD; usar no boss, se couber | ✅ E1 (relógio estado exibido; uso no boss segue em aberto) |
 | Três dos seis motivos de invalidação são emitidos | Janelas de outras origens ainda contam como válidas | Emitir os demais quando surgirem as situações | futuro |
-| `ArenaScene` (575 linhas) e `ai/` sem testes | Regressão não detectada na apresentação | Modularizar a cena e cobrir com testes | E1 |
+| `ArenaScene` (575 linhas) e `ai/` sem testes | Regressão não detectada na apresentação | Modularizar a cena e cobrir com testes | ✅ E1 (cena modularizada em controlador de sessão, entrada/atalhos, câmera, vista do mundo, debug e HUD; regras do Assaltante testadas) |
 | Recuo (`retreat`) é **inferido** | Dim 4 depende de uma inferência | Declarar como limitação | texto |
 | Um único arquétipo de inimigo | O perfil é medido diante de um só padrão | Sub-projeto D | 🔵 |
-| `public/assets/README.md` desatualizado; `public/assets/_unused/` (≈ 3 MB de pacotes de terceiros, sem registro de licença) | Documentação e repositório sujos | Atualizar o README; decidir manter ou remover; criar `LICENSES.md` | E1 |
+| `public/assets/README.md` desatualizado; `public/assets/_unused/` (≈ 3 MB de pacotes de terceiros, sem registro de licença) | Documentação e repositório sujos | Atualizar o README; decidir manter ou remover; criar `LICENSES.md` | ✅ E1 (README atualizado, `_unused/` removido, `LICENSES.md` criado; tiles `grass.png` e `water.png` com licença a conferir) |
 | Documento de arquitetura v1.1 fora do repositório | As specs o citam, mas ele não está versionado | Copiar para o repositório ou registrar o que ele definia | 🔵 |
 
 ---
@@ -1154,11 +1158,11 @@ Estado do repositório: 156 commits; 15 specs e 15 planos; `master` em `1f0aa4f`
 | **Jogo** | Playtest do combate B, do zoom e das teclas F2, F8 e F9 | Merge |
 | | Mesclar `combat-b` no `master` (avanço direto) e dar push | — |
 | | Definir *perfect dodge*, a ação `utility`, o design do boss, outros arquétipos e a estrutura de salas | Boss, E4 |
-| **Ambiente (E1 a E4)** | HUD de análise, arena procedural, herói e inimigo comum, chefe | — |
+| **Ambiente (E1 a E4)** | ✅ E1 (HUD de análise e cena modularizada) feito em 16/10. Faltam: arena procedural (E2), herói e inimigo comum (E3), chefe (E4). Playtest do painel no navegador pendente | — |
 | | Decidir a "arma nova" | E3 |
 | **Áudio** | Decidir a fonte (CC0, síntese em código); registrar licenças; decidir o `audio_on` no log | E3 |
 | **Dados** | Registrar os dados-piloto; definir o ponto de congelamento | Coleta oficial |
-| **Repositório** | Atualizar `public/assets/README.md`; decidir `public/assets/_unused/`; criar `LICENSES.md`; trazer o documento de arquitetura v1.1 para dentro do repositório | — |
+| **Repositório** | ✅ README, `_unused/` e `LICENSES.md` resolvidos no E1. Pendente: conferir a licença de `grass.png` e `water.png`; revisar `public/assets/exemplo/` e `sprites/` (sem referência no código); trazer o documento de arquitetura v1.1 para dentro do repositório | — |
 | **Lacunas do sistema** | Ver 4.8 | — |
 
 ## 9.4 Pendências aceitas (follow-ups registrados)
