@@ -207,7 +207,7 @@ Nenhum corte a priori. As dimensões que sobrevivem são resultado empírico do 
 | 3 | `opp.close` do tipo `punish` com desfecho ≠ `invalid` | `Encounter` → `profile.recordOutcome('punish', …)` | janela de punição = fase de recuperação do Assaltante (500 ms; 750 ms após parry) |
 | 4 | colisão do golpe inimigo + estado do jogador | `Encounter.step()` | `dodge` via evento `player.dodge` durante o ataque; `parry`/`block` resolvidos na colisão; `retreat` inferido quando a janela de esquiva expira sem contato e sem defesa. **No máximo um rótulo por ataque** (guarda `defenseRecordedThisAttack`) |
 | 5 | todo passo de simulação | `Encounter.step()` | `record('distance', emAlcance ? Δt : 0, Δt)` em **segundos** (correção de 18/08: antes era ms, o que distorcia a confiança) |
-| 6 | `player.action` | `Encounter` → `isPatientAttack()` | janela segura = nenhum inimigo consegue atingir o jogador durante a parte **não cancelável** da ação, `lockedMs` (ver §12.6; até 12/09 era o comprometimento total, redefinido em 30/09/2026 pelo combate B) |
+| 6 | `player.action` | `Encounter` → `isPatientAttack()` | janela segura = nenhum inimigo consegue atingir o jogador durante a parte **não cancelável** da ação, `lockedMs` (ver §12.6; de 12/09 a 30/09 era o comprometimento total, redefinido em 30/09/2026 pelo combate B) |
 
 > **RISCO ACEITO**
 >
@@ -330,7 +330,7 @@ Não mudam sem discussão explícita. Cada uma tem um documento de origem citáv
 | D6 | Suavização | Contagens decaídas, não EWMA sobre a razão. |
 | D9 | Taxonomia da dim 2 | Remove `aéreo`. Conjunto passa a `{leve, pesado, carregado, arremesso, utilitário}`, `n = 5`. Consequência da decisão "combate 100% planar". |
 | — | Quem adapta | Só o boss. Inimigos comuns são instrumento de coleta com IA fixa. |
-| — | Janela da dim 6 | A exposição é o **comprometimento total** da ação (startup + active + recovery), não só o recovery, por escolha explícita do autor: mede o risco real de se comprometer. |
+| — | Janela da dim 6 | **Revisada em 30/09/2026:** a exposição é só a parte **não cancelável** da ação, `lockedMs` (startup + active; na carregada, só o active após soltar), porque a recuperação passou a ser cancelável (combate B, §12.6). *(Antes, de 12/09 a 30/09: comprometimento total, startup + active + recovery, por escolha explícita do autor.)* |
 
 ### 6.1 Decisões de arquitetura
 
@@ -620,7 +620,7 @@ A trilha de repertório fechou as três dimensões da Família B, o que resolveu
 | `core/events.ts` | Mapa de eventos do jogo: `opp.open`, `opp.close`, `player.action`, `player.dodge`, `player.cancel`, `player.hit_unmitigated` |
 | `opportunity/types.ts` | `OppType`, `OppOutcome`, `InvalidReason`, payloads |
 | `opportunity/opportunitySystem.ts` | Abre, resolve e expira janelas; gancho `onExpire` decide `expired` ou `invalid` |
-| `combat/actionRegistry.ts` | Registro data-driven de ações por arma, com validação (IDs duplicados, arma desconhecida); `totalCommitmentMs` |
+| `combat/actionRegistry.ts` | Registro data-driven de ações por arma, com validação (IDs duplicados, arma desconhecida); `totalCommitmentMs` e `lockedMs` (parte não cancelável) |
 | `combat/actionDefs.ts` | Constantes de esquiva, troca de arma, postura, stagger, parry |
 | `combat/movementDefs.ts` | Velocidades, dash, limites da arena, alcance e abertura do leque |
 | `combat/movement.ts` | Normalização, integração de movimento, *clamp* na arena |
@@ -734,7 +734,7 @@ isPatientAttack(comprometimento, ameaças, alvo) = ∀ a ∈ ameaças: a.msUntil
 comprometimento = lockedMs = startup + active       (ação carregada: só active, pois o evento só sai ao soltar)
 ```
 
-**Mudança de definição (30/09/2026, combate B).** Até 12/09 a exposição era o **comprometimento total** (`totalCommitmentMs = startup + active + recovery`; carregada: `active + recovery`), escolha do autor. Com o combate B a recuperação passou a ser **cancelável** por andar, dash ou novo ataque, então o jogador não está mais preso nela. A exposição passa a ser só a parte não cancelável, `lockedMs`: preparação + golpe (`startup + active`); na ação carregada, apenas a janela de golpe após soltar. A pergunta "atacou quando era seguro?" continua a mesma, mas a janela encurta, e a dim 6 tende a subir; se perder variância entre jogadores, os dados dirão (D1). Logs anteriores a `0.0.2+combatB` não são comparáveis (§3.1).
+**Mudança de definição (30/09/2026, combate B).** De 12/09 a 30/09 a exposição era o **comprometimento total** (`totalCommitmentMs = startup + active + recovery`; carregada: `active + recovery`), escolha do autor. Com o combate B a recuperação passou a ser **cancelável** por andar, dash ou novo ataque, então o jogador não está mais preso nela. A exposição passa a ser só a parte não cancelável, `lockedMs`: preparação + golpe (`startup + active`); na ação carregada, apenas a janela de golpe após soltar. A pergunta "atacou quando era seguro?" continua a mesma, mas a janela encurta, e a dim 6 tende a subir; se perder variância entre jogadores, os dados dirão (D1). Logs anteriores a `0.0.2+combatB` não são comparáveis (§3.1).
 
 Contrato: `null` significa **seguro**, nunca "desconhecido". O modelo contínuo tem **viés de até ~1 passo (≈16 ms)** em relação ao jogo discreto, sempre na direção conservadora; isso está documentado e coberto por um teste de equivalência simulação-vs-realidade.
 

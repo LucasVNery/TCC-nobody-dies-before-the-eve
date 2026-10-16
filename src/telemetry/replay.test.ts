@@ -50,7 +50,9 @@ function runBot(stack: TelemetryStack, ticks: number) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
       if (light) encounter.player.tryAction(light.id);
     }
-    if (encounter.assaltante.state === 'attacking' && i % 10 === 0) encounter.player.tryDodge();
+    // Dodge cadence (i % 20) is deliberately loose: it leaves margin above the `runEnds >= 2` guard
+    // while still covering obs.defense via dodge. i % 10 sat exactly on that threshold.
+    if (encounter.assaltante.state === 'attacking' && i % 20 === 0) encounter.player.tryDodge();
     stack.step(1000 / 60);
   }
 }
