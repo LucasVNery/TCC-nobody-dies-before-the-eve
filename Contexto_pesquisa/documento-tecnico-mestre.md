@@ -333,7 +333,7 @@ Para o **chefe**, a decisão espera o design do boss. Existem animações para o
 
 ## 3.5 HUD de análise e HUD de jogador ✅
 
-**Status:** ✅ implementado em 16/10/2026 no E1 (commits `8920fab` a `6c3622d`): painel de análise em DOM com atualização limitada (*throttled*), alimentado por `MetricsAggregator`, `ProfileView` e fita de eventos; `ArenaScene` reduzida a orquestradora. O texto abaixo é a proposta original; o painel de preditor segue ⬜ (5b).
+**Status:** ✅ implementado em 16/10/2026 no E1 (commits `8920fab` a `6c3622d`): painel de análise em DOM com atualização limitada (*throttled*), alimentado por `MetricsAggregator`, `ProfileView` e fita de eventos; `ArenaScene` reduzida a orquestradora. O playtest do painel no navegador está pendente. O texto abaixo é a proposta original; o painel de preditor segue ⬜ (5b).
 
 Hoje há um painel de texto único. A proposta separa dois modos:
 
@@ -611,12 +611,12 @@ Princípio (autor, 16/10): toda métrica que precisa ser **combinada com outra p
 | M11 | Razão de troca de dano | dano causado ÷ dano sofrido; dano por minuto | B7, B2 | idem | ✅ |
 | M12 | Duração do encontro, da run e salas por run | `encounter.end − encounter.start`; `run.end.duration_ms` | B12, B2 | run, histórico | ✅ |
 | M13 | Fração de ataques pacientes | ataques em janela segura ÷ total | B4 + previsão de ameaça | idem | ✅ (**dim 6**; lida do `ProfileView`, com rótulo do relógio estado/traço) |
-| M14 | **Ociosidade** (ideia do autor) | tempo com `ms_since_last_action > L` ÷ tempo de combate; `L` a definir 🔵 | B11, B2 | idem | ✅ |
+| M14 | **Ociosidade** (ideia do autor) | tempo com `ms_since_last_action > L` ÷ tempo de combate; `L` = 3000 ms fixo (contado desde a última `player.action` ou `run.start`) | B11, B2 | idem | ✅ |
 | M15 | Cobertura espacial (opcional) | células visitadas ÷ células da arena; entropia espacial | B1 | run, histórico | ✅ |
 | M16 | Previsibilidade | acurácia top-1 móvel; entropia condicional da próxima ação | log de ações (5b) | histórico | ⬜ |
 | M17 | Progresso até o limiar de confiança | `confiança(dim) ÷ 0,60` | perfil | atual | ⬜ (só HUD) |
 
-**Implementação (E1, 16/10/2026):** M1 a M15 estão implementadas no `MetricsAggregator` e exibidas no painel. M9 mede só a esquiva (a latência de defesa fica de fora). M3 e M13 não são recalculadas: vêm do `ProfileView` e a HUD mostra o rótulo do relógio (estado ou traço). Em M10 (`byCause`) e M11 (campos por minuto) o agregador já calcula os campos, mas nem todos são renderizados no painel. M16 e M17 continuam ⬜ (5b e HUD de confiança).
+**Implementação (E1, 16/10/2026):** M1 a M15 estão implementadas no `MetricsAggregator` e exibidas no painel. M9 mede só a esquiva (a latência de defesa fica de fora). M3 e M13 não são recalculadas: vêm do `ProfileView` e a HUD mostra o rótulo do relógio (estado ou traço). Em M10 (`byCause`) e M11 (campos por minuto) o agregador já calcula os campos, mas nem todos são renderizados no painel; o mesmo vale para M12 (`meanRoomsPerRun`). M16 e M17 continuam ⬜ (5b e HUD de confiança).
 
 **Regras de agregação:** toda métrica mostra a **amostra** (*n*) junto do valor; sem amostra, o valor é "—" e nunca 0 (mesmo critério do domínio `null`); janelas possíveis: encontro, sala, run, sessão e histórico; unidades em unidades de mundo e milissegundos.
 
