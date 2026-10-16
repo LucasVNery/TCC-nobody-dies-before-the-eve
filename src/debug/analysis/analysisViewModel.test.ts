@@ -49,6 +49,14 @@ describe('buildAnalysisView', () => {
     expect(sec(buildAnalysisView(input()), 'metrics').rows.find((r) => r.id === 'm3')!.cells[0]).toContain('decaído');
   });
 
+  it('M3 and M13 name their profile clock and M11 shows no sample count', () => {
+    const m = sec(buildAnalysisView(input({ profile: profile(0, 0.5) })), 'metrics');
+    for (const id of ['m3', 'm13']) {
+      expect(m.rows.find((r) => r.id === id)!.cells.slice(1)).toEqual(['—', '—', 'estado 50% n=0', 'traço 50% n=0']);
+    }
+    expect(m.rows.find((r) => r.id === 'm11')!.cells[1]).toBe('0/0 (—) —');
+  });
+
   it('absent values render as — and nothing renders NaN', () => {
     const v = buildAnalysisView(input());
     const text = allText(v);

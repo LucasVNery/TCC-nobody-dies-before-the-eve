@@ -64,16 +64,17 @@ const METRIC_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => strin
   { id: 'm8', name: 'M8 omissão esq/pun', cell: (w) => `${fmtPercent(w.opportunities.dodge.omission)}/${fmtPercent(w.opportunities.punish.omission)} ${fmtSample(oppBoth(w))}` },
   { id: 'm9', name: 'M9 reação à esquiva méd/med (ms)', cell: (w) => `${fmtMs(w.reaction.meanMs)}/${fmtMs(w.reaction.medianMs)} ${fmtSample(w.reaction.n)}` },
   { id: 'm10', name: 'M10 cancelamentos (por ação)', cell: (w) => `${w.cancels.total} (${fmtNum(w.cancels.perAction)}) ${fmtSample(w.actions.count)}` },
-  { id: 'm11', name: 'M11 dano causado/sofrido (razão)', cell: (w) => `${fmtNum(w.damage.dealt, 0)}/${fmtNum(w.damage.taken, 0)} (${fmtNum(w.damage.ratio)}) ${fmtSample(w.events)}` },
+  { id: 'm11', name: 'M11 dano causado/sofrido (razão)', cell: (w) => `${fmtNum(w.damage.dealt, 0)}/${fmtNum(w.damage.taken, 0)} (${fmtNum(w.damage.ratio)}) ${DASH}` },
   { id: 'm12', name: 'M12 ciclo encontro/run', cell: (w) => `${fmtMs(w.cycle.meanEncounterMs)}/${fmtMs(w.cycle.meanRunMs)} ${fmtSample(w.cycle.encounters)}` },
   { id: 'm14', name: 'M14 ociosidade (4 Hz)', cell: (w) => `${fmtPercent(w.idleFraction)} ${fmtSample(w.samples)}` },
   { id: 'm15', name: 'M15 cobertura (4 Hz)', cell: (w) => `${fmtPercent(w.coverage)} ${fmtSample(w.samples)}` },
 ];
 
-// The profile has two clocks, not four windows: decayed (state) fills 'sessão', trait fills 'histórico'.
+// The profile clocks are not the metric windows (state decays per encounter, trait per room), so each
+// cell names its clock and the window columns stay '—'.
 function profileMetricRow(id: string, name: string, skill: string, p: ProfileView): ViewRow {
   const c = (clock: 'trait' | 'state'): string =>
-    `${fmtPercent(p.domain(skill, clock))} ${fmtSample(p.sampleSize(skill, clock))}`;
+    `${clock === 'state' ? 'estado' : 'traço'} ${fmtPercent(p.domain(skill, clock))} ${fmtSample(p.sampleSize(skill, clock))}`;
   return { id, cells: [name, DASH, DASH, c('state'), c('trait')] };
 }
 
