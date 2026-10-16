@@ -3,16 +3,22 @@
 export const WINDOW_IDS = ['encounter', 'run', 'session', 'history'] as const;
 export type WindowId = (typeof WINDOW_IDS)[number];
 
-/** Per-window result of one opportunity type (filled by a later task; neutral until then). */
+/** Per-window result of one opportunity type. */
 export interface OppStats {
   taken: number;
   missed: number;
   expired: number;
   invalid: number;
   /** taken / (taken + missed + expired); null when the denominator is 0. */
-  utilization: number | null;
+  rate: number | null;
   /** expired / (expired + missed); null when the denominator is 0. */
   omission: number | null;
+}
+
+/** Raw label counts plus entropy normalized by ln(n); null with fewer than 2 labels used. */
+export interface Distribution {
+  counts: Record<string, number>;
+  entropy: number | null;
 }
 
 export interface WindowMetrics {
@@ -27,13 +33,14 @@ export interface WindowMetrics {
     count: number;
     perMinute: number | null;
     meanIntervalMs: number | null;
-    byType: Record<string, number>;
-    byWeapon: Record<string, number>;
+    byType: Distribution;
+    byWeapon: Distribution;
   };
-  defenses: Record<string, number>;
+  defenses: Distribution;
   opportunities: { dodge: OppStats; punish: OppStats };
   reaction: { n: number; meanMs: number | null; medianMs: number | null };
-  cancels: { count: number; ratio: number | null; byCause: Record<string, number> };
+  /** perAction = total / actions; null when there are no actions. */
+  cancels: { total: number; perAction: number | null; byCause: Record<string, number> };
   damage: {
     dealt: number;
     taken: number;

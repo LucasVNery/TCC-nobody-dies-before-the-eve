@@ -17,6 +17,8 @@ export interface Derived {
   distance: number | null;
   /** pos.sample only: the interval is idle; null if there is no interval or no reference. */
   idle: boolean | null;
+  /** player.dodge only: ms since the enemy attack start, when this is the first dodge inside an open dodge window; else null. */
+  reactionMs: number | null;
 }
 
 interface Prev {
@@ -30,14 +32,20 @@ export class StreamTracker {
   private encounterStartT: number | null = null;
   private prev: Prev | null = null;
   private lastActivityT: number | null = null;
+  /** t of the latest enemy.attack_start not yet answered by a dodge. */
+  private attackStartT: number | null = null;
+  /** ids of the dodge opportunity windows currently open. */
+  private readonly dodgeWindows = new Set<string>();
 
   observe(ev: LoggedEvent): Derived {
-    const out: Derived = { encounterMs: null, dtMs: null, stepDistance: null, distance: null, idle: null };
+    const out: Derived = { encounterMs: null, dtMs: null, stepDistance: null, distance: null, idle: null, reactionMs: null };
     switch (ev.type) {
       case 'session.start':
         this.encounterStartT = null;
         this.prev = null;
         this.lastActivityT = null;
+        this.attackStartT = null;
+        this.dodgeWindows.clear();
         break;
       case 'run.start':
         // A new run breaks sample continuity and is the idleness reference.
@@ -46,6 +54,22 @@ export class StreamTracker {
         break;
       case 'player.action':
         this.lastActivityT = ev.t_ms;
+        break;
+      case 'enemy.attack_start':
+        this.attackStartT = ev.t_ms;
+        break;
+      case 'opp.open':
+        if (ev.opp_type === 'dodge') this.dodgeWindows.add(ev.opp_id as string);
+        break;
+      case 'opp.close':
+        this.dodgeWindows.delete(ev.opp_id as string);
+        break;
+      case 'player.dodge':
+        // Only the first dodge inside an open window counts; earlier or later ones do not.
+        if (this.attackStartT !== null && this.dodgeWindows.size > 0) {
+          out.reactionMs = Math.max(0, ev.t_ms - this.attackStartT);
+          this.attackStartT = null;
+        }
         break;
       case 'encounter.start':
         this.encounterStartT = ev.t_ms;
