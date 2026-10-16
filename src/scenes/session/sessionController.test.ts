@@ -61,9 +61,10 @@ describe('SessionController', () => {
     const store = new MemoryEventStore();
     const { platform } = fakePlatform({ store });
     const c = controller(platform);
-    await c.start();
+    let seen: readonly LoggedEvent[] | null = null;
+    await c.start({ onStackReady: (_s, h) => { seen = h; } });
     expect(c.ready).toBe(true);
-    expect(c.history).toEqual([]);
+    expect(seen).toEqual([]);
     expect(c.stack.director.runIdx).toBe(0);
     await c.persist();
     const events = await store.readAll();
@@ -85,8 +86,9 @@ describe('SessionController', () => {
     await first.shutdown();
 
     const second = controller(fakePlatform({ store }).platform);
-    await second.start();
-    expect(second.history.length).toBeGreaterThan(0);
+    let secondHistory: readonly LoggedEvent[] = [];
+    await second.start({ onStackReady: (_s, h) => { secondHistory = h; } });
+    expect(secondHistory.length).toBeGreaterThan(0);
     expect(second.stack.director.runIdx).toBeGreaterThanOrEqual(1);
     expect(second.status().playerId).toBe(first.status().playerId);
     await second.shutdown();
@@ -290,7 +292,8 @@ describe('SessionController', () => {
     for (let i = 0; i < 40; i++) a.stack.step(16);
     const closed = a.shutdown();
     const b = controller(fakePlatform({ store }).platform);
-    await b.start({ after: closed });
+    let bHistory: readonly LoggedEvent[] = [];
+    await b.start({ after: closed, onStackReady: (_s, h) => { bHistory = h; } });
     for (let i = 0; i < 40; i++) b.stack.step(16);
     await b.shutdown();
 
@@ -302,7 +305,7 @@ describe('SessionController', () => {
       const sorted = [...seqs].sort((x, y) => x - y);
       expect(sorted).toEqual(sorted.map((_, i) => i));
     }
-    expect(b.history.length).toBeGreaterThan(0);
+    expect(bHistory.length).toBeGreaterThan(0);
   });
 
   it('openStore failure falls back to a memory store, and a boot failure starts a fresh in-memory profile (never rejects)', async () => {

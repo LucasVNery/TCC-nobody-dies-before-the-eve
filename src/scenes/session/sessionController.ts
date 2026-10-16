@@ -39,7 +39,6 @@ export interface StartOptions {
 /** Boot, batched persistence, export/import and shutdown of the telemetry session (no Phaser, no DOM). */
 export class SessionController {
   private _stack: TelemetryStack | null = null;
-  private _history: readonly LoggedEvent[] = [];
   private store: EventStore = new MemoryEventStore();
   private storeKind: 'indexeddb' | 'memory' = 'memory';
   private _ready = false;
@@ -62,10 +61,6 @@ export class SessionController {
   get stack(): TelemetryStack {
     if (!this._stack) throw new Error('SessionController not started');
     return this._stack;
-  }
-
-  get history(): readonly LoggedEvent[] {
-    return this._history;
   }
 
   /** Never rejects: on any failure the game still starts on an in-memory profile when it can. */
@@ -117,7 +112,6 @@ export class SessionController {
     this.playerId = boot.playerId;
     this.sessionId = platform.newUuid();
     this.persistent = this.storeKind === 'indexeddb' && boot.restored;
-    this._history = boot.history;
     this._stack = createTelemetryStack({
       accumulator: boot.accumulator,
       playerId: boot.playerId,
@@ -127,7 +121,7 @@ export class SessionController {
       entitySize: this.opts.entitySize,
       onRunEnd: () => void this.persist(),
     });
-    opts.onStackReady?.(this._stack, this._history);
+    opts.onStackReady?.(this._stack, boot.history);
 
     // session.start, then the run the previous session left open (tab closed)
     // is closed under its own indices, then the first run of this session.
