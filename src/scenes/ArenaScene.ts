@@ -111,12 +111,14 @@ export class ArenaScene extends Phaser.Scene {
     void session.start({
       after: this.previousShutdown,
       onStackReady: (stack, history) => {
-        this.aggregator.applyAll(history);
+        const agg = this.aggregator;
+        const tape = this.tape;
+        agg.applyAll(history);
         stack.recorder.subscribe((e) => {
           // recorder.log rethrows listener errors into the game loop; the HUD must never break it.
           try {
-            this.aggregator.apply(e);
-            this.tape.push(e);
+            agg.apply(e);
+            tape.push(e);
           } catch (err) {
             console.warn('[analysis] failed to fold an event', err);
           }

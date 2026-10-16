@@ -43,7 +43,6 @@ font:11px/1.3 ui-monospace,Consolas,Menlo,monospace;color:#d8e6d8;background:rgb
 export class AnalysisPanel {
   private readonly root: HTMLDivElement;
   private readonly style: HTMLStyleElement;
-  private readonly bodies = new Map<string, HTMLTableSectionElement>();
   private readonly cells = new Map<string, HTMLTableCellElement[]>();
   private readonly holders = new Map<string, HTMLElement>();
   private prev: AnalysisView | null = null;
@@ -78,12 +77,15 @@ export class AnalysisPanel {
   toggle(): void { this.setVisible(!this.shown); }
 
   render(view: AnalysisView): void {
+    const rebuilt = new Set<string>();
     for (const sec of view) {
       const before = this.prev?.find((s) => s.id === sec.id) ?? null;
-      if (needsRebuild(before, sec)) this.build(sec);
+      if (needsRebuild(before, sec)) {
+        this.build(sec);
+        rebuilt.add(sec.id);
+      }
     }
-    // After a rebuild the new cells already hold final text; patching them is a harmless no-op.
-    const rebuilt = new Set<string>(view.filter((s) => needsRebuild(this.prev?.find((p) => p.id === s.id) ?? null, s)).map((s) => s.id));
+    // A rebuilt section's cells already hold final text; skip patching them.
     for (const p of diffView(this.prev, view)) {
       if (rebuilt.has(p.sectionId)) continue;
       const cell = this.cells.get(`${p.sectionId}|${p.rowId}`)?.[p.cell];
@@ -95,7 +97,6 @@ export class AnalysisPanel {
   destroy(): void {
     this.root.remove();
     this.style.remove();
-    this.bodies.clear();
     this.cells.clear();
     this.holders.clear();
     this.prev = null;
@@ -125,7 +126,6 @@ export class AnalysisPanel {
       });
       this.cells.set(`${sec.id}|${row.id}`, tds);
     }
-    this.bodies.set(sec.id, body);
     holder.append(h, table);
   }
 }

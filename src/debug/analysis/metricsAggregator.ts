@@ -71,6 +71,11 @@ export class MetricsAggregator {
   }
 }
 
+/**
+ * Folds a whole log into a snapshot. `events` MUST be in chronological/stream order: IndexedDB `readAll`
+ * returns key order [session_id, seq], which is not chronological across sessions, so order it first
+ * (`orderEvents` in src/telemetry/replay.ts).
+ */
 export function metricsFromLog(events: readonly LoggedEvent[]): MetricsSnapshot {
   const agg = new MetricsAggregator();
   agg.applyAll(events);
