@@ -1,19 +1,51 @@
 // Cross-event state needed by the window accumulators. Computed once per event.
 import type { LoggedEvent } from '../../telemetry/schema';
 
+/** Speed at or below this (u/s) counts as standing still. */
+export const MOVING_SPEED_EPS = 5;
+/** An interval is idle when it ends this long after the last player.action or run start. */
+export const IDLE_THRESHOLD_MS = 3000;
+
 export interface Derived {
   /** Duration of the encounter that this event ends; null for any other event. */
   encounterMs: number | null;
+  /** pos.sample only: ms since the previous sample of the same run; null if none. */
+  dtMs: number | null;
+  /** pos.sample only: player path length since the previous sample; null if none. */
+  stepDistance: number | null;
+  /** pos.sample only: player-enemy distance at the end of the interval; null if none. */
+  distance: number | null;
+  /** pos.sample only: the interval is idle; null if there is no interval or no reference. */
+  idle: boolean | null;
+}
+
+interface Prev {
+  t: number;
+  x: number;
+  y: number;
+  session: string;
 }
 
 export class StreamTracker {
   private encounterStartT: number | null = null;
+  private prev: Prev | null = null;
+  private lastActivityT: number | null = null;
 
   observe(ev: LoggedEvent): Derived {
-    const out: Derived = { encounterMs: null };
+    const out: Derived = { encounterMs: null, dtMs: null, stepDistance: null, distance: null, idle: null };
     switch (ev.type) {
       case 'session.start':
         this.encounterStartT = null;
+        this.prev = null;
+        this.lastActivityT = null;
+        break;
+      case 'run.start':
+        // A new run breaks sample continuity and is the idleness reference.
+        this.prev = null;
+        this.lastActivityT = ev.t_ms;
+        break;
+      case 'player.action':
+        this.lastActivityT = ev.t_ms;
         break;
       case 'encounter.start':
         this.encounterStartT = ev.t_ms;
@@ -24,6 +56,19 @@ export class StreamTracker {
           this.encounterStartT = null;
         }
         break;
+      case 'pos.sample': {
+        const [x, y] = ev.p as [number, number];
+        const [ex, ey] = ev.e as [number, number];
+        const prev = this.prev;
+        if (prev !== null && prev.session === ev.session_id && ev.t_ms > prev.t) {
+          out.dtMs = ev.t_ms - prev.t;
+          out.stepDistance = Math.hypot(x - prev.x, y - prev.y);
+          out.distance = Math.hypot(x - ex, y - ey);
+          if (this.lastActivityT !== null) out.idle = ev.t_ms - this.lastActivityT > IDLE_THRESHOLD_MS;
+        }
+        this.prev = { t: ev.t_ms, x, y, session: ev.session_id };
+        break;
+      }
     }
     return out;
   }
