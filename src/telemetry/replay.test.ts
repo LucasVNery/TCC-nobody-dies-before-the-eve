@@ -2,8 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { Clock } from '../profile/types';
-import { findWeaponAction } from '../combat/actionRegistry';
-import { createTelemetryStack, type TelemetryStack } from './stack';
+import { makeBotStack, runBot } from './testing/scriptedBot';
 import { orderEvents, rebuildProfile, rebuildProfileWithStats, nextRunIdx } from './replay';
 import type { LoggedEvent } from './schema';
 
@@ -11,50 +10,10 @@ const SKILLS = ['punish', 'distance', 'patience', 'weapon_repertoire', 'action_r
 const CLOCKS: Clock[] = ['trait', 'state'];
 
 function makeStack(accumulator = new ProfileAccumulator()) {
-  let seed = 7;
-  const runEnds = { count: 0 };
-  const stack = createTelemetryStack({
-    accumulator,
-    playerId: 'p',
-    sessionId: 's',
-    firstRunIdx: 0,
-    nextSeed: () => seed++,
-    entitySize: 20,
-    onRunEnd: () => { runEnds.count += 1; },
-  });
-  stack.recorder.log('session.start', { wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: 'test', schema_v: 2 });
-  stack.director.start();
-  return { stack, runEnds };
-}
-
-/**
- * Deterministic scripted player: chases the Assaltante, attacks on a cadence,
- * dodges now and then, alternates weapons. Only needs to be good enough to
- * produce kills, deaths, rooms and every profile write type — the coverage
- * assertions in the test guard that. If they fail, tune the cadences here;
- * never delete the assertions.
- */
-function runBot(stack: TelemetryStack, ticks: number) {
-  const { encounter } = stack;
-  for (let i = 0; i < ticks; i++) {
-    const p = encounter.player.position;
-    const e = encounter.assaltante.position;
-    const dx = e.x - p.x;
-    const dy = e.y - p.y;
-    encounter.player.setAimDirection({ x: dx, y: dy });
-    const far = Math.hypot(dx, dy) > 40;
-    encounter.setPlayerMoveInput(far ? dx : 0, far ? dy : 0);
-    if (i % 400 === 0) encounter.player.switchWeapon('sword_shield');
-    if (i % 400 === 200) encounter.player.switchWeapon('heavy_weapon');
-    if (i % 20 === 0) {
-      const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
-      if (light) encounter.player.tryAction(light.id);
-    }
-    // Dodge cadence (i % 20) is deliberately loose: it leaves margin above the `runEnds >= 2` guard
-    // while still covering obs.defense via dodge. i % 10 sat exactly on that threshold.
-    if (encounter.assaltante.state === 'attacking' && i % 20 === 0) encounter.player.tryDodge();
-    stack.step(1000 / 60);
-  }
+  const made = makeBotStack({ accumulator });
+  made.stack.recorder.log('session.start', { wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: 'test', schema_v: 2 });
+  made.stack.director.start();
+  return made;
 }
 
 function expectSameProfile(rebuilt: ProfileAccumulator, live: ProfileAccumulator) {
