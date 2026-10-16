@@ -19,6 +19,7 @@ export interface SessionStatus {
   buffered: number;
   store: 'indexeddb' | 'memory';
   persistent: boolean;
+  /** Counts failure episodes (a streak of failed writes counts once), not individual failed writes. */
   writeFailures: number;
 }
 
