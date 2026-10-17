@@ -28,6 +28,23 @@ Render: Blender 5.2.1, headless, via a purpose-written script (`render_character
 
 The game's ground projection is now a screen-aligned pitched one: a 64-unit tile is drawn 64×48 px (ratio 0.75), so the matching camera elevation is `asin(0.75)` ≈ 48.59°. The old 26.57° (2:1 dimetric, ratio 0.5) made the sprites look flatter than the ground. `render_character.py` takes `--elevation <deg>` (default 48.59). Only the elevation changed: the azimuth/row convention below is untouched (`ROW_ROTATION_OFFSET = 4`), and the sheet geometry is identical (frame 128×128, 8 rows; idle 1 column, walk 6 columns). After re-rendering at 48.59° the profile check below was repeated and still holds (row 0 faces screen-left, row 4 screen-right, row 2 back, row 6 front).
 
+## Floor tiles
+
+The arena floor is five 128×96 RGBA tiles rendered by `render_floor_tiles.py` (no Blender MCP connection needed):
+
+```
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --python tools/blender/render_floor_tiles.py -- --out public/assets/tiles/floor
+```
+
+It prints the list of files written: `floor_base` (plain slab, light chamfer), `floor_a` (slab split by a groove), `floor_b` (one chamfered corner), `floor_worn` (shallow depression and a few-face crack), `floor_edge` (darker, inner bevel; playable perimeter). Registry and keys (`floor:<id>`) live in `src/visual/floor/floorAssets.ts`; `src/visual/floor/floorAssets.test.ts` pins the format.
+
+- **Scene:** a clean scene per tile. Ground = the top face of a side-1 square scaled 1.02, flat mortar at z = 0; slabs sit on it with at most 0.02 of relief. Flat shading, solid colours on the Principled BSDF (found by node type), one sun plus flat white ambient, Standard view transform, `film_transparent = True`.
+- **Camera:** orthographic, azimuth 0° (on −Y looking along +Y, screen up = far edge), elevation `asin(0.75)` ≈ 48.59°, resolution 128×96, `ortho_scale` = 1.0.
+- **Why 128×96:** the game draws a ground tile 64×48 px (ratio 0.75 = sin of the elevation), so at this elevation one world tile projects to exactly a 4:3 frame; 128×96 is that at 2× so the art stays crisp at the default zoom 2.
+- **Why `ortho_scale` 1.0, not 1.02:** Blender applies `ortho_scale` to the larger frame dimension (the 128 px width), and at this elevation the 96 px height spans the same ground depth, so the frame shows `ortho_scale × ortho_scale` of ground. With 1.02 the quad edge coincides with the frame edge and the anti-aliased border came out semi-transparent (223 non-opaque pixels per tile). With 1.0 the 1.02 quad overfills the frame by 1% per side and is cropped, so every pixel is opaque (the test checks all of them).
+- **Seams:** the outer `JOINT` strip of every tile is the same flat mortar, so all five tiles have identical edges and the joint between two slabs is that strip seen from both sides. The test keeps edge-column/row luminance differences ≤ 25.
+- **Adjusting the palette:** colours are linear-RGB albedos in the `Palette` block at the top of the script (relief, chamfer, groove, corner cut, crack and light constants sit next to it). Keep them cold and desaturated (no saturated red/orange: warm colours are reserved for telegraphs). After a change, re-render and run `npx vitest run src/visual/floor/floorAssets.test.ts`: mean luminance (Rec. 709) of each tile must stay within 40–140, the spread between tile means ≤ 30 and at most 5% of pixels above 200.
+
 ## Direction-row convention (calibrated 2026-09-07, wrong three times, root-caused 2026-09-13)
 
 **`image_row_from_top(render_direction) == render_direction`, directly — no flip.** Row index `d` (0-7, top of the sheet = row 0 = render direction 0) corresponds to a Blender-world camera azimuth of `d * 45°`, camera orbiting counter-clockwise (viewed from above) starting from world +X.
