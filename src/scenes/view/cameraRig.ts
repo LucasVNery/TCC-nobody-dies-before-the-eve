@@ -3,6 +3,7 @@ import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { GROUND_PROJECTION } from '../../visual/groundProjection';
 import { CAMERA_FOLLOW_LERP, VOID_COLOR, worldCameraBounds } from '../../visual/cameraDefaults';
 import { DEFAULT_ZOOM, zoomAfterWheel } from '../../visual/cameraZoom';
+import { SKIRT_TILES } from '../../visual/floor/composeFloor';
 
 /**
  * Main camera draws only the world (bounded, following the player, wheel zoom);
@@ -14,7 +15,7 @@ export class CameraRig {
   /** All world objects must already exist when this is called. */
   attach(follow: Phaser.GameObjects.Container, uiObjects: Phaser.GameObjects.GameObject[]): void {
     const scene = this.scene;
-    const bounds = worldCameraBounds(ARENA_BOUNDS, GROUND_PROJECTION, 2);
+    const bounds = worldCameraBounds(ARENA_BOUNDS, GROUND_PROJECTION, SKIRT_TILES);
 
     const main = scene.cameras.main;
     main.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);

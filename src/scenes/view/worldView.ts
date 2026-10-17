@@ -1,22 +1,36 @@
 import type Phaser from 'phaser';
 import type { Encounter } from '../../combat/encounter';
 import type { ProfileSink } from '../../profile/profileSink';
+import type { LoggedEvent } from '../../telemetry/schema';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { ASSET_KEYS } from '../../visual/assetRegistry';
 import { ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT } from '../../visual/placeholderTextures';
 import { GROUND_PROJECTION } from '../../visual/groundProjection';
-import { createGroundTilemap } from '../../visual/groundTilemap';
 import { DirectionalSprite } from '../../visual/directionalSprite';
+import { FLOOR_TILESET, SKIRT_TILES } from '../../visual/floor/composeFloor';
+import { FloorTracker } from '../../visual/floor/floorFromEvents';
+import { FLOOR_TILE_IDS } from '../../visual/floor/floorAssets';
+import { FloorView } from './floorView';
 
 const WALK_FRAME_COUNT = 6;
 
-/** Ground tilemap and the two character sprites, with i-frame / attack tints. */
+/** Procedural floor (rebuilt on room.enter) and the two character sprites, with i-frame / attack tints. */
 export class WorldView {
   readonly playerSprite: DirectionalSprite;
   readonly assaltanteSprite: DirectionalSprite;
+  private readonly floor: FloorView<Phaser.GameObjects.Image>;
+  private readonly floorTracker: FloorTracker;
 
   constructor(scene: Phaser.Scene) {
-    createGroundTilemap(scene, ARENA_BOUNDS, GROUND_PROJECTION);
+    // The floor container must exist before any other world object and before CameraRig.attach.
+    this.floorTracker = new FloorTracker(
+      Math.ceil(ARENA_BOUNDS.width / GROUND_PROJECTION.tileWorldSize),
+      Math.ceil(ARENA_BOUNDS.height / GROUND_PROJECTION.tileWorldSize),
+      SKIRT_TILES,
+      FLOOR_TILESET,
+    );
+    this.floor = new FloorView<Phaser.GameObjects.Image>(scene, ARENA_BOUNDS, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    this.floor.rebuild(this.floorTracker.initial());
     this.playerSprite = new DirectionalSprite(
       scene,
       { idleTextureKey: ASSET_KEYS.playerIdle, walkTextureKey: ASSET_KEYS.playerWalk, walkFrameCount: WALK_FRAME_COUNT },
@@ -33,6 +47,12 @@ export class WorldView {
       { x: 400, y: 300 },
       GROUND_PROJECTION,
     );
+  }
+
+  /** Feeds a logged event to the floor tracker; a room change rebuilds the floor. */
+  handleEvent(e: LoggedEvent): void {
+    const layout = this.floorTracker.apply(e);
+    if (layout) this.floor.rebuild(layout);
   }
 
   sync(encounter: Encounter<ProfileSink>, playerMoving: boolean): void {

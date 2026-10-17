@@ -4,6 +4,7 @@ import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
 import { findWeaponAction } from '../combat/actionRegistry';
 import { ASSET_KEYS } from '../visual/assetRegistry';
+import { loadFloorTiles } from '../visual/floor/floorAssets';
 import { generatePlaceholderTextures, ENTITY_SIZE } from '../visual/placeholderTextures';
 import { SessionController } from './session/sessionController';
 import { createBrowserPlatform } from './session/browserPlatform';
@@ -59,8 +60,7 @@ export class ArenaScene extends Phaser.Scene {
 
   preload(): void {
     const sheet = { frameWidth: CHARACTER_FRAME_SIZE, frameHeight: CHARACTER_FRAME_SIZE };
-    this.load.image(ASSET_KEYS.groundGrass, '/assets/tiles/grass.png');
-    this.load.image(ASSET_KEYS.groundWater, '/assets/tiles/water.png');
+    loadFloorTiles(this);
     this.load.spritesheet(ASSET_KEYS.playerIdle, '/assets/characters/player/idle.png', sheet);
     this.load.spritesheet(ASSET_KEYS.playerWalk, '/assets/characters/player/walk.png', sheet);
     this.load.spritesheet(ASSET_KEYS.assaltanteIdle, '/assets/characters/assaltante/idle.png', sheet);
@@ -111,14 +111,14 @@ export class ArenaScene extends Phaser.Scene {
     void session.start({
       after: this.previousShutdown,
       onStackReady: (stack, history) => {
-        const agg = this.aggregator;
-        const tape = this.tape;
+        const { aggregator: agg, tape, world } = this;
         agg.applyAll(history);
         stack.recorder.subscribe((e) => {
           // recorder.log rethrows listener errors into the game loop; the HUD must never break it.
           try {
             agg.apply(e);
             tape.push(e);
+            world.handleEvent(e);
           } catch (err) {
             console.warn('[analysis] failed to fold an event', err);
           }
