@@ -66,7 +66,7 @@ describe('dependency rule', () => {
     expect(Object.keys(files).length).toBeGreaterThan(0);
     for (const [f, src] of Object.entries(files)) {
       const specs = [...src.matchAll(/(?:import|from)\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
-      for (const s of specs) expect(s, `${f} imports ${s}`).not.toMatch(/(phaser|\/core\/|\/game\/|\/combat\/)/);
+      for (const s of specs) expect(s, `${f} imports ${s}`).not.toMatch(/(phaser|\/core\/|\/game\/|\/combat\/|testing\/)/);
     }
   });
 });

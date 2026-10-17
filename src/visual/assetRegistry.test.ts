@@ -9,8 +9,6 @@ describe('ASSET_KEYS', () => {
       'player_walk',
       'assaltante_idle',
       'assaltante_walk',
-      'ground_grass',
-      'ground_water',
       'placeholder_direction_arrow',
     ]);
     expect(new Set(keys).size).toBe(keys.length);

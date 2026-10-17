@@ -12,9 +12,9 @@ const ATTACK_HITBOX_COLOR = 0xffeb3b;
 const ATTACK_RANGE_COLOR = 0xff9800;
 
 /** Projected sector outline: the origin first, then `samples + 1` arc points. */
-export function sectorPoints(sector: AttackSector, iso: GroundProjection, samples = 10): Vec2[] {
+export function sectorPoints(sector: AttackSector, projection: GroundProjection, samples = 10): Vec2[] {
   const centerAngle = Math.atan2(sector.direction.y, sector.direction.x);
-  const points: Vec2[] = [toScreen(sector.origin, iso)];
+  const points: Vec2[] = [toScreen(sector.origin, projection)];
   for (let i = 0; i <= samples; i++) {
     const angle = centerAngle - sector.halfAngleRad + (2 * sector.halfAngleRad * i) / samples;
     points.push(
@@ -23,7 +23,7 @@ export function sectorPoints(sector: AttackSector, iso: GroundProjection, sample
           x: sector.origin.x + Math.cos(angle) * sector.reach,
           y: sector.origin.y + Math.sin(angle) * sector.reach,
         },
-        iso,
+        projection,
       ),
     );
   }
@@ -31,14 +31,14 @@ export function sectorPoints(sector: AttackSector, iso: GroundProjection, sample
 }
 
 /** The four projected corners of a box, in order. */
-export function boxCorners(box: AABB, iso: GroundProjection): Vec2[] {
+export function boxCorners(box: AABB, projection: GroundProjection): Vec2[] {
   const corners: Vec2[] = [
     { x: box.x, y: box.y },
     { x: box.x + box.width, y: box.y },
     { x: box.x + box.width, y: box.y + box.height },
     { x: box.x, y: box.y + box.height },
   ];
-  return corners.map((corner) => toScreen(corner, iso));
+  return corners.map((corner) => toScreen(corner, projection));
 }
 
 /** On-screen size of a circular world range (radius `range`) under the projection. */

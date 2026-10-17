@@ -5,7 +5,7 @@ export { GROUND_TILE_SIZE } from './groundProjection';
 export const ENTITY_SIZE = 20; // hurtbox/collision size — combat's AABB, unrelated to how big the sprite draws
 export const ENTITY_VISUAL_WIDTH = 20;
 // Taller than wide — standing-character silhouette, purely visual. 40 (was 32)
-// makes the character read better against the 64x32 tiles without drawing it
+// makes the character read better against the 64x48 tiles without drawing it
 // much larger than its 20-unit hurtbox (hits "outside the body" confuse reads).
 export const ENTITY_VISUAL_HEIGHT = 40;
 // Long enough that the tip clears the entity's half-extent in every

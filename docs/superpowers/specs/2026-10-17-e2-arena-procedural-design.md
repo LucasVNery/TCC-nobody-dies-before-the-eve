@@ -1,7 +1,7 @@
 # E2: Projeção estilo Hades, arena procedural e fundo — Design
 
 **Data:** 2026-10-17 (revisada no mesmo dia: o autor escolheu a projeção estilo Hades, caminho B)
-**Status:** rascunho para revisão do autor (padrões do Claude, marcados como **[minha escolha]**).
+**Status:** implementado em 2026-10-17, commits 89c0bde..HEAD; playtest visual pendente. (Padrões do Claude marcados como **[minha escolha]**.)
 **Sub-projeto:** E2 do ambiente de gameplay v2. Sequência: E1 (feito) → **E2 projeção + arena** → E3 herói e inimigo comum animados → E4 chefe. Contexto: `Contexto_pesquisa/documento-tecnico-mestre.md` §3.3 e §3.8.
 
 ## 1. Intenção
@@ -98,7 +98,7 @@ composeFloor(seed, colunas, linhas, tileset): string[][]
 
 ### 4.8 Pipeline do Blender
 
-Novo `tools/blender/render_floor_tiles.py` (headless): só a face superior de um quadrado de lado 1 com relevo ≤ 0,02, ligeiramente maior que o quadro (1,02) e cortada, para as bordas ficarem opacas e os tiles encaixarem sem frestas; câmera ortográfica com azimute 0°, elevação ≈ 48,59° (`asin(0,75)`), resolução 128 × 96, `ortho_scale` 1,02. Parâmetros no topo. O Blender MCP não precisa estar conectado. `render_character.py` ganha `--elevation` (padrão 48,59°).
+Novo `tools/blender/render_floor_tiles.py` (headless): só a face superior de um quadrado de lado 1 com relevo ≤ 0,02, ligeiramente maior que o quadro (1,02) e cortada, para as bordas ficarem opacas e os tiles encaixarem sem frestas; câmera ortográfica com azimute 0°, elevação ≈ 48,59° (`asin(0,75)`), resolução 128 × 96, `ortho_scale` 1,0 (o quadro mostra exatamente 1 × 1 de chão; o quadrado escalado a 1,02 transborda e é cortado). Parâmetros no topo. O Blender MCP não precisa estar conectado. `render_character.py` ganha `--elevation` (padrão 48,59°).
 
 ## 5. Testes e aceitação
 
@@ -136,3 +136,11 @@ Modelagem detalhada dos tiles (§4.4); PRNG e hash exatos (congelados em testes 
 2. **`GAME_VERSION` sobe** (§3).
 3. **Tema do chão** (§4.4), **seed derivada do log** e **piso novo a cada sala** (§4.7: para um piso por run, troque `roomIdx` por `0`).
 4. **Anel de 10 tiles com escurecimento** (§4.6).
+
+## 9. Divergências da implementação
+
+- `ortho_scale` 1,0 em vez de 1,02: com 1,02 a borda do quadrado coincidia com a do quadro e a linha de pixels de borda saía semitransparente (223 pixels não opacos por tile); o quadrado escalado a 1,02 transborda o quadro de 1,0 e é cortado.
+- Câmera dos tiles a `asin(0,75)` (48,59°) em vez dos 26,57° do losango 2:1 anterior.
+- `floor_edge` sem face lateral (só a face superior, como os demais).
+- Zoom e limites da câmera ajustados na implementação (`cameraZoom`, `worldCameraBounds`), não fixados no desenho.
+- `FloorView` genérica: desenha qualquer `FloorLayout` com o anel; não conhece a arena.

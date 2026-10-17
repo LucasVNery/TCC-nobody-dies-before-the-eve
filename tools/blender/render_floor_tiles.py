@@ -263,6 +263,7 @@ def build_tile(tile_id):
             v.co.x, v.co.y = x, y
         inset_face(bm, top, 0.02, drop=WORN_DEPTH)
         top.material_index = idx["worn"]
+        # crack quads sit at RELIEF 0.02 plus a decal epsilon (0.0008) to avoid z-fighting
         add_crack(bm, [(0.08, 0.40), (0.15, 0.30), (0.12, 0.22), (0.24, 0.12), (0.30, 0.04)],
                   CRACK_WIDTH, RELIEF + 0.0008, idx["crack"])
     elif tile_id == "floor_edge":
