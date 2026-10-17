@@ -60,7 +60,7 @@ Efeitos em cadeia, todos de apresentação: `mapMovement` vira identidade; `mapA
 
 ### 4.2 Câmera
 
-Segue o jogador com suavização leve (*lerp* 0,12), pixels arredondados, zoom padrão e roda do mouse como hoje (`DEFAULT_ZOOM` 2). Os limites incluem o anel de tiles; a cor de fundo cobre o que sobrar. Afinar o enquadramento é parte do playtest, por isso os números são constantes nomeadas.
+Segue o jogador com suavização leve (*lerp* 0,12), sem arredondamento de pixels (o arredondamento fazia a câmera parar fora do centro e tremer), zoom padrão e roda do mouse como hoje (`DEFAULT_ZOOM` 2). Os limites incluem o anel de tiles; a cor de fundo cobre o que sobrar. Afinar o enquadramento é parte do playtest, por isso os números são constantes nomeadas.
 
 ### 4.3 Sprites dos personagens
 

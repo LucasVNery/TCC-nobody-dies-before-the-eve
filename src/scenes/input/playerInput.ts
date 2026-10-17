@@ -1,8 +1,7 @@
 import Phaser from 'phaser';
 import type { ActionType } from '../../combat/actionRegistry';
 import type { Vec2 } from '../../combat/types';
-import { toScreen, GROUND_PROJECTION } from '../../visual/groundProjection';
-import { mapAim, mapMovement } from './mapMovement';
+import { aimOrigin, mapAim, mapMovement } from './mapMovement';
 
 export interface PlayerIntents {
   setMoveInput(dx: number, dy: number): void;
@@ -82,7 +81,7 @@ export class PlayerInput {
     if (!intents) return;
     const pointer = this.scene.input.activePointer;
     const worldPoint = this.scene.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    this.aim = mapAim(worldPoint, toScreen(intents.position, GROUND_PROJECTION));
+    this.aim = mapAim(worldPoint, aimOrigin(intents.position));
     intents.setAimDirection(this.aim);
 
     const k = this.keys;

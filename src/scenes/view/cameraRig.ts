@@ -19,8 +19,7 @@ export class CameraRig {
 
     const main = scene.cameras.main;
     main.setBounds(bounds.x, bounds.y, bounds.width, bounds.height);
-    main.startFollow(follow, true, CAMERA_FOLLOW_LERP, CAMERA_FOLLOW_LERP);
-    main.roundPixels = true;
+    main.startFollow(follow, false, CAMERA_FOLLOW_LERP, CAMERA_FOLLOW_LERP);
     main.setBackgroundColor(VOID_COLOR);
     main.setZoom(DEFAULT_ZOOM);
     scene.input.on('wheel', (_pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
