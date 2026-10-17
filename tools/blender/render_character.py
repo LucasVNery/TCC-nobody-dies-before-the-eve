@@ -11,6 +11,7 @@ Usage:
     --walk-action "Rig_Medium|Walking_A" \
     --walk-frames 6 \
     --out-key player
+    [--elevation 48.59]  # camera elevation in degrees; default matches the 64x48 game tile
 """
 import sys
 import os
@@ -20,7 +21,7 @@ import mathutils
 
 DIRECTIONS = 8
 FRAME_SIZE = 128  # render resolution per frame, square, cropped later if needed
-ELEVATION_DEG = 26.57  # matches the game's 2:1 dimetric ground tile projection
+DEFAULT_ELEVATION_DEG = 48.59  # asin(0.75): elevation matching the game's 64x48 ground tile (ratio 0.75)
 
 
 def parse_args():
@@ -137,7 +138,7 @@ def render_direction_frame(cam_obj, out_path):
     bpy.ops.render.render(write_still=True)
 
 
-def render_animation(character_fbx, anim_fbx, action_name, frame_numbers, out_dir, entity, anim_name):
+def render_animation(character_fbx, anim_fbx, action_name, frame_numbers, out_dir, entity, anim_name, elevation_deg):
     os.makedirs(os.path.abspath(out_dir), exist_ok=True)
 
     clean_scene()
@@ -197,7 +198,7 @@ def render_animation(character_fbx, anim_fbx, action_name, frame_numbers, out_di
 
     for direction in range(DIRECTIONS):
         azimuth = direction * (360.0 / DIRECTIONS)
-        position_camera(cam_obj, center, azimuth, ELEVATION_DEG, distance)
+        position_camera(cam_obj, center, azimuth, elevation_deg, distance)
         for i, frame in enumerate(frame_numbers):
             bpy.context.scene.frame_set(frame)
             bpy.context.view_layer.update()
@@ -243,13 +244,14 @@ def compose_sheet(render_dir, out_path, frame_count):
 def main():
     args = parse_args()
     entity = args["out-key"]
+    elevation_deg = float(args.get("elevation", DEFAULT_ELEVATION_DEG))
     renders_root = os.path.join("tools", "blender", "renders", entity)
     sheets_root = os.path.join("public", "assets", "characters", entity)
 
     idle_frames = [17]  # mid-pose of the 33-frame Idle_A cycle
     render_animation(
         args["character"], args["idle-fbx"], args["idle-action"], idle_frames,
-        os.path.join(renders_root, "idle"), entity, "idle",
+        os.path.join(renders_root, "idle"), entity, "idle", elevation_deg,
     )
     compose_sheet(os.path.join(renders_root, "idle"), os.path.join(sheets_root, "idle.png"), len(idle_frames))
 
@@ -258,7 +260,7 @@ def main():
     walk_frames = [1 + round(i * 32 / (walk_frame_count - 1)) for i in range(walk_frame_count)]
     render_animation(
         args["character"], args["walk-fbx"], args["walk-action"], walk_frames,
-        os.path.join(renders_root, "walk"), entity, "walk",
+        os.path.join(renders_root, "walk"), entity, "walk", elevation_deg,
     )
     compose_sheet(os.path.join(renders_root, "walk"), os.path.join(sheets_root, "walk.png"), walk_frame_count)
 

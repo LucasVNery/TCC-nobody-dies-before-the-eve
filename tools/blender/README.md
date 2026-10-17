@@ -22,7 +22,11 @@ Render: Blender 5.2.1, headless, via a purpose-written script (`render_character
      --walk-frames 6 \
      --out-key <player|assaltante>
    ```
-   This renders 8 directions (45° apart, orthographic, elevation 26.57° to match the game's 2:1 dimetric ground tiles) × 1 frame (idle, mid-cycle frame 17 of the 33-frame `Idle_A` clip) or 6 frames (walk, evenly sampled across the 33-frame `Walking_A` clip) per direction, then composes each (entity, animation) pair into a single grid PNG: 8 rows (one per direction) × N columns (animation frames), written to `public/assets/characters/<entity>/<idle|walk>.png`. Frame size: 128×128px per cell (both idle.png and walk.png share this — required for Phaser's uniform-grid `load.spritesheet`).
+   This renders 8 directions (45° apart, orthographic, camera elevation 48.59° = asin(0.75), the elevation that corresponds to the game's 64×48 ground tile; override with `--elevation <deg>`) × 1 frame (idle, mid-cycle frame 17 of the 33-frame `Idle_A` clip) or 6 frames (walk, evenly sampled across the 33-frame `Walking_A` clip) per direction, then composes each (entity, animation) pair into a single grid PNG: 8 rows (one per direction) × N columns (animation frames), written to `public/assets/characters/<entity>/<idle|walk>.png`. Frame size: 128×128px per cell (both idle.png and walk.png share this — required for Phaser's uniform-grid `load.spritesheet`).
+
+## Camera elevation (changed 2026-10-17)
+
+The game's ground projection is now a screen-aligned pitched one: a 64-unit tile is drawn 64×48 px (ratio 0.75), so the matching camera elevation is `asin(0.75)` ≈ 48.59°. The old 26.57° (2:1 dimetric, ratio 0.5) made the sprites look flatter than the ground. `render_character.py` takes `--elevation <deg>` (default 48.59). Only the elevation changed: the azimuth/row convention below is untouched (`ROW_ROTATION_OFFSET = 4`), and the sheet geometry is identical (frame 128×128, 8 rows; idle 1 column, walk 6 columns). After re-rendering at 48.59° the profile check below was repeated and still holds (row 0 faces screen-left, row 4 screen-right, row 2 back, row 6 front).
 
 ## Direction-row convention (calibrated 2026-09-07, wrong three times, root-caused 2026-09-13)
 
