@@ -208,7 +208,7 @@ describe('TelemetryRecorder', () => {
 });
 
 describe('game version', () => {
-  it('declares the combat B game version', () => {
+  it('declares the current game version', () => {
     expect(GAME_VERSION).toBe('0.0.3+viewB');
   });
 

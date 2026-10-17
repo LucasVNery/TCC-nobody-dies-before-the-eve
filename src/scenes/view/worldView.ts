@@ -51,8 +51,12 @@ export class WorldView {
 
   /** Feeds a logged event to the floor tracker; a room change rebuilds the floor. */
   handleEvent(e: LoggedEvent): void {
-    const layout = this.floorTracker.apply(e);
-    if (layout) this.floor.rebuild(layout);
+    try {
+      const layout = this.floorTracker.apply(e);
+      if (layout) this.floor.rebuild(layout);
+    } catch (err) {
+      console.warn('[floor] failed to update', err);
+    }
   }
 
   sync(encounter: Encounter<ProfileSink>, playerMoving: boolean): void {
