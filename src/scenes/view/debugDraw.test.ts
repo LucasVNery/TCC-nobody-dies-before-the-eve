@@ -1,32 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { sectorPoints, boxCorners } from './debugDraw';
-import { ISO_CONFIG } from '../../visual/placeholderTextures';
+import { sectorPoints, boxCorners, rangeEllipseSize } from './debugDraw';
+import { GROUND_PROJECTION } from '../../visual/groundProjection';
 
 describe('debugDraw geometry', () => {
   it('sectorPoints starts at the projected origin and samples the arc', () => {
     const pts = sectorPoints(
       { origin: { x: 0, y: 0 }, direction: { x: 1, y: 0 }, reach: 64, halfAngleRad: Math.PI / 4 },
-      ISO_CONFIG,
+      GROUND_PROJECTION,
       2,
     );
+    const expected = [[0, 0], [45.25, -33.94], [64, 0], [45.25, 33.94]];
     expect(pts).toHaveLength(4);
-    expect(pts[0].x).toBeCloseTo(0, 1);
-    expect(pts[0].y).toBeCloseTo(0, 1);
-    expect(pts[1].x).toBeCloseTo(45.25, 1);
-    expect(pts[1].y).toBeCloseTo(0, 1);
-    expect(pts[2].x).toBeCloseTo(32, 1);
-    expect(pts[2].y).toBeCloseTo(16, 1);
-    expect(pts[3].x).toBeCloseTo(0, 1);
-    expect(pts[3].y).toBeCloseTo(22.63, 1);
+    expected.forEach(([x, y], i) => {
+      expect(pts[i].x).toBeCloseTo(x, 1);
+      expect(pts[i].y).toBeCloseTo(y, 1);
+    });
   });
 
   it('boxCorners projects the four corners in order', () => {
-    const c = boxCorners({ x: 0, y: 0, width: 64, height: 64 }, ISO_CONFIG);
-    const expected = [[0, 0], [32, 16], [0, 32], [-32, 16]];
+    const c = boxCorners({ x: 0, y: 0, width: 64, height: 64 }, GROUND_PROJECTION);
+    const expected = [[0, 0], [64, 0], [64, 48], [0, 48]];
     expect(c).toHaveLength(4);
     expected.forEach(([x, y], i) => {
       expect(c[i].x).toBeCloseTo(x, 1);
       expect(c[i].y).toBeCloseTo(y, 1);
     });
+  });
+
+  it('rangeEllipseSize foreshortens the vertical axis by the projection', () => {
+    expect(rangeEllipseSize(60, GROUND_PROJECTION)).toEqual({ width: 120, height: 90 });
   });
 });

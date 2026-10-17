@@ -1,8 +1,7 @@
 import type Phaser from 'phaser';
 import { ASSET_KEYS } from './assetRegistry';
-import type { IsoConfig } from './isometricProjection';
 
-export const GROUND_TILE_SIZE = 64;
+export { GROUND_TILE_SIZE } from './groundProjection';
 export const ENTITY_SIZE = 20; // hurtbox/collision size — combat's AABB, unrelated to how big the sprite draws
 export const ENTITY_VISUAL_WIDTH = 20;
 // Taller than wide — standing-character silhouette, purely visual. 40 (was 32)
@@ -14,12 +13,6 @@ export const ENTITY_VISUAL_HEIGHT = 40;
 // not "painted over the block".
 const DIRECTION_ARROW_SIZE = 20;
 const DIRECTION_ARROW_COLOR = 0xffeb3b; // bright yellow — readable over both blue and red
-
-export const ISO_CONFIG: IsoConfig = {
-  tileWorldSize: GROUND_TILE_SIZE,
-  halfWidth: 32,
-  halfHeight: 16,
-};
 
 export function generatePlaceholderTextures(scene: Phaser.Scene): void {
   generateArrowTexture(scene, ASSET_KEYS.directionArrow, DIRECTION_ARROW_SIZE, DIRECTION_ARROW_COLOR);

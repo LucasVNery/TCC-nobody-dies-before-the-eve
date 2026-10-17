@@ -1,31 +1,33 @@
 // src/visual/groundTilemap.ts
+// Temporary: lays the old square placeholder tiles on the screen-aligned
+// projection grid so the arena stays visible until the Blender tile arena
+// replaces this file (E2 Task 8).
 import type Phaser from 'phaser';
 import type { AABB, Vec2 } from '../combat/types';
 import { ASSET_KEYS } from './assetRegistry';
-import { toScreen, type IsoConfig } from './isometricProjection';
+import { toScreen, type GroundProjection } from './groundProjection';
 
 const GROUND_DEPTH_BASE = -100000;
 
-export function createGroundTilemap(scene: Phaser.Scene, bounds: AABB, config: IsoConfig): void {
+export function createGroundTilemap(scene: Phaser.Scene, bounds: AABB, config: GroundProjection): void {
   const widthInTiles = Math.ceil(bounds.width / config.tileWorldSize);
   const heightInTiles = Math.ceil(bounds.height / config.tileWorldSize);
-  const tileDisplaySize = config.halfWidth * 2;
+  const origin = toScreen({ x: bounds.x, y: bounds.y }, config);
 
   for (let row = 0; row < heightInTiles; row++) {
     for (let col = 0; col < widthInTiles; col++) {
       const onEdge = row === 0 || row === heightInTiles - 1 || col === 0 || col === widthInTiles - 1;
       const textureKey = onEdge ? ASSET_KEYS.groundWater : ASSET_KEYS.groundGrass;
 
-      const worldPos: Vec2 = {
-        x: bounds.x + col * config.tileWorldSize,
-        y: bounds.y + row * config.tileWorldSize,
+      const screenPos: Vec2 = {
+        x: origin.x + col * config.tileScreenWidth,
+        y: origin.y + row * config.tileScreenHeight,
       };
-      const screenPos = toScreen(worldPos, config);
 
       const tile = scene.add.image(screenPos.x, screenPos.y, textureKey);
       tile.setOrigin(0, 0);
-      tile.setDisplaySize(tileDisplaySize, tileDisplaySize);
-      tile.setDepth(GROUND_DEPTH_BASE + row + col);
+      tile.setDisplaySize(config.tileScreenWidth, config.tileScreenHeight);
+      tile.setDepth(GROUND_DEPTH_BASE + row);
     }
   }
 }

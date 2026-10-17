@@ -1,8 +1,7 @@
 import Phaser from 'phaser';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import type { Vec2 } from '../../combat/types';
-import { ISO_CONFIG } from '../../visual/placeholderTextures';
-import { toScreen } from '../../visual/isometricProjection';
+import { toScreen, GROUND_PROJECTION } from '../../visual/groundProjection';
 import { DEFAULT_ZOOM, zoomAfterWheel } from '../../visual/cameraZoom';
 
 /**
@@ -21,8 +20,8 @@ export class CameraRig {
       { x: ARENA_BOUNDS.x, y: ARENA_BOUNDS.y + ARENA_BOUNDS.height },
       { x: ARENA_BOUNDS.x + ARENA_BOUNDS.width, y: ARENA_BOUNDS.y + ARENA_BOUNDS.height },
     ];
-    const projectedCorners = arenaCorners.map((corner) => toScreen(corner, ISO_CONFIG));
-    const margin = ISO_CONFIG.halfWidth * 2;
+    const projectedCorners = arenaCorners.map((corner) => toScreen(corner, GROUND_PROJECTION));
+    const margin = GROUND_PROJECTION.tileScreenWidth;
     const minX = Math.min(...projectedCorners.map((p) => p.x)) - margin;
     const maxX = Math.max(...projectedCorners.map((p) => p.x)) + margin;
     const minY = Math.min(...projectedCorners.map((p) => p.y)) - margin;

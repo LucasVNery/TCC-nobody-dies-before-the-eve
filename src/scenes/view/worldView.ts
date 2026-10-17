@@ -3,7 +3,8 @@ import type { Encounter } from '../../combat/encounter';
 import type { ProfileSink } from '../../profile/profileSink';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { ASSET_KEYS } from '../../visual/assetRegistry';
-import { ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT, ISO_CONFIG } from '../../visual/placeholderTextures';
+import { ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT } from '../../visual/placeholderTextures';
+import { GROUND_PROJECTION } from '../../visual/groundProjection';
 import { createGroundTilemap } from '../../visual/groundTilemap';
 import { DirectionalSprite } from '../../visual/directionalSprite';
 
@@ -15,14 +16,14 @@ export class WorldView {
   readonly assaltanteSprite: DirectionalSprite;
 
   constructor(scene: Phaser.Scene) {
-    createGroundTilemap(scene, ARENA_BOUNDS, ISO_CONFIG);
+    createGroundTilemap(scene, ARENA_BOUNDS, GROUND_PROJECTION);
     this.playerSprite = new DirectionalSprite(
       scene,
       { idleTextureKey: ASSET_KEYS.playerIdle, walkTextureKey: ASSET_KEYS.playerWalk, walkFrameCount: WALK_FRAME_COUNT },
       ENTITY_VISUAL_WIDTH,
       ENTITY_VISUAL_HEIGHT,
       { x: 100, y: 300 },
-      ISO_CONFIG,
+      GROUND_PROJECTION,
     );
     this.assaltanteSprite = new DirectionalSprite(
       scene,
@@ -30,7 +31,7 @@ export class WorldView {
       ENTITY_VISUAL_WIDTH,
       ENTITY_VISUAL_HEIGHT,
       { x: 400, y: 300 },
-      ISO_CONFIG,
+      GROUND_PROJECTION,
     );
   }
 

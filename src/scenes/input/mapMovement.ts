@@ -1,16 +1,15 @@
-import { fromScreen } from '../../visual/isometricProjection';
-import { ISO_CONFIG } from '../../visual/placeholderTextures';
+import { fromScreen, GROUND_PROJECTION } from '../../visual/groundProjection';
 import type { Vec2 } from '../../combat/types';
 
 /**
- * Rotates WASD 45° so each key drives the player toward a screen-space point
- * of the isometric diamond, instead of along the cartesian world axes.
+ * WASD drives the player along the world axes directly: the ground projection
+ * is screen-aligned, so world +x is screen-right and world +y is screen-down.
  */
 export function mapMovement(ix: number, iy: number): { dx: number; dy: number } {
-  return { dx: ix + iy, dy: iy - ix };
+  return { dx: ix, dy: iy };
 }
 
 /** World-space aim direction from the pointer's world (screen-plane) point and the player's screen position. */
 export function mapAim(pointerWorld: Vec2, playerScreen: Vec2): Vec2 {
-  return fromScreen({ x: pointerWorld.x - playerScreen.x, y: pointerWorld.y - playerScreen.y }, ISO_CONFIG);
+  return fromScreen({ x: pointerWorld.x - playerScreen.x, y: pointerWorld.y - playerScreen.y }, GROUND_PROJECTION);
 }

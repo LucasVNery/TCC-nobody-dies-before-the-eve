@@ -1,6 +1,6 @@
 import type Phaser from 'phaser';
 import type { Vec2 } from '../combat/types';
-import { toScreen, screenDepth, type IsoConfig } from './isometricProjection';
+import { toScreen, screenDepth, type GroundProjection } from './groundProjection';
 import { directionBucket, DIRECTION_COUNT } from './spriteDirection';
 
 export interface DirectionalSpriteTextures {
@@ -67,7 +67,7 @@ function spriteRowForDirection(bucket: number): number {
 export class DirectionalSprite {
   private readonly container: Phaser.GameObjects.Container;
   private readonly sprite: Phaser.GameObjects.Sprite;
-  private readonly config: IsoConfig;
+  private readonly config: GroundProjection;
   private readonly textures: DirectionalSpriteTextures;
   private readonly scene: Phaser.Scene;
   private currentAnimKey = '';
@@ -78,7 +78,7 @@ export class DirectionalSprite {
     width: number,
     height: number,
     initialPosition: Vec2,
-    config: IsoConfig,
+    config: GroundProjection,
   ) {
     this.scene = scene;
     this.config = config;
