@@ -57,12 +57,12 @@ export class FloorTracker {
   }
 
   initial(): FloorLayout {
-    return this.build(0);
+    return this.build(0, DEFAULT_FLOOR_SEED);
   }
 
-  private build(room: number): FloorLayout {
+  private build(room: number, seed: number = this.seed): FloorLayout {
     return composeFloorWithSkirt(
-      floorSeed(this.seed, room),
+      floorSeed(seed, room),
       this.colunas,
       this.linhas,
       this.skirt,

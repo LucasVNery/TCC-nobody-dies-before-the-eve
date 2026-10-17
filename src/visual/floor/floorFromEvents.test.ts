@@ -3,6 +3,7 @@ import type { LoggedEvent } from '../../telemetry/schema';
 import { FLOOR_TILESET, composeFloorWithSkirt } from './composeFloor';
 import { DEFAULT_FLOOR_SEED, FloorTracker, floorFromEvents } from './floorFromEvents';
 import { floorSeed } from './floorSeed';
+import { makeBotStack, runBot } from '../../telemetry/testing/scriptedBot';
 
 let seq = 0;
 function ev(type: string, env: { run_idx?: number; room_idx?: number }, payload: Record<string, unknown> = {}): LoggedEvent {
@@ -82,5 +83,55 @@ describe('FloorTracker', () => {
 
   it('initial() equals the default seed, room 0', () => {
     expect(tracker().initial()).toEqual(expected(DEFAULT_FLOOR_SEED, 0));
+  });
+});
+
+describe('FloorTracker extra cases', () => {
+  it('initial() ignores the seed stored by run.start', () => {
+    const t = tracker();
+    t.apply(runStart(0, 5));
+    expect(t.initial()).toEqual(expected(DEFAULT_FLOOR_SEED, 0));
+  });
+
+  it.each([0, -17, 2 ** 33 + 5])('seed %s is valid and tracker matches floorFromEvents', (seed) => {
+    const t = tracker();
+    t.apply(runStart(2, seed));
+    for (const r of [0, 3]) {
+      const fromTracker = t.apply(roomEnter(r, 2));
+      expect(fromTracker).toEqual(expected(seed, r));
+      expect(fromTracker).toEqual(
+        floorFromEvents([runStart(2, seed)], 2, r, 25, 19, 10, FLOOR_TILESET),
+      );
+    }
+  });
+});
+
+describe('FloorTracker against a real recorded log', () => {
+  it('matches floorFromEvents for every room.enter of a bot session', () => {
+    const { stack } = makeBotStack({ seedStart: 123 });
+    stack.director.start();
+    runBot(stack, 30000);
+    const log = JSON.parse(JSON.stringify(stack.recorder.drain())) as LoggedEvent[];
+
+    const starts = log.filter((e) => e.type === 'run.start');
+    expect(starts.length).toBeGreaterThanOrEqual(1);
+    expect(starts[0].seed).toBe(123);
+    expect(Number.isFinite(starts[0].seed)).toBe(true);
+
+    const t = new FloorTracker(25, 19, 10, FLOOR_TILESET);
+    let matches = 0;
+    let deepest = 0;
+    for (const e of log) {
+      const layout = t.apply(e);
+      if (layout === null) continue;
+      expect(e.type).toBe('room.enter');
+      expect(layout).toEqual(
+        floorFromEvents(log, e.run_idx, e.room_idx, 25, 19, 10, FLOOR_TILESET),
+      );
+      matches += 1;
+      deepest = Math.max(deepest, e.room_idx);
+    }
+    expect(matches).toBeGreaterThanOrEqual(2);
+    expect(deepest).toBeGreaterThan(0);
   });
 });
