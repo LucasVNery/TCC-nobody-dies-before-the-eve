@@ -4,6 +4,31 @@
 **Status:** implementado em 2026-10-17, commits 89c0bde..HEAD; playtest visual pendente. (Padrões do Claude marcados como **[minha escolha]**.)
 **Sub-projeto:** E2 do ambiente de gameplay v2. Sequência: E1 (feito) → **E2 projeção + arena** → E3 herói e inimigo comum animados → E4 chefe. Contexto: `Contexto_pesquisa/documento-tecnico-mestre.md` §3.3 e §3.8.
 
+## Revisão 2 (19/10/2026): losango 2:1 e fluidez — substitui o que for citado
+
+Depois de ver o jogo rodando, o autor corrigiu o rumo: o chão deve ser um **losango 2:1** (a vista que o jogo tinha antes do E2), e a jogabilidade estava **travada**. A descrição "retângulo inclinado, sem giro" do caminho B estava errada para o que o autor queria (erro de especificação do Claude). Esta revisão **substitui** as partes abaixo; o resto da spec continua valendo. Plano: `docs/superpowers/plans/2026-10-19-e2-1-losango-fluidez.md`.
+
+**Projeção (substitui §3 e §4.1).** Giro de 45°, tile lógico de 64 unidades ⇒ losango de **64 × 32 px** na tela:
+
+```
+toScreen(pos)    = ((pos.x − pos.y) · W / 2T, (pos.x + pos.y) · H / 2T)   W=64, H=32, T=64
+fromScreen(d)    = (T · (d.x / W + d.y / H), T · (d.y / H − d.x / W))
+screenDepth(pos) = pos.x + pos.y
+```
+
+- `mapMovement` volta a girar o teclado em 45°: `{ dx: ix + iy, dy: iy − ix }`, para W/A/S/D continuarem alinhados à tela. `aimOrigin` (centro do hurtbox) permanece.
+- A elipse do alcance na depuração é a projeção exata de um círculo de raio R: largura `√2 · R · W / T`, altura `√2 · R · H / T`.
+- Os limites da câmera são o mínimo e o máximo dos **quatro** cantos projetados da arena expandida em `marginTiles` tiles de mundo em cada lado.
+- **Personagens:** re-renderizar a elevação **30°** (`asin(H/W)`), que dá o chão exatamente 2:1 (substitui §4.3: 48,59°).
+- **Tiles (substitui §4.4 formato e §4.8):** PNG **128 × 64** com o losango preenchendo o quadro e **cantos transparentes**; câmera ortográfica azimute 45°, elevação 30°, `ortho_scale` = √2 (a diagonal do tile ocupa os 128 px); o plano é desenhado a **1,03×** o tamanho da célula (os 4 vértices passam do quadro e as bordas diagonais ficam dentro dele) para os tiles vizinhos se sobreporem ≈ 1,5% e **não haver frestas**. Posicionamento: origem (0,5; 0) no vértice superior da célula, exibido a 64 × 32.
+- **Versão:** a lógica continua igual e o controle volta ao mapeamento da `0.0.2`, mas a **mira a partir do centro** (E2) continua, então `GAME_VERSION` permanece `0.0.3+viewB` (o sufixo `viewB` ficou histórico: a vista retangular nunca coletou dados oficiais).
+
+**Fluidez (novo, só apresentação).** Medido em 19/10: o Phaser reportava ≈ 54 fps no painel do app; o chão novo desenhava ≈ 1.755 imagens por quadro (contra 475) e a simulação de passo fixo (60 Hz) não interpola, então a tela mostra o último passo; com a câmera de *lerp* por quadro isso gera tremor quando a taxa de quadros não é exatamente 60. Requisitos:
+- O desenho do chão custa proporcional ao que está **visível**, não ao total de células (por exemplo, `TilemapLayer` isométrico do Phaser, que faz *culling* e aceita *tint* por tile, ou blocos pré-renderizados). A escolha é do implementador; o critério é: com o painel (Tab), **≥ 58 quadros/s no computador do autor** e nunca pior que antes do E2.
+- Os *sprites* dos personagens são **interpolados** entre o passo anterior e o atual da simulação (fração do acumulador do passo fixo). A lógica continua com as posições do passo; só o que é desenhado interpola.
+- O seguimento da câmera é **independente da taxa de quadros** (fator de suavização calculado do tempo decorrido).
+- O escurecimento do anel de tiles continua (§4.6), por *tint* de tile ou sobreposição; o custo por quadro não pode crescer com o tamanho do anel.
+
 ## 1. Intenção
 
 A tese é sobre o sistema de análise de perfil; o ambiente só precisa ser **legível, coerente e feito por você**. O autor pediu que a câmera se pareça com a de **Hades**: vista inclinada de cima, **sem o giro de 45°** do losango atual. Arena retangular alinhada à tela, W vai para cima, tiles retangulares.
