@@ -70,6 +70,8 @@ export class WorldView {
     this.stepped = true;
   }
 
+  // Sprites are drawn interpolated (up to one step behind) while debug hitboxes and aim use the logic positions,
+  // so hitboxes lead the sprite by up to one step (~4 px walking, ~11 px dashing).
   /** Draws the sprites `alpha` of a step past the previous step (presentation only; logic keeps the step positions). */
   sync(encounter: Encounter<ProfileSink>, playerMoving: boolean, alpha: number): void {
     if (!this.stepped) this.recordStep(encounter); // first frame before any step
