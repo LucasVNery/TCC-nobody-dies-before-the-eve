@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Nota (19/10/2026):** As tarefas 1–3 e 7–8 foram parcialmente substituídas pelo E2.1 (ver `2026-10-19-e2-1-losango-fluidez.md`): a projeção voltou ao losango 2:1 e o chão passou a ser desenhado em blocos.
+
 **Goal:** Trocar a vista em losango 2:1 por uma vista inclinada alinhada à tela (estilo Hades) e o chão fixo por 5 tiles próprios do Blender, compostos de forma determinística, com anel de tiles e fundo, sem mudar nenhuma regra de jogo.
 
 **Architecture:** Parte A troca a projeção (`GroundProjection`) e tudo que depende dela (entrada, mira, depuração, câmera, sprites re-renderizados). Parte B acrescenta módulos puros em `src/visual/floor/` (PRNG e `floorSeed`, `composeFloor`/`composeFloorWithSkirt`, `floorFromEvents`, `FloorTracker`), uma vista fina `FloorView` (contêiner único criado antes do `CameraRig.attach`) e o script de Blender dos tiles.

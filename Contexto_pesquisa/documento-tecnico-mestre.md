@@ -132,7 +132,7 @@ Cada mecânica traz a regra, os parâmetros, onde está no código e o que falta
 
 | Entrada | Efeito | Fonte | Status |
 |---|---|---|---|
-| WASD | Mover, **sem giro**: alinhado à tela (W vai para cima, D para a direita) desde a projeção estilo Hades de 17/10/2026 | `scenes/ArenaScene.ts` | ✅ |
+| WASD | Mover com o teclado **girado 45°** (`mapMovement`: `dx = ix + iy`, `dy = iy − ix`) para continuar alinhado à tela (W vai para cima, D para a direita) na projeção em losango 2:1. A vista retangular de 17/10/2026 (sem giro) foi descartada em 19/10/2026 | `scenes/ArenaScene.ts` | ✅ |
 | Mouse | Mira em 360° (a posição do mouse é convertida pela inversa da projeção) | `ArenaScene.ts`, `visual/groundProjection.ts` | ✅ |
 | Clique esquerdo | Ataque leve da arma equipada; no arco, o disparo | `ArenaScene.ts` | ✅ |
 | Clique direito | Ataque pesado (sem efeito no arco) | `ArenaScene.ts` | ✅ |
@@ -287,12 +287,14 @@ A regra de dependência já existente (nada da lógica importa Phaser nem `visua
 
 | Item | Especificação *(proposta, a confirmar)* | Status |
 |---|---|---|
-| Conjunto de tiles | 3 a 6 variações do piso (por exemplo: base, duas variações, desgastado, borda) renderizadas pelo mesmo pipeline ortográfico a `asin(0,75)` = 48,59°, sem giro (tile lógico de 64 unidades → 64 × 48 px na tela; PNG 128 × 96). Cinco tiles em `public/assets/tiles/floor/`: `floor_base`, `floor_a`, `floor_b`, `floor_worn`, `floor_edge`, gerados por `tools/blender/render_floor_tiles.py` | ✅ (17/10/2026) |
+| Conjunto de tiles | 3 a 6 variações do piso (por exemplo: base, duas variações, desgastado, borda) renderizadas pelo mesmo pipeline ortográfico, azimute 45° e elevação 30° (tile lógico de 64 unidades → losango de 64 × 32 px na tela; PNG 128 × 64 com cantos transparentes; plano desenhado a 1,05× a célula, filtro de pixel 1,0 px, sobreposição ≈ 2,5%, menor que a junta de argamassa `JOINT` = 0,03). Em 17/10/2026 foram feitos em retângulo 64 × 48 (PNG 128 × 96), vista descartada em 19/10/2026. Cinco tiles em `public/assets/tiles/floor/`: `floor_base`, `floor_a`, `floor_b`, `floor_worn`, `floor_edge`, gerados por `tools/blender/render_floor_tiles.py` | ✅ (17/10/2026; refeitos em losango em 19/10/2026) |
 | Composição | Função pura `composeFloor(seed, colunas, linhas, tileset)` que devolve a matriz de tiles, com PRNG semeado e regras simples de vizinhança. Mesma seed produz a mesma arena; trocar o tamanho ou o conjunto de tiles basta para expandir. Inclui um **anel (skirt) de 10 tiles** em volta da arena, escurecido, e fundo | ✅ (17/10/2026) |
 | Registro | **Por derivação, sem campo novo no log:** a seed do piso é `floorSeed(run.start.seed, room.enter.room_idx)`; o `FloorTracker` reconstrói o piso a partir do log e a cena redesenha a cada `room.enter`. O piso muda a cada sala | ✅ (17/10/2026) |
 | Natureza | **Puramente visual:** não altera colisão nem nenhuma regra. Os testes da lógica passam sem mudança | — |
 | Legibilidade | O chão **nunca** carrega informação de jogo. Telegrafia e zonas de dano são sobreposições autorais com contraste garantido sobre qualquer tile (regra herdada do GDD) | — |
 | Dimensões | Hoje 1600 × 1200 unidades (25 × 19 tiles); passa a ser parâmetro | 🔵 |
+
+**Revisão 2 (19/10/2026, E2.1): losango 2:1 e fluidez.** O autor, ao ver o jogo rodando, corrigiu o rumo: o chão deve ser o losango 2:1 e a jogabilidade estava travada. A descrição "retângulo inclinado, sem giro" (caminho B) foi um **erro de especificação do Claude**, não o que o autor queria. Entregue: projeção de volta a 64 × 32 px com giro de 45° e W/A/S/D girados para ficarem alinhados à tela; mira a partir do centro do hurtbox mantida; personagens re-renderizados a 30°; cinco tiles em losango 128 × 64; teste de malha estrito ("losango exato, sem margem"). Fluidez, só apresentação: o chão é desenhado como 15 blocos pré-renderizados (`DynamicTexture`, ≈ 100 MB de GPU com o *depth buffer*; custo de 6 a 20 ms ao trocar de sala, aceito), que se destroem ao encerrar a cena e se reconstroem após perda de contexto WebGL; os *sprites* são interpolados entre os passos fixos de simulação (`alpha` do `fixedTimestepLoop`) e o seguimento da câmera independe da taxa de quadros. As caixas de acerto na depuração adiantam o *sprite* em até um passo. Medição indireta (o painel oculto não permite medir fps): vértices por quadro 10.809 (E2) → 3.125 (master) → 366 (E2.1). **Pendências, sem playtest feito:** (a) playtest em janela visível; (b) fps real ≥ 58 no computador do autor; (c) o soluço na troca de sala; (d) se `floor_worn` se repete de forma visível; (e) o *sprite* ~5 px à esquerda do hurtbox, que já existia antes. Plano: `docs/superpowers/plans/2026-10-19-e2-1-losango-fluidez.md`.
 
 **Critérios de aceitação:** `composeFloor` é determinístico (teste em Node); trocar o conjunto de tiles não muda nenhuma colisão; a arena lê bem com o zoom padrão de 2×. **Status (17/10/2026):** os testes automáticos passam; a leitura visual com zoom 2× depende do playtest visual, ainda pendente.
 
@@ -393,7 +395,7 @@ O ponto do "limite de escopo", em termos simples: arte, animação e som **não 
 | Etapa | Entrega | Critério de pronto |
 |---|---|---|
 | **E1** | HUD de análise + cena modularizada, **com a arte atual** | Todas as métricas do catálogo 4.7 visíveis e testadas; `ArenaScene` dividida e com testes |
-| **E2** | Arena procedural com 3 a 6 tiles | `composeFloor` determinístico; arena legível em 2×. ✅ implementado em 2026-10-17 (branch `e2-arena-procedural`); **playtest visual pendente** (os testes de fumaça foram parciais: a troca da sala 1 para a 2, a mira com o mouse e o alinhamento do WASD não foram observados em janela visível) |
+| **E2** | Arena procedural com 3 a 6 tiles | `composeFloor` determinístico; arena legível em 2×. ✅ implementado em 2026-10-17 (branch `e2-arena-procedural`) e **Revisão 2 em 2026-10-19** (losango 2:1 e fluidez; ver §3.3); **playtest visual pendente** (os testes de fumaça foram parciais: a troca da sala 1 para a 2, a mira com o mouse e o alinhamento do WASD não foram observados em janela visível) |
 | **E3** | Herói e inimigo comum animados, sincronizados, com som mínimo | Todas as linhas da tabela 3.6 marcadas como ⬜ para esses dois personagens viram ✅ ou têm decisão registrada |
 | **E4** | Chefe | Só depois do design do boss (4.6) |
 
@@ -745,7 +747,7 @@ O log segue a **ordem causal**: o gatilho vem antes dos efeitos. O gravador assi
 | 07/09/2026 | O leque angular substitui a caixa de quatro quadrantes. Dados anteriores não são comparáveis (dims 3, 4 e 6); antes disso um erro geométrico do inimigo virava um falso recuo |
 | 30/09/2026 (5a) | Nasce o log persistente (`0.0.1+5a`); antes dele não há log |
 | 01/10/2026 (combate B) | `0.0.2+combatB`: velocidades, esquiva, stagger, recuperação cancelável e janela da dim 6. **Dims 4 a 6 e a dim 5 não são comparáveis com a versão anterior** |
-| 17/10/2026 (E2, vista) | `0.0.3+viewB`: a vista e o controle mudaram (projeção sem giro de 45°, WASD alinhado à tela, mira pela nova inversa). A lógica de combate é a mesma, mas a mudança de controle pode alterar o comportamento do jogador, então os logs não se misturam. **Dados coletados até 16/10/2026 usam `0.0.2+combatB`** |
+| 17/10/2026 (E2, vista) e Revisão 2 (19/10/2026) | `0.0.3+viewB`. Em 17/10 a vista era retangular (sem giro de 45°, 64 × 48), descartada em 19/10: a Revisão 2 voltou ao losango 2:1 com WASD girado como na `0.0.2`. O sufixo `viewB` ficou histórico (a vista retangular nunca produziu dados oficiais). O que separa a `0.0.3` da `0.0.2` é a **mira a partir do centro do hurtbox**, que pode alterar o comportamento do jogador, então os logs não se misturam. A lógica de combate é a mesma. **Dados coletados até 16/10/2026 usam `0.0.2+combatB`** |
 | Reconstrução do ambiente | Arte, som e HUD **não** exigem nova versão se a lógica ficar igual. Mudar hurtbox, alcances ou velocidades exige |
 
 ## 5.8 Limitações conhecidas
@@ -830,16 +832,16 @@ enquanto acumulador ≥ passo:  simular(passo); acumulador −= passo      passo
 
 Estado de 32 bits; incremento pela constante de Weyl `0x6D2B79F5` seguido de misturas com `Math.imul` e *xorshifts*; saída em [0, 1). Mesma seed, mesma sequência (testado). Usado no sorteio do nascimento do inimigo por run.
 
-### Projeção inclinada alinhada à tela (estilo Hades)
+### Projeção em losango 2:1 (Revisão 2, 19/10/2026)
 
-Tile lógico de 64 unidades; na tela, retângulo de 64 × 48 px (razão 0,75 = `sin` da elevação de 48,59°). Substituiu, em 17/10/2026, a projeção dimétrica 2:1 em losango (64 × 32 px, WASD girado 45°), usada de 24/08 a 16/10.
+Tile lógico de 64 unidades; na tela, losango de 64 × 32 px (razão 0,5 = `sin` da elevação de 30°), com giro de 45°. Esta é a projeção usada de 24/08 a 16/10/2026; em 17/10/2026 foi trocada por uma vista retangular 64 × 48 sem giro (elevação 48,59°), **descartada em 19/10/2026** por erro de especificação (o autor queria o losango).
 
 ```
-tela.x = x · 64/64 = x          tela.y = y · 48/64 = 0,75 · y          profundidade = y  (ordem de desenho)
-inversa:  x = Δx · 64/64        y = Δy · 64/48                         (converte o mouse em direção de mira)
+tela.x = (x − y) · 32/64          tela.y = (x + y) · 16/64          profundidade = x + y  (ordem de desenho)
+inversa:  x = 64 · (Δx/64 + Δy/32)       y = 64 · (Δy/32 − Δx/64)         (converte o mouse em direção de mira)
 ```
 
-Entrada WASD **sem giro** (`dx = ix`, `dy = iy`; W vai para cima). A elevação de `asin(0,75)` = 48,59° do render no Blender casa com a razão 0,75; tiles e personagens (re-renderizados em 17/10/2026) usam a mesma câmera.
+Entrada WASD **girada 45°** (`dx = ix + iy`, `dy = iy − ix`), de modo que W vai para cima e D para a direita na tela. A elevação de 30° do render no Blender casa com a razão 0,5; tiles e personagens (re-renderizados em 19/10/2026) usam a mesma câmera. A mira parte do centro do hurtbox.
 
 ### Leque de ataque (setor circular)
 
@@ -957,7 +959,7 @@ Material direto para a seção de decisões técnicas da tese.
 
 1. Fontes em `tools/blender/source/` (ignorada pelo git): KayKit Adventurers 2.0 (modelos, armas e textura) e KayKit Character Animations 1.1 (**161 clipes** para `Rig_Medium` e arquivos para `Rig_Large`), ambos CC0.
 2. `blender --background --python tools/blender/render_character.py -- --character <modelo>.fbx --idle-fbx … --idle-action "Rig_Medium|Idle_A" --walk-fbx … --walk-action "Rig_Medium|Walking_A" --walk-frames 6 --out-key <entidade>`.
-3. O script limpa a cena, importa o personagem, importa o FBX de animação, **remove os objetos que não pertencem ao personagem**, atribui a *action* (e o *slot*), monta luz de três pontos mais ambiente, posiciona câmera **ortográfica a 48,59°** (`asin(0,75)`, padrão de `--elevation`; era 26,57° até 16/10/2026), renderiza **8 azimutes (45° cada)** e compõe uma grade de 8 linhas (direções) × N colunas (quadros), em PNG 128 × 128 com fundo transparente.
+3. O script limpa a cena, importa o personagem, importa o FBX de animação, **remove os objetos que não pertencem ao personagem**, atribui a *action* (e o *slot*), monta luz de três pontos mais ambiente, posiciona câmera **ortográfica a 30°** (`asin(0,5)`, padrão de `--elevation`; era 26,57° até 16/10/2026 e 48,59° em 17/10/2026, descartado em 19/10/2026), renderiza **8 azimutes (45° cada)** e compõe uma grade de 8 linhas (direções) × N colunas (quadros), em PNG 128 × 128 com fundo transparente.
 4. No jogo: `load.spritesheet`; animações `idle_<linha>` (1 fps) e `walk_<linha>` (8 fps); escala uniforme pela altura visual (40).
 
 **Armas hoje não são anexadas** ao personagem no render. O pacote tem os modelos (espada de uma e duas mãos, machados, arco, besta, adaga, cajado, varinha e escudos), e o passo pendente é prendê-los a um osso da mão antes de renderizar.
@@ -1045,7 +1047,7 @@ O desenvolvimento usou o **Claude Code** (assistente de programação da Anthrop
 
 ## 8.3 Ameaças à validade (conhecidas)
 
-- Dados anteriores ao leque angular (07/09) e à versão `0.0.2+combatB` não são comparáveis com os atuais nas dimensões afetadas. A versão `0.0.3+viewB` (17/10/2026) também separa os dados: a vista e o controle mudaram.
+- Dados anteriores ao leque angular (07/09) e à versão `0.0.2+combatB` não são comparáveis com os atuais nas dimensões afetadas. A versão `0.0.3+viewB` (17/10/2026) também separa os dados: a mira passou a partir do centro do hurtbox (a vista retangular daquele dia foi descartada em 19/10, sem dados oficiais).
 - Viés de discretização da previsão de ameaça (≈ 16 ms, conservador).
 - O tipo `utility` não tem ação: a dim 2 nunca chega a entropia máxima.
 - A regra de 8 ações mínimas por segmento de `H` não está implementada.
@@ -1133,7 +1135,8 @@ Não mudam sem discussão explícita; mudar vira emenda registrada aqui.
 | 13/08 | Núcleo jogável e `OpportunitySystem`; movimento e câmera | Loop fixo, PRNG, barramento, esquiva e punição |
 | 18/08 | Esqueleto visual; ciclo de vida da oportunidade; acumuladores decaídos; Família A (dims 3 e 5) | Quatro desfechos, dois relógios, formato do instantâneo |
 | 24 e 25/08 | Projeção isométrica | Migração para isometria 2:1 e tiles reais |
-| 17/10 | E2: projeção estilo Hades, piso procedural e fundo | Vista sem giro (64 × 48), cinco tiles autorais do Blender, `composeFloor`, anel e fundo, `GAME_VERSION 0.0.3+viewB`; playtest visual pendente |
+| 17/10 | E2: piso procedural e fundo (vista retangular 64 × 48, descartada em 19/10) | Cinco tiles autorais do Blender, `composeFloor`, anel e fundo, `GAME_VERSION 0.0.3+viewB` |
+| 19/10 | E2.1: losango 2:1 e fluidez | Projeção 64 × 32 com giro de 45°, tiles e personagens a 30°, chão em blocos, interpolação e câmera por tempo; playtest visual pendente |
 | 06/09 | Registro de ações e entropia (dim 2); mira, arco, arma pesada e troca (dim 1) | Combate orientado a dados |
 | 07/09 | Pipeline de assets 3D; kit defensivo (dim 4); leque de ataque | Sprites pré-renderizados; bloqueio, parry, postura |
 | 12/09 | Janela segura (dim 6) | Previsão de ameaça e predicado de paciência |
@@ -1159,7 +1162,7 @@ Estado do repositório: 156 commits; 15 specs e 15 planos; `master` em `1f0aa4f`
 | **Jogo** | Playtest do combate B, do zoom e das teclas F2, F8 e F9 | Merge |
 | | Mesclar `combat-b` no `master` (avanço direto) e dar push | — |
 | | Definir *perfect dodge*, a ação `utility`, o design do boss, outros arquétipos e a estrutura de salas | Boss, E4 |
-| **Ambiente (E1 a E4)** | ✅ E1 (HUD de análise e cena modularizada) feito em 16/10. ✅ E2 (projeção estilo Hades, arena procedural e fundo) implementado em 17/10, **playtest visual pendente** (troca da sala 1 para a 2, mira com o mouse e alinhamento do WASD ainda não observados em janela visível; os testes de fumaça foram parciais). Faltam: herói e inimigo comum (E3), chefe (E4). Playtest do painel no navegador pendente | — |
+| **Ambiente (E1 a E4)** | ✅ E1 (HUD de análise e cena modularizada) feito em 16/10. ✅ E2 (arena procedural e fundo) implementado em 17/10 e revisado em 19/10 (Revisão 2: losango 2:1, fluidez; a vista retangular de 17/10 foi descartada), **playtest visual pendente** (janela visível, fps real ≥ 58 no computador do autor, soluço na troca de sala, repetição de `floor_worn`; os testes de fumaça foram parciais). Faltam: herói e inimigo comum (E3), chefe (E4). Playtest do painel no navegador pendente | — |
 | | Decidir a "arma nova" | E3 |
 | **Áudio** | Decidir a fonte (CC0, síntese em código); registrar licenças; decidir o `audio_on` no log | E3 |
 | **Dados** | Registrar os dados-piloto; definir o ponto de congelamento | Coleta oficial |

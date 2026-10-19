@@ -1,7 +1,7 @@
 # E2: Projeção estilo Hades, arena procedural e fundo — Design
 
 **Data:** 2026-10-17 (revisada no mesmo dia: o autor escolheu a projeção estilo Hades, caminho B)
-**Status:** implementado em 2026-10-17, commits 89c0bde..HEAD; playtest visual pendente. (Padrões do Claude marcados como **[minha escolha]**.)
+**Status:** implementado em 2026-10-17 + Revisão 2 em 2026-10-19; playtest visual pendente. (Padrões do Claude marcados como **[minha escolha]**.)
 **Sub-projeto:** E2 do ambiente de gameplay v2. Sequência: E1 (feito) → **E2 projeção + arena** → E3 herói e inimigo comum animados → E4 chefe. Contexto: `Contexto_pesquisa/documento-tecnico-mestre.md` §3.3 e §3.8.
 
 ## Revisão 2 (19/10/2026): losango 2:1 e fluidez — substitui o que for citado
@@ -20,7 +20,7 @@ screenDepth(pos) = pos.x + pos.y
 - A elipse do alcance na depuração é a projeção exata de um círculo de raio R: largura `√2 · R · W / T`, altura `√2 · R · H / T`.
 - Os limites da câmera são o mínimo e o máximo dos **quatro** cantos projetados da arena expandida em `marginTiles` tiles de mundo em cada lado.
 - **Personagens:** re-renderizar a elevação **30°** (`asin(H/W)`), que dá o chão exatamente 2:1 (substitui §4.3: 48,59°).
-- **Tiles (substitui §4.4 formato e §4.8):** PNG **128 × 64** com o losango preenchendo o quadro e **cantos transparentes**; câmera ortográfica azimute 45°, elevação 30°, `ortho_scale` = √2 (a diagonal do tile ocupa os 128 px); o plano é desenhado a **1,03×** o tamanho da célula (os 4 vértices passam do quadro e as bordas diagonais ficam dentro dele) para os tiles vizinhos se sobreporem ≈ 1,5% e **não haver frestas**. Posicionamento: origem (0,5; 0) no vértice superior da célula, exibido a 64 × 32.
+- **Tiles (substitui §4.4 formato e §4.8):** PNG **128 × 64** com o losango preenchendo o quadro e **cantos transparentes**; câmera ortográfica azimute 45°, elevação 30°, `ortho_scale` = √2 (a diagonal do tile ocupa os 128 px); o plano é desenhado a **1,05×** o tamanho da célula, com filtro de pixel de **1,0 px** no Blender (os 4 vértices passam do quadro e as bordas diagonais ficam dentro dele) para os tiles vizinhos se sobreporem ≈ 2,5% (menos que a junta `JOINT` = 0,03) e **não haver frestas**. O teste de malha é estrito: losango exato, sem margem (dois fundos, com uma autoverificação negativa). Posicionamento: origem (0,5; 0) no vértice superior da célula, exibido a 64 × 32.
 - **Versão:** a lógica continua igual e o controle volta ao mapeamento da `0.0.2`, mas a **mira a partir do centro** (E2) continua, então `GAME_VERSION` permanece `0.0.3+viewB` (o sufixo `viewB` ficou histórico: a vista retangular nunca coletou dados oficiais).
 
 **Fluidez (novo, só apresentação).** Medido em 19/10: o Phaser reportava ≈ 54 fps no painel do app; o chão novo desenhava ≈ 1.755 imagens por quadro (contra 475) e a simulação de passo fixo (60 Hz) não interpola, então a tela mostra o último passo; com a câmera de *lerp* por quadro isso gera tremor quando a taxa de quadros não é exatamente 60. Requisitos:
