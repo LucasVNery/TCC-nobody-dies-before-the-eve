@@ -1,16 +1,21 @@
 """
-Render the five floor tiles (cold, desaturated dungeon stone slabs) as 128x96 RGBA PNGs.
+Render the five floor tiles (cold, desaturated dungeon stone slabs) as 128x64 RGBA diamonds.
 
 Usage:
   blender --background --python tools/blender/render_floor_tiles.py -- --out public/assets/tiles/floor
 
-Each tile is rendered in a clean scene: the top face of a side-1 square, scaled 1.02 and
-cropped by the camera frame (so every pixel is opaque), with at most RELIEF of relief,
-flat shading, one sun plus flat ambient light, and an orthographic camera at azimuth 0
-(looking along +Y) and elevation asin(0.75) -- the game draws a tile 64x48 px, ratio 0.75.
+Each tile is rendered in a clean scene: the top face of a side-1 square (the world cell),
+drawn at PLANE_SCALE (1.05) so the neighbouring tiles overlap slightly, with at most RELIEF
+of relief, flat shading, one sun plus flat ambient light, and an orthographic camera at
+azimuth 45 deg (looking along the cell diagonal) and elevation asin(H/W) = 30 deg -- the game
+draws a tile as a 64x32 px diamond (2:1). With ortho_scale = sqrt(2) the cell diagonal spans
+the 128 px width, so the cell is exactly the 128x64 diamond touching the frame edge midpoints;
+the four frame corners stay transparent. The 1.05 plane pushes the diamond's four tips just
+past the frame (clipped) while its diagonal edges stay inside, so adjacent tiles overlap by
+~2.5% of the cell and the lattice has no gaps.
 
 The outermost JOINT strip of every tile is flat mortar at z = 0 in the same colour, so the
-frame edges of all five tiles match and neighbouring tiles join without visible seams;
+diagonal edges of all five tiles match and neighbouring tiles join without visible seams;
 the joint between two slabs is that mortar strip seen from both sides.
 """
 import sys
@@ -21,29 +26,37 @@ import bmesh
 import mathutils
 
 # ---- Camera / output -------------------------------------------------------
-RES_X, RES_Y = 128, 96
-ELEVATION_DEG = math.degrees(math.asin(0.75))  # 48.59
-# Blender applies ortho_scale to the larger frame dimension (width, 128 px), and at this
-# elevation the 96 px height then spans the same ground depth, so the frame shows exactly
-# ORTHO_SCALE x ORTHO_SCALE of ground. It must equal the tile side (1), so the 1.02 quad
-# overfills the frame and is cropped: with ortho_scale 1.02 the quad edge coincides with
-# the frame edge and the anti-aliased border row/column came out semi-transparent
-# (223 non-opaque pixels per tile, measured).
-PLANE_SIDE = 1.0
-ORTHO_SCALE = PLANE_SIDE
-PLANE_SCALE = 1.02           # ground quad is side 1 scaled 1.02, cropped by the frame
+RES_X, RES_Y = 128, 64
+AZIMUTH_DEG = 45.0
+ELEVATION_DEG = math.degrees(math.asin(RES_Y / RES_X))  # 30: the ground projects exactly 2:1
+CELL_SIDE = 1.0
+# Blender applies ortho_scale to the larger frame dimension (the 128 px width). Seen at
+# azimuth 45 the cell's horizontal extent is its diagonal, sqrt(2) * side, so the cell fills
+# the frame width; at elevation 30 its depth diagonal is foreshortened by sin(30) = 0.5,
+# which is exactly the 64 px height.
+ORTHO_SCALE = math.sqrt(2) * CELL_SIDE
+# Ground plane = cell scaled PLANE_SCALE: the tips pass the frame (clipped) and the diagonal
+# edges stay inside it. 1.03 was the first value tried; its anti-aliased edge left the format
+# test's points just inside the cell edge (e.g. (32,48)) semi-transparent, so it went to 1.05.
+PLANE_SCALE = 1.05
 CAMERA_DISTANCE = 5.0
 RENDER_SAMPLES = 32
+# Pixel filter width (Blender default 1.5 px). The default spreads the diamond's alpha ramp
+# over ~2 px across the edge; 1.0 keeps the edge soft but makes every pixel more than half a
+# pixel inside the plane fully opaque.
+FILTER_SIZE = 1.0
 
-# ---- Geometry (world units; frame half-width is ORTHO_SCALE / 2) -----------
-FRAME_HALF = ORTHO_SCALE / 2
-JOINT = 0.024                # flat mortar strip at the frame edge (~3 px at 128 wide)
+# ---- Geometry (world units; the cell spans -0.5..0.5 on X and Y) -----------
+CELL_HALF = CELL_SIDE / 2
+JOINT = 0.03                 # flat mortar strip along every cell edge (~1.7 px across)
 RELIEF = 0.02                # max height of a slab top (hard limit 0.02)
 CHAMFER = 0.035              # horizontal run of the slab chamfer
 GROOVE_HALF = 0.022          # floor_a: half width of the mortar groove between the two halves
 CORNER_CUT = 0.24            # floor_b: leg of the cut corner
-WORN_DEPTH = 0.008           # floor_worn: depth of the shallow depression
-CRACK_WIDTH = 0.016          # floor_worn: max crack width (tapers to the tips)
+WORN_DEPTH = 0.009           # floor_worn: total depth of the shallow depression
+WORN_STEPS = 4               # floor_worn: the depression is a few shallow terraces (soft rim)
+WORN_STEP_INSET = 0.022      # floor_worn: horizontal run of each terrace
+CRACK_WIDTH = 0.014          # floor_worn: max crack width (tapers to the tips)
 EDGE_RIM = 0.045             # floor_edge: flat rim width before the inner bevel
 EDGE_BEVEL = 0.03            # floor_edge: horizontal run of the inner bevel
 EDGE_PANEL_DROP = 0.01       # floor_edge: how far the inner panel sits below the rim
@@ -52,14 +65,14 @@ EDGE_PANEL_DROP = 0.01       # floor_edge: how far the inner panel sits below th
 MORTAR = (0.054, 0.059, 0.070)
 SLAB = (0.108, 0.115, 0.132)
 SLAB_SIDE = (0.092, 0.099, 0.115)
-WORN = (0.088, 0.094, 0.106)
-CRACK = (0.050, 0.055, 0.066)
+WORN = (0.097, 0.103, 0.117)      # close to SLAB: the wear reads as a soft patch, not a hole
+CRACK = (0.062, 0.067, 0.079)
 EDGE_SLAB = (0.070, 0.076, 0.090)
 EDGE_PANEL = (0.062, 0.068, 0.080)
 
 # ---- Lighting -------------------------------------------------------------
 SUN_STRENGTH = 2.8
-SUN_ROTATION_DEG = (40.0, 0.0, -135.0)  # light from the far-left (screen top-left)
+SUN_ROTATION_DEG = (40.0, 0.0, 180.0)  # light from world +Y = the screen top-left
 AMBIENT_STRENGTH = 0.38
 
 TILE_IDS = ["floor_base", "floor_a", "floor_b", "floor_worn", "floor_edge"]
@@ -110,6 +123,7 @@ def setup_render(out_path):
         scene.view_settings.look = "None"
     except TypeError:
         pass
+    scene.render.filter_size = FILTER_SIZE
     scene.render.film_transparent = True
     scene.render.resolution_x = RES_X
     scene.render.resolution_y = RES_Y
@@ -146,10 +160,17 @@ def setup_camera():
     cam = bpy.data.objects.new("cam", cam_data)
     bpy.context.collection.objects.link(cam)
     el = math.radians(ELEVATION_DEG)
-    # Azimuth 0: the camera sits on -Y and looks along +Y, tilted down; screen up = far (+Y).
-    cam.location = (0.0, -CAMERA_DISTANCE * math.cos(el), CAMERA_DISTANCE * math.sin(el))
+    az = math.radians(AZIMUTH_DEG)
+    # Azimuth 45: the camera sits on the (-X, -Y) diagonal and looks along (+X, +Y), tilted
+    # down. Screen right = world (+X, -Y), screen up = far = (+X, +Y): the cell corner
+    # (+0.5, +0.5) is the diamond's top tip, (+0.5, -0.5) its right tip.
+    horiz = (math.cos(az), math.sin(az))
+    cam.location = (-CAMERA_DISTANCE * math.cos(el) * horiz[0],
+                    -CAMERA_DISTANCE * math.cos(el) * horiz[1],
+                    CAMERA_DISTANCE * math.sin(el))
+    look = mathutils.Vector((math.cos(el) * horiz[0], math.cos(el) * horiz[1], -math.sin(el)))
     cam.rotation_mode = "QUATERNION"
-    cam.rotation_quaternion = mathutils.Vector((0.0, math.cos(el), -math.sin(el))).to_track_quat("-Z", "Y")
+    cam.rotation_quaternion = look.to_track_quat("-Z", "Y")
     bpy.context.scene.camera = cam
 
 
@@ -177,7 +198,7 @@ def rect(x0, y0, x1, y1):
 
 
 def add_ground(bm, mat_index):
-    h = PLANE_SIDE * PLANE_SCALE / 2
+    h = CELL_HALF * PLANE_SCALE
     vs = [bm.verts.new((x, y, 0.0)) for x, y in rect(-h, -h, h, h)]
     bm.faces.new(vs).material_index = mat_index
 
@@ -223,7 +244,7 @@ def add_crack(bm, points, width, z, mat_index):
 
 
 def slab_half():
-    return FRAME_HALF - JOINT
+    return CELL_HALF - JOINT
 
 
 def build_tile(tile_id):
@@ -236,6 +257,10 @@ def build_tile(tile_id):
         "edge_slab": make_material("edge_slab", EDGE_SLAB),
         "edge_panel": make_material("edge_panel", EDGE_PANEL),
     }
+    for step in range(WORN_STEPS):
+        t = (step + 1) / (WORN_STEPS + 1)
+        mats[f"worn_{step}"] = make_material(
+            f"worn_{step}", tuple(SLAB[i] + (WORN[i] - SLAB[i]) * t for i in range(3)))
     order = list(mats.keys())
     idx = {k: i for i, k in enumerate(order)}
 
@@ -246,12 +271,14 @@ def build_tile(tile_id):
     if tile_id == "floor_base":
         add_slab(bm, rect(-s, -s, s, s), idx["slab_side"], idx["slab"])
     elif tile_id == "floor_a":
+        # The groove runs along world Y: on screen it is a diagonal from the left tip's
+        # upper edge to the bottom tip's lower edge, splitting the diamond in two.
         g = GROOVE_HALF
         add_slab(bm, rect(-s, -s, -g, s), idx["slab_side"], idx["slab"])
         add_slab(bm, rect(g, -s, s, s), idx["slab_side"], idx["slab"])
     elif tile_id == "floor_b":
         c = CORNER_CUT
-        footprint = [(-s, -s), (s, -s), (s, s - c), (s - c, s), (-s, s)]  # far-right corner cut
+        footprint = [(-s, -s), (s - c, -s), (s, -s + c), (s, s), (-s, s)]  # right tip (+X, -Y) cut
         add_slab(bm, footprint, idx["slab_side"], idx["slab"])
     elif tile_id == "floor_worn":
         top = add_slab(bm, rect(-s, -s, s, s), idx["slab_side"], idx["slab"])
@@ -261,10 +288,15 @@ def build_tile(tile_id):
         for v, (x, y) in zip(sorted(top.verts, key=lambda v: math.atan2(v.co.y, v.co.x)),
                              sorted(outline, key=lambda p: math.atan2(p[1], p[0]))):
             v.co.x, v.co.y = x, y
-        inset_face(bm, top, 0.02, drop=WORN_DEPTH)
+        # A few shallow terraces instead of one hard step: the rim of the wear reads soft.
+        # Each terrace blends from SLAB to WORN, so the patch has no hard colour edge either.
+        for step in range(WORN_STEPS):
+            ring = inset_face(bm, top, WORN_STEP_INSET, drop=WORN_DEPTH / WORN_STEPS)
+            for f in ring:
+                f.material_index = idx[f"worn_{step}"]
         top.material_index = idx["worn"]
         # crack quads sit at RELIEF 0.02 plus a decal epsilon (0.0008) to avoid z-fighting
-        add_crack(bm, [(0.08, 0.40), (0.15, 0.30), (0.12, 0.22), (0.24, 0.12), (0.30, 0.04)],
+        add_crack(bm, [(0.08, 0.36), (0.15, 0.28), (0.12, 0.20), (0.24, 0.11), (0.30, 0.04)],
                   CRACK_WIDTH, RELIEF + 0.0008, idx["crack"])
     elif tile_id == "floor_edge":
         top = add_slab(bm, rect(-s, -s, s, s), idx["slab_side"], idx["edge_slab"])
