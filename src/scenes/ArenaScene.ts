@@ -48,6 +48,7 @@ export class ArenaScene extends Phaser.Scene {
   private loop!: ReturnType<typeof createFixedTimestepLoop>;
   private playerInput!: PlayerInput;
   private world!: WorldView;
+  private cameraRig!: CameraRig;
   private debugDraw!: DebugDraw;
   private hud!: GameplayHud;
   private panel!: AnalysisPanel;
@@ -84,7 +85,8 @@ export class ArenaScene extends Phaser.Scene {
     this.world = new WorldView(this);
     this.debugDraw = new DebugDraw(this);
     this.hud = new GameplayHud(this);
-    new CameraRig(this).attach(this.world.playerSprite.gameObject, this.hud.objects);
+    this.cameraRig = new CameraRig(this);
+    this.cameraRig.attach(this.world.playerSprite.gameObject, this.hud.objects);
 
     this.playerInput = new PlayerInput(this, () => (session.ready ? this.intents() : null));
     this.panel = new AnalysisPanel(document.body);
@@ -123,7 +125,7 @@ export class ArenaScene extends Phaser.Scene {
             console.warn('[analysis] failed to fold an event', err);
           }
         });
-        this.loop = createFixedTimestepLoop(STEP_MS, (stepMs) => stack.step(stepMs));
+        this.loop = createFixedTimestepLoop(STEP_MS, (ms) => { stack.step(ms); world.recordStep(stack.encounter); });
       },
     });
   }
@@ -163,12 +165,10 @@ export class ArenaScene extends Phaser.Scene {
     this.stepAvg.add(performance.now() - t0);
 
     const snap = this.playerInput.snapshot();
-    this.world.sync(encounter, snap.move.dx !== 0 || snap.move.dy !== 0);
+    this.world.sync(encounter, snap.move.dx !== 0 || snap.move.dy !== 0, this.loop.alpha);
+    this.cameraRig.update(delta);
     this.hud.update({
-      hp: player.hp,
-      maxHp: PLAYER_MAX_HP,
-      enemyHp: assaltante.hp,
-      enemyMaxHp: ASSALTANTE_MAX_HP,
+      hp: player.hp, maxHp: PLAYER_MAX_HP, enemyHp: assaltante.hp, enemyMaxHp: ASSALTANTE_MAX_HP,
       poise: player.poise,
       weaponLabel: WEAPON_LABELS[player.equippedWeaponId] ?? player.equippedWeaponId,
       run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,

@@ -10,6 +10,7 @@ import { DirectionalSprite } from '../../visual/directionalSprite';
 import { FLOOR_TILESET, SKIRT_TILES } from '../../visual/floor/composeFloor';
 import { FloorTracker } from '../../visual/floor/floorFromEvents';
 import { FLOOR_TILE_IDS } from '../../visual/floor/floorAssets';
+import { PositionHistory } from '../../visual/stepInterpolation';
 import { FloorView } from './floorView';
 
 const WALK_FRAME_COUNT = 6;
@@ -20,6 +21,9 @@ export class WorldView {
   readonly assaltanteSprite: DirectionalSprite;
   private readonly floor: FloorView<Phaser.GameObjects.Image, Phaser.Textures.DynamicTexture>;
   private readonly floorTracker: FloorTracker;
+  private readonly playerTrail = new PositionHistory();
+  private readonly assaltanteTrail = new PositionHistory();
+  private stepped = false;
 
   constructor(scene: Phaser.Scene) {
     // The floor container must exist before any other world object and before CameraRig.attach.
@@ -59,12 +63,21 @@ export class WorldView {
     }
   }
 
-  sync(encounter: Encounter<ProfileSink>, playerMoving: boolean): void {
-    this.playerSprite.syncPosition(encounter.player.position);
+  /** Records the step positions; called after every simulation step. */
+  recordStep(encounter: Encounter<ProfileSink>): void {
+    this.playerTrail.push(encounter.player.position);
+    this.assaltanteTrail.push(encounter.assaltante.position);
+    this.stepped = true;
+  }
+
+  /** Draws the sprites `alpha` of a step past the previous step (presentation only; logic keeps the step positions). */
+  sync(encounter: Encounter<ProfileSink>, playerMoving: boolean, alpha: number): void {
+    if (!this.stepped) this.recordStep(encounter); // first frame before any step
+    this.playerSprite.syncPosition(this.playerTrail.at(alpha));
     this.playerSprite.syncDirection(encounter.player.facing, playerMoving);
     this.playerSprite.setTint(encounter.player.isInvulnerable ? 0x8bc34a : 0xffffff);
 
-    this.assaltanteSprite.syncPosition(encounter.assaltante.position);
+    this.assaltanteSprite.syncPosition(this.assaltanteTrail.at(alpha));
     this.assaltanteSprite.syncDirection(
       encounter.assaltante.attackDirection,
       encounter.assaltante.state === 'chasing',

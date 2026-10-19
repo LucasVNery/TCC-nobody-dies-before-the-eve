@@ -1,6 +1,8 @@
 export interface FixedTimestepLoop {
   advance(realDeltaMs: number): void;
   readonly stepMs: number;
+  /** Leftover fraction of a step after the last advance, in [0,1): how far presentation is past the last step. */
+  readonly alpha: number;
 }
 
 export function createFixedTimestepLoop(
@@ -17,5 +19,11 @@ export function createFixedTimestepLoop(
     }
   }
 
-  return { advance, stepMs };
+  return {
+    advance,
+    stepMs,
+    get alpha(): number {
+      return Math.max(0, accumulator / stepMs);
+    },
+  };
 }

@@ -4,6 +4,7 @@ import { GROUND_PROJECTION } from '../../visual/groundProjection';
 import { CAMERA_FOLLOW_LERP, VOID_COLOR, worldCameraBounds } from '../../visual/cameraDefaults';
 import { DEFAULT_ZOOM, zoomAfterWheel } from '../../visual/cameraZoom';
 import { SKIRT_TILES } from '../../visual/floor/composeFloor';
+import { followLerp } from '../../visual/stepInterpolation';
 
 /**
  * Main camera draws only the world (bounded, following the player, wheel zoom);
@@ -29,5 +30,11 @@ export class CameraRig {
     main.ignore(uiObjects);
     const uiCamera = scene.cameras.add(0, 0, scene.scale.width, scene.scale.height);
     uiCamera.ignore(scene.children.list.filter((obj) => !uiObjects.includes(obj)));
+  }
+
+  /** Once per frame: scales the follow lerp by the frame time so the camera converges at the same rate at any frame rate. */
+  update(deltaMs: number): void {
+    const lerp = followLerp(CAMERA_FOLLOW_LERP, deltaMs);
+    this.scene.cameras.main.setLerp(lerp, lerp);
   }
 }

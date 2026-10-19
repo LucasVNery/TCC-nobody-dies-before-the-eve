@@ -26,6 +26,26 @@ describe('createFixedTimestepLoop', () => {
     expect(onStep).toHaveBeenCalledTimes(3);
   });
 
+  it('exposes alpha as the leftover fraction of a step', () => {
+    const onStep = vi.fn();
+    const step = 1000 / 60;
+    const loop = createFixedTimestepLoop(step, onStep);
+    expect(loop.alpha).toBe(0);
+    loop.advance(40);
+    expect(onStep).toHaveBeenCalledTimes(2);
+    expect(loop.alpha).toBeCloseTo((40 - 2 * step) / step, 10);
+    expect(loop.alpha).toBeCloseTo(0.4, 10);
+  });
+
+  it('keeps alpha in [0,1) across arbitrary deltas', () => {
+    const loop = createFixedTimestepLoop(1000 / 60, () => {});
+    for (const d of [0, 1, 16.6, 16.7, 33.4, 7, 250, 1000 / 60, 0.0001]) {
+      loop.advance(d);
+      expect(loop.alpha).toBeGreaterThanOrEqual(0);
+      expect(loop.alpha).toBeLessThan(1);
+    }
+  });
+
   it('exposes the configured stepMs', () => {
     const loop = createFixedTimestepLoop(16, () => {});
     expect(loop.stepMs).toBe(16);
