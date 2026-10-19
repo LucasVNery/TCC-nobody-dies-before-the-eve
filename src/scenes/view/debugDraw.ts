@@ -41,11 +41,14 @@ export function boxCorners(box: AABB, projection: GroundProjection): Vec2[] {
   return corners.map((corner) => toScreen(corner, projection));
 }
 
-/** On-screen size of a circular world range (radius `range`) under the projection. */
+/**
+ * On-screen size (full width and height) of a circular world range of radius
+ * `range`: under the 45°-yawed diamond projection a world circle maps exactly
+ * to an axis-aligned ellipse of width √2·R·W/T and height √2·R·H/T.
+ */
 export function rangeEllipseSize(range: number, p: GroundProjection): { width: number; height: number } {
-  const diameter = { x: range * 2, y: range * 2 };
-  const projected = toScreen(diameter, p);
-  return { width: projected.x, height: projected.y };
+  const k = (Math.SQRT2 * range) / p.tileWorldSize;
+  return { width: k * p.tileScreenWidth, height: k * p.tileScreenHeight };
 }
 
 export class DebugDraw {

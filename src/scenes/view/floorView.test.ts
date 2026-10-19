@@ -51,9 +51,15 @@ function layout(rows: number, cols: number, skirt: number): FloorLayout {
 
 const ORIGIN = { x: 0, y: 0, width: 192, height: 192 };
 
-function grid(view: FloorView, cols: number): (r: number, c: number) => StubImage {
+/** Finds the child for layout cell (r, c) by its projected position (insertion order is diagonal). */
+function grid(view: FloorView, bounds: { x: number; y: number }, col0: number, row0: number): (r: number, c: number) => StubImage {
   const children = (view.container as StubContainer).children;
-  return (r, c) => children[r * cols + c];
+  return (r, c) => {
+    const p = toScreen({ x: bounds.x + (c - col0) * 64, y: bounds.y + (r - row0) * 64 }, GROUND_PROJECTION);
+    const hit = children.find((img) => img.x === p.x && img.y === p.y);
+    if (!hit) throw new Error(`no image at cell (${r},${c})`);
+    return hit;
+  };
 }
 
 describe('FloorView', () => {
@@ -62,29 +68,49 @@ describe('FloorView', () => {
     expect(() => new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS)).toThrow(/floor_worn/);
   });
 
-  it('rebuild places one image per cell at the projected position with origin (0,0) and display size 64x48', () => {
+  it('rebuild places one image per cell at the projected top vertex with origin (0.5,0) and display size 64x32', () => {
     const { scene } = stubScene();
     const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
     view.rebuild(layout(3, 3, 0));
-    const at = grid(view, 3);
+    const children = (view.container as StubContainer).children;
+    expect(children).toHaveLength(9);
+    const at = grid(view, ORIGIN, 0, 0);
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         const img = at(r, c);
         const p = toScreen({ x: c * 64, y: r * 64 }, GROUND_PROJECTION);
         expect([img.x, img.y]).toEqual([p.x, p.y]);
         expect(img.key).toBe(FLOOR_TILE_KEYS.floor_base);
-        expect(img.origin).toEqual([0, 0]);
-        expect(img.size).toEqual([64, 48]);
-        expect(img.depth).toBe(-100000 + r);
+        expect(img.origin).toEqual([0.5, 0]);
+        expect(img.size).toEqual([64, 32]);
+        expect(img.depth).toBe(-100000 + r + c);
       }
     }
+  });
+
+  it('rebuild inserts cells by increasing diagonal r + c, ties broken by increasing r', () => {
+    const { scene } = stubScene();
+    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(3, 3, 0));
+    const children = (view.container as StubContainer).children;
+    const at = grid(view, ORIGIN, 0, 0);
+    expect(children[0]).toBe(at(0, 0));
+    expect(children[children.length - 1]).toBe(at(2, 2));
+    const order: [number, number][] = [];
+    for (let d = 0; d <= 4; d++) {
+      for (let r = 0; r < 3; r++) {
+        const c = d - r;
+        if (c >= 0 && c < 3) order.push([r, c]);
+      }
+    }
+    expect(children).toEqual(order.map(([r, c]) => at(r, c)));
   });
 
   it('cells outside the playable rectangle are tinted with skirtTint of their Chebyshev distance and playable cells are not', () => {
     const { scene } = stubScene();
     const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
     view.rebuild(layout(3, 3, 2));
-    const at = grid(view, 7);
+    const at = grid(view, ORIGIN, 2, 2);
     expect(at(0, 0).tint).toBe(skirtTint(2, 2));
     expect(at(1, 3).tint).toBe(skirtTint(1, 2));
     expect(at(0, 6).tint).toBe(skirtTint(2, 2));
@@ -99,9 +125,15 @@ describe('FloorView', () => {
     const bounds = { x: 128, y: 64, width: 192, height: 192 };
     const view = new FloorView(scene, bounds, GROUND_PROJECTION, FLOOR_TILE_IDS);
     view.rebuild(layout(3, 3, 2));
-    const cell = grid(view, 7)(2, 2);
     const p = toScreen({ x: bounds.x, y: bounds.y }, GROUND_PROJECTION);
-    expect([cell.x, cell.y]).toEqual([p.x, p.y]);
+    const children = (view.container as StubContainer).children;
+    // Cell (2,2) is the playable top-left: it sits at the projected bounds origin with depth base + 4.
+    const cell = children.find((img) => img.x === p.x && img.y === p.y);
+    expect(cell).toBeDefined();
+    expect(cell?.depth).toBe(-100000 + 4);
+    // The outer corner (0,0) is two tiles up-left in world space.
+    const corner = toScreen({ x: bounds.x - 128, y: bounds.y - 128 }, GROUND_PROJECTION);
+    expect([children[0].x, children[0].y]).toEqual([corner.x, corner.y]);
   });
 
   it('rebuilding twice leaves exactly rows x cols children', () => {

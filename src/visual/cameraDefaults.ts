@@ -8,22 +8,28 @@ export const CAMERA_FOLLOW_LERP = 0.12;
 export const VOID_COLOR = 0x0b0e13;
 
 /**
- * Screen-space camera bounds: the projected arena corners expanded by
- * marginTiles tiles (tileScreenWidth horizontally, tileScreenHeight vertically).
+ * Screen-space camera bounds: the bounding box of the four projected corners
+ * of the arena expanded by marginTiles world tiles on every side.
  */
 export function worldCameraBounds(
   arena: AABB,
   p: GroundProjection,
   marginTiles: number,
 ): { x: number; y: number; width: number; height: number } {
-  const topLeft = toScreen({ x: arena.x, y: arena.y }, p);
-  const bottomRight = toScreen({ x: arena.x + arena.width, y: arena.y + arena.height }, p);
-  const marginX = marginTiles * p.tileScreenWidth;
-  const marginY = marginTiles * p.tileScreenHeight;
-  return {
-    x: topLeft.x - marginX,
-    y: topLeft.y - marginY,
-    width: bottomRight.x - topLeft.x + 2 * marginX,
-    height: bottomRight.y - topLeft.y + 2 * marginY,
-  };
+  const m = marginTiles * p.tileWorldSize;
+  const x0 = arena.x - m;
+  const y0 = arena.y - m;
+  const x1 = arena.x + arena.width + m;
+  const y1 = arena.y + arena.height + m;
+  const corners = [
+    toScreen({ x: x0, y: y0 }, p),
+    toScreen({ x: x1, y: y0 }, p),
+    toScreen({ x: x1, y: y1 }, p),
+    toScreen({ x: x0, y: y1 }, p),
+  ];
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
 }

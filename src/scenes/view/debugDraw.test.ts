@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sectorPoints, boxCorners, rangeEllipseSize } from './debugDraw';
-import { GROUND_PROJECTION } from '../../visual/groundProjection';
+import { GROUND_PROJECTION, toScreen } from '../../visual/groundProjection';
 
 describe('debugDraw geometry', () => {
   it('sectorPoints starts at the projected origin and samples the arc', () => {
@@ -9,17 +9,24 @@ describe('debugDraw geometry', () => {
       GROUND_PROJECTION,
       2,
     );
-    const expected = [[0, 0], [45.25, -33.94], [64, 0], [45.25, 33.94]];
+    const worldExpected = [[0, 0], [45.25, -45.25], [64, 0], [45.25, 45.25]];
     expect(pts).toHaveLength(4);
-    expected.forEach(([x, y], i) => {
+    worldExpected.forEach(([x, y], i) => {
+      const s = toScreen({ x, y }, GROUND_PROJECTION);
+      expect(pts[i].x).toBeCloseTo(s.x, 1);
+      expect(pts[i].y).toBeCloseTo(s.y, 1);
+    });
+    // Explicit projected numbers, independent of toScreen.
+    const projected = [[0, 0], [45.25, 0], [32, 16], [0, 22.63]];
+    projected.forEach(([x, y], i) => {
       expect(pts[i].x).toBeCloseTo(x, 1);
       expect(pts[i].y).toBeCloseTo(y, 1);
     });
   });
 
-  it('boxCorners projects the four corners in order', () => {
+  it('boxCorners projects the four corners as a diamond, in order', () => {
     const c = boxCorners({ x: 0, y: 0, width: 64, height: 64 }, GROUND_PROJECTION);
-    const expected = [[0, 0], [64, 0], [64, 48], [0, 48]];
+    const expected = [[0, 0], [32, 16], [0, 32], [-32, 16]];
     expect(c).toHaveLength(4);
     expected.forEach(([x, y], i) => {
       expect(c[i].x).toBeCloseTo(x, 1);
@@ -27,7 +34,9 @@ describe('debugDraw geometry', () => {
     });
   });
 
-  it('rangeEllipseSize foreshortens the vertical axis by the projection', () => {
-    expect(rangeEllipseSize(60, GROUND_PROJECTION)).toEqual({ width: 120, height: 90 });
+  it('rangeEllipseSize is the exact projection of a world circle of radius R', () => {
+    const s = rangeEllipseSize(60, GROUND_PROJECTION);
+    expect(s.width).toBeCloseTo(84.85, 2);
+    expect(s.height).toBeCloseTo(42.43, 2);
   });
 });

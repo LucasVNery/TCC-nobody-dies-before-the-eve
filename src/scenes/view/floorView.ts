@@ -46,7 +46,7 @@ export class FloorView<I extends FloorImage = FloorImage> {
       this.keys.set(id, key);
     }
     this.container = scene.add.container(0, 0);
-    this.container.setDepth(FLOOR_DEPTH_BASE); // below every sprite (depth = world y >= 0)
+    this.container.setDepth(FLOOR_DEPTH_BASE); // below every sprite (depth = world x + y >= 0)
   }
 
   rebuild(layout: FloorLayout): void {
@@ -60,24 +60,28 @@ export class FloorView<I extends FloorImage = FloorImage> {
     const { col0, row0, cols, rows } = layout.playable;
     // The ring width of this layout (SKIRT_TILES in the game): darkest at its outer edge.
     const skirt = Math.max(col0, row0);
-    const origin = toScreen({ x: this.bounds.x, y: this.bounds.y }, p);
-    layout.tiles.forEach((row, r) => {
-      row.forEach((id, c) => {
-        const img = this.scene.add.image(
-          origin.x + (c - col0) * p.tileScreenWidth,
-          origin.y + (r - row0) * p.tileScreenHeight,
-          this.keys.get(id) as string,
-        );
-        img.setOrigin(0, 0);
+    const T = p.tileWorldSize;
+    const totalRows = layout.tiles.length;
+    const totalCols = totalRows > 0 ? layout.tiles[0].length : 0;
+    // Back-to-front: increasing diagonal r + c, ties by increasing r.
+    for (let d = 0; d <= totalRows + totalCols - 2; d++) {
+      for (let r = Math.max(0, d - totalCols + 1); r <= Math.min(totalRows - 1, d); r++) {
+        const c = d - r;
+        const id = layout.tiles[r][c];
+        if (id === undefined) continue;
+        // (x, y) is the cell's top world corner, i.e. the diamond's top vertex.
+        const pos = toScreen({ x: this.bounds.x + (c - col0) * T, y: this.bounds.y + (r - row0) * T }, p);
+        const img = this.scene.add.image(pos.x, pos.y, this.keys.get(id) as string);
+        img.setOrigin(0.5, 0);
         img.setDisplaySize(p.tileScreenWidth, p.tileScreenHeight);
-        img.setDepth(FLOOR_DEPTH_BASE + r);
+        img.setDepth(FLOOR_DEPTH_BASE + r + c);
         const dx = Math.max(col0 - c, c - (col0 + cols - 1), 0);
         const dy = Math.max(row0 - r, r - (row0 + rows - 1), 0);
         const distance = Math.max(dx, dy);
         if (distance > 0) img.setTint(skirtTint(distance, skirt));
         this.container.add(img);
-      });
-    });
+      }
+    }
   }
 
   destroy(): void {

@@ -3,11 +3,13 @@ import { ENTITY_SIZE } from '../../visual/placeholderTextures';
 import type { Vec2 } from '../../combat/types';
 
 /**
- * WASD drives the player along the world axes directly: the ground projection
- * is screen-aligned, so world +x is screen-right and world +y is screen-down.
+ * Rotates screen-space WASD input by 45° into world axes so the keys stay
+ * screen-aligned under the 2:1 diamond projection: D is screen-right
+ * (world +x, -y), W is screen-up (world -x, -y). Not normalised; the caller
+ * normalises the resulting vector.
  */
 export function mapMovement(ix: number, iy: number): { dx: number; dy: number } {
-  return { dx: ix, dy: iy };
+  return { dx: ix + iy, dy: iy - ix };
 }
 
 /** World-space aim direction from the pointer's world (screen-plane) point and the player's screen position. */

@@ -3,17 +3,27 @@ import { toScreen, fromScreen, screenDepth, GROUND_PROJECTION } from './groundPr
 
 const p = GROUND_PROJECTION;
 
+describe('GROUND_PROJECTION', () => {
+  it('is a 2:1 diamond: 64-unit world tiles draw as 64x32', () => {
+    expect(p).toEqual({ tileWorldSize: 64, tileScreenWidth: 64, tileScreenHeight: 32 });
+  });
+});
+
 describe('toScreen', () => {
   it('maps the world origin to the screen origin', () => {
     expect(toScreen({ x: 0, y: 0 }, p)).toEqual({ x: 0, y: 0 });
   });
 
-  it('maps one world tile to one screen tile (64 wide, 48 tall)', () => {
-    expect(toScreen({ x: 64, y: 64 }, p)).toEqual({ x: 64, y: 48 });
+  it('maps world +x one tile to the right diamond vertex (32,16)', () => {
+    expect(toScreen({ x: 64, y: 0 }, p)).toEqual({ x: 32, y: 16 });
   });
 
-  it('keeps world x on screen x and foreshortens world y', () => {
-    expect(toScreen({ x: 32, y: 64 }, p)).toEqual({ x: 32, y: 48 });
+  it('maps world +y one tile to the left diamond vertex (-32,16)', () => {
+    expect(toScreen({ x: 0, y: 64 }, p)).toEqual({ x: -32, y: 16 });
+  });
+
+  it('maps the far tile corner to the bottom diamond vertex (0,32)', () => {
+    expect(toScreen({ x: 64, y: 64 }, p)).toEqual({ x: 0, y: 32 });
   });
 });
 
@@ -31,9 +41,9 @@ describe('fromScreen', () => {
 });
 
 describe('screenDepth', () => {
-  it('screenDepth grows with y and ignores x', () => {
-    expect(screenDepth({ x: 5, y: 7 }, p)).toBe(7);
-    expect(screenDepth({ x: 900, y: 7 }, p)).toBe(7);
-    expect(screenDepth({ x: 0, y: 8 }, p)).toBeGreaterThan(screenDepth({ x: 0, y: 7 }, p));
+  it('screenDepth is x + y and grows with it', () => {
+    expect(screenDepth({ x: 5, y: 7 }, p)).toBe(12);
+    expect(screenDepth({ x: 6, y: 7 }, p)).toBeGreaterThan(screenDepth({ x: 5, y: 7 }, p));
+    expect(screenDepth({ x: 5, y: 8 }, p)).toBeGreaterThan(screenDepth({ x: 5, y: 7 }, p));
   });
 });
