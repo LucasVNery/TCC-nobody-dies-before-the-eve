@@ -12,15 +12,17 @@ const TRANSPARENT_POINTS: [number, number][] = [[0, 0], [127, 0], [0, 63], [127,
 const OPAQUE_POINTS: [number, number][] = [
   [64, 2], [64, 61], [4, 32], [123, 32], [64, 32],
   [32, 16], [96, 16], [32, 48], [96, 48],
+  // mirrors of the probes above (pixel x ↔ 127 − x, y ↔ 63 − y): the bleed holds on all four edges
+  [31, 48], [95, 48], [31, 15], [96, 15],
 ];
 
 // Lattice composition: 6x6 cells at native resolution over a contrast colour.
 const LATTICE_W = 640;
 const LATTICE_H = 320;
 const LATTICE_N = 6;
-const LATTICE_INSET = 2;
-const MAGENTA = [255, 0, 255];
-const MAGENTA_TOLERANCE = 24; // summed |RGB| distance: anything this close is a visible gap
+// The lattice is composited over two different backgrounds; a pixel inside a cell is covered
+// only if both composites agree exactly (no background shows through, not even partially).
+const BACKGROUNDS = [[255, 0, 255], [0, 255, 0]];
 
 // Edge similarity along the shared diagonals.
 const EDGE_INSET = 3; // px inside the diagonal (vertically)
@@ -63,6 +65,80 @@ function cellOrigin(c: number, r: number): [number, number] {
   return [(c - r) * (TILE_W / 2) + LATTICE_W / 2 - TILE_W / 2, (c + r) * (TILE_H / 2)];
 }
 
+type Pick = (c: number, r: number) => number;
+type Offset = (c: number, r: number) => [number, number];
+
+/** True when the pixel centre (x + 0.5, y + 0.5) lies inside the exact cell diamond |dx|/64 + |dy|/32 <= 1. */
+function inExactDiamond(x: number, y: number, scale = 1): boolean {
+  const dx = Math.abs(x + 0.5 - TILE_W / 2);
+  const dy = Math.abs(y + 0.5 - TILE_H / 2);
+  return dx / (TILE_W / 2) + dy / (TILE_H / 2) <= scale;
+}
+
+let EXACT_DIAMOND_PIXELS = 0;
+for (let y = 0; y < TILE_H; y++) for (let x = 0; x < TILE_W; x++) if (inExactDiamond(x, y)) EXACT_DIAMOND_PIXELS++;
+
+/** Composite a LATTICE_N x LATTICE_N lattice over `bg` in the game's painter's order (diagonal c + r). */
+function compositeLattice(pngs: Png[], pick: Pick, bg: number[], offset: Offset): Float64Array {
+  const canvas = new Float64Array(LATTICE_W * LATTICE_H * 3);
+  for (let i = 0; i < LATTICE_W * LATTICE_H; i++) canvas.set(bg, i * 3);
+  for (let d = 0; d <= 2 * (LATTICE_N - 1); d++) {
+    for (let c = 0; c < LATTICE_N; c++) {
+      const r = d - c;
+      if (r < 0 || r >= LATTICE_N) continue;
+      const [ox, oy] = cellOrigin(c, r);
+      const [sx, sy] = offset(c, r);
+      const { data } = pngs[pick(c, r)];
+      for (let y = 0; y < TILE_H; y++) {
+        for (let x = 0; x < TILE_W; x++) {
+          const cx = ox + sx + x;
+          const cy = oy + sy + y;
+          if (cx < 0 || cy < 0 || cx >= LATTICE_W || cy >= LATTICE_H) continue;
+          const s = (y * TILE_W + x) * 4;
+          const a = data[s + 3] / 255;
+          if (a === 0) continue;
+          const t = (cy * LATTICE_W + cx) * 3;
+          for (let ch = 0; ch < 3; ch++) canvas[t + ch] = data[s + ch] * a + canvas[t + ch] * (1 - a);
+        }
+      }
+    }
+  }
+  return canvas;
+}
+
+/**
+ * Pixels inside the exact diamond of an interior cell (all four neighbours present) where the
+ * background shows: the composites over the two backgrounds differ there.
+ */
+function latticeLeaks(pngs: Png[], pick: Pick, offset: Offset = () => [0, 0]): { leaks: number; checked: number } {
+  const [a, b] = BACKGROUNDS.map((bg) => compositeLattice(pngs, pick, bg, offset));
+  let leaks = 0;
+  let checked = 0;
+  for (let r = 1; r < LATTICE_N - 1; r++) {
+    for (let c = 1; c < LATTICE_N - 1; c++) {
+      const [ox, oy] = cellOrigin(c, r);
+      for (let y = 0; y < TILE_H; y++) {
+        for (let x = 0; x < TILE_W; x++) {
+          if (!inExactDiamond(x, y)) continue;
+          checked++;
+          const t = ((oy + y) * LATTICE_W + ox + x) * 3;
+          if (a[t] !== b[t] || a[t + 1] !== b[t + 1] || a[t + 2] !== b[t + 2]) leaks++;
+        }
+      }
+    }
+  }
+  return { leaks, checked };
+}
+
+/** A copy of `png` made transparent outside |dx|/64 + |dy|/32 <= scale (for the detector self-check). */
+function clipDiamond(png: Png, scale: number): Png {
+  const data = new Uint8Array(png.data);
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) if (!inExactDiamond(x, y, scale)) data[(y * png.width + x) * 4 + 3] = 0;
+  }
+  return { ...png, data };
+}
+
 const allTilesetIds = [...FLOOR_TILESET.border, ...FLOOR_TILESET.interior.map((t) => t.id)];
 
 describe('floor tile assets', () => {
@@ -99,58 +175,28 @@ describe('floor tile assets', () => {
   it('tiles compose into a lattice with no gaps', () => {
     const tiles = FLOOR_TILE_IDS.map((id) => ({ id, png: loadTile(id) }));
     for (const { id, png } of tiles) expect([png.width, png.height], id).toEqual([TILE_W, TILE_H]);
+    const pngs = tiles.map((t) => t.png);
     // One lattice per tile id (uniform floor) plus one mixing all ids.
-    const layouts: [string, (c: number, r: number) => number][] = [
-      ...tiles.map((_, k): [string, (c: number, r: number) => number] => [tiles[k].id, () => k]),
+    const layouts: [string, Pick][] = [
+      ...tiles.map((t, k): [string, Pick] => [t.id, () => k]),
       ['mixed', (c, r) => (c * 7 + r * 3) % tiles.length],
     ];
     for (const [name, pick] of layouts) {
-      const canvas = new Float64Array(LATTICE_W * LATTICE_H * 3);
-      for (let i = 0; i < LATTICE_W * LATTICE_H; i++) canvas.set(MAGENTA, i * 3);
-      // Painter's order of the game: increasing diagonal c + r.
-      for (let d = 0; d <= 2 * (LATTICE_N - 1); d++) {
-        for (let c = 0; c < LATTICE_N; c++) {
-          const r = d - c;
-          if (r < 0 || r >= LATTICE_N) continue;
-          const [ox, oy] = cellOrigin(c, r);
-          const { data } = tiles[pick(c, r)].png;
-          for (let y = 0; y < TILE_H; y++) {
-            for (let x = 0; x < TILE_W; x++) {
-              const cx = ox + x;
-              const cy = oy + y;
-              if (cx < 0 || cy < 0 || cx >= LATTICE_W || cy >= LATTICE_H) continue;
-              const s = (y * TILE_W + x) * 4;
-              const a = data[s + 3] / 255;
-              if (a === 0) continue;
-              const t = (cy * LATTICE_W + cx) * 3;
-              for (let ch = 0; ch < 3; ch++) canvas[t + ch] = data[s + ch] * a + canvas[t + ch] * (1 - a);
-            }
-          }
-        }
-      }
-      let magenta = 0;
-      let checked = 0;
-      for (let r = 1; r < LATTICE_N - 1; r++) {
-        for (let c = 1; c < LATTICE_N - 1; c++) {
-          const [ox, oy] = cellOrigin(c, r);
-          for (let y = 0; y < TILE_H; y++) {
-            for (let x = 0; x < TILE_W; x++) {
-              // Exact cell diamond |dx|/64 + |dy|/32 <= 1, inset 2 px (vertically) on every edge.
-              const dx = Math.abs(x + 0.5 - TILE_W / 2);
-              const dy = Math.abs(y + 0.5 - TILE_H / 2);
-              if (dx + 2 * dy > TILE_W / 2 - 2 * LATTICE_INSET) continue;
-              checked++;
-              const t = ((oy + y) * LATTICE_W + ox + x) * 3;
-              const dist = Math.abs(canvas[t] - MAGENTA[0]) + Math.abs(canvas[t + 1] - MAGENTA[1]) +
-                Math.abs(canvas[t + 2] - MAGENTA[2]);
-              if (dist < MAGENTA_TOLERANCE) magenta++;
-            }
-          }
-        }
-      }
-      expect(checked, `${name} lattice checked pixels`).toBeGreaterThan(0);
-      expect(magenta, `${name} lattice magenta pixels inside interior cells`).toBe(0);
+      const { leaks, checked } = latticeLeaks(pngs, pick);
+      expect(checked, `${name} lattice checked pixels`).toBe(EXACT_DIAMOND_PIXELS * (LATTICE_N - 2) ** 2);
+      expect(leaks, `${name} lattice pixels showing the background inside interior cells`).toBe(0);
     }
+  });
+
+  it('the lattice gap detector catches clipped and misplaced tiles', () => {
+    const pngs = FLOOR_TILE_IDS.map(loadTile);
+    const mixed: Pick = (c, r) => (c * 7 + r * 3) % pngs.length;
+    // Every tile clipped to 0.94 of its diamond leaves a ~2 px gap all around each cell.
+    const clipped = pngs.map((png) => clipDiamond(png, 0.94));
+    expect(latticeLeaks(clipped, mixed).leaks, 'clipped tiles').toBeGreaterThan(0);
+    // One interior tile drawn 3 px too low opens a gap along its upper edges.
+    const shifted = latticeLeaks(pngs, mixed, (c, r) => (c === 2 && r === 2 ? [0, 3] : [0, 0]));
+    expect(shifted.leaks, 'one tile shifted 3 px').toBeGreaterThan(0);
   });
 
   it('tiles are close in brightness so none competes with telegraphs', () => {
