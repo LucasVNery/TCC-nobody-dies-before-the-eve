@@ -5,6 +5,7 @@ import type { ProfileOutcome } from '../../profile/types';
 import type { ActionType } from '../../combat/actionRegistry';
 import { SCHEMA_VERSION, type LoggedEvent } from '../../telemetry/schema';
 import { makeBotStack, runBot } from '../../telemetry/testing/scriptedBot';
+import { orderEvents } from '../../telemetry/replay';
 import { REPORT_SKILLS, runWindowValues, roomWindowValues, type WindowValue } from './windowValues';
 
 /**
@@ -42,6 +43,13 @@ function logBuilder(playerId = 'p', sessionId = 's') {
       enc = 0;
       log('run.start', { run_idx: idx, seed: 1 });
       log('room.enter', { room_idx: 0 });
+    },
+    /** Like TelemetryRecorder.withIndices (closeAbandonedRun): log under another run's indices. */
+    withIndices(runIdx: number, roomIdx: number, fn: () => void) {
+      const saved = [run, room, enc];
+      [run, room, enc] = [runIdx, roomIdx, 0];
+      fn();
+      [run, room, enc] = saved;
     },
     enterRoom(idx: number) {
       room = idx;
@@ -245,6 +253,45 @@ describe('windowValues', () => {
     for (const skill of REPORT_SKILLS) expect(pick(runWindowValues(b.events, 'p'), skill, 3, null).domain).not.toBeNull();
   });
 
+  it('orders sessions by session.start time, not by session id, across an abandoned run', () => {
+    // Earlier session 'zz' leaves run 0 open in room 1; later session 'aa' closes it.
+    // Sorting by id would put 'aa' first; wall_clock_iso says 'zz' came first.
+    const zz = logBuilder('p', 'zz');
+    zz.log('session.start', { wall_clock_iso: '2026-10-01T00:00:00.000Z' });
+    zz.startRun(0);
+    for (let i = 0; i < 3; i++) zz.outcome('punish', 'taken');
+    zz.encounterBoundary();
+    zz.roomBoundary();
+    zz.enterRoom(1);
+    zz.outcome('punish', 'missed');
+    // session ends abruptly: run 0 / room 1 left open
+    const aa = logBuilder('p', 'aa');
+    aa.log('session.start', { wall_clock_iso: '2026-10-02T00:00:00.000Z' });
+    aa.withIndices(0, 1, () => {
+      aa.outcome('punish', 'taken'); // evidence under the abandoned run's indices (makes order observable)
+      aa.encounterBoundary();
+      aa.roomBoundary();
+    });
+    aa.startRun(1);
+    aa.outcome('punish', 'missed');
+
+    const log = [...aa.events, ...zz.events];
+    const chronological = [...zz.events, ...aa.events].filter((e) => e.type.startsWith('obs.'));
+
+    const run0 = new ProfileAccumulator();
+    feed(run0, chronological.filter((e) => e.run_idx === 0));
+    expectMatches(runWindowValues(log, 'p'), run0, 0, null);
+
+    const room01 = new ProfileAccumulator();
+    feed(room01, chronological.filter((e) => e.run_idx === 0 && e.room_idx === 1));
+    expectMatches(roomWindowValues(log, 'p'), room01, 0, 1);
+
+    const run1 = new ProfileAccumulator();
+    feed(run1, chronological.filter((e) => e.run_idx === 1));
+    run1.applyRoomBoundary(); // open run: the one final fold
+    expectMatches(runWindowValues(log, 'p'), run1, 1, null);
+  });
+
   it('derives the windows of a real recorded log', () => {
     const { stack, runEnds } = makeBotStack();
     stack.recorder.log('session.start', { wall_clock_iso: '2026-10-19T00:00:00.000Z', game_version: 'test', schema_v: 2 });
@@ -278,7 +325,6 @@ describe('windowValues', () => {
     // run.start, so it carries the ENDED room's indices — every closed room
     // window ends in its own room boundary.
     const lastOf = <T,>(xs: readonly T[]): T => xs[xs.length - 1];
-    const lastRun = Math.max(...runIdxs);
     const openRoom = lastOf(mine.filter((e) => e.type === 'room.enter'));
     for (const key of roomKeys) {
       if (key === `${openRoom.run_idx}/${openRoom.room_idx}`) continue;
@@ -287,17 +333,21 @@ describe('windowValues', () => {
       expect(`${key}:${last.type}:${String(last.kind)}`).toBe(`${key}:obs.boundary:room`);
     }
 
-    // A closed run (ends in a real room boundary): equals a fresh accumulator fed the same obs events.
-    const closed = new ProfileAccumulator();
-    feed(closed, mine.filter((e) => e.run_idx === 0 && e.type.startsWith('obs.')));
-    expectMatches(runs, closed, 0, null);
-
-    // The open last run: same, plus the one final fold.
-    const open = new ProfileAccumulator();
-    const lastRunObs = mine.filter((e) => e.run_idx === lastRun && e.type.startsWith('obs.'));
-    feed(open, lastRunObs);
-    const endsFolded = lastOf(lastRunObs).type === 'obs.boundary' && lastOf(lastRunObs).kind === 'room';
-    if (!endsFolded) open.applyRoomBoundary();
-    expectMatches(runs, open, lastRun, null);
+    // EVERY window equals a fresh accumulator fed that window's obs in true global
+    // order, plus one fold only if the window does not end in a room boundary.
+    const globalObs = orderEvents(mine).filter((e) => e.type.startsWith('obs.'));
+    const expectWindow = (values: readonly WindowValue[], runIdx: number, roomIdx: number | null) => {
+      const windowObs = globalObs.filter((e) => e.run_idx === runIdx && (roomIdx === null || e.room_idx === roomIdx));
+      const acc = new ProfileAccumulator();
+      feed(acc, windowObs);
+      const end = lastOf(windowObs);
+      if (!(end.type === 'obs.boundary' && end.kind === 'room')) acc.applyRoomBoundary();
+      expectMatches(values, acc, runIdx, roomIdx);
+    };
+    for (const runIdx of runIdxs) expectWindow(runs, runIdx, null);
+    for (const key of roomKeys) {
+      const [runIdx, roomIdx] = key.split('/').map(Number);
+      expectWindow(rooms, runIdx, roomIdx);
+    }
   });
 });

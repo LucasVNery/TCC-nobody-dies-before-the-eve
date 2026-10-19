@@ -45,6 +45,19 @@ type WindowKey = [runIdx: number, roomIdx: number | null];
  * and rebuilds a fresh profile per window. Windows are derived from obs.*
  * events only, so non-obs events logged under stale indices (session.start
  * is enveloped with the recorder's initial run_idx 0) never create a window.
+ *
+ * Order: the player's FULL log is ordered once (orderEvents uses each
+ * session.start's wall_clock_iso; a window of obs.* alone would fall back to
+ * ordering sessions by id string, e.g. 'agent-s10' before 'agent-s2', which
+ * can put an abandoned run's closing boundaries — logged by a later session —
+ * before its own observations). The replay re-orders its input, so each
+ * window is passed together with the session.start events of its sessions
+ * (non-obs events are ignored by the replay) to keep that same order.
+ *
+ * Note: an obs.reset inside a window makes the replay drop the window's
+ * earlier events (it starts after the last reset). Not expected in V0 —
+ * agents never reset.
+ *
  * Output: windows ordered by runIdx then roomIdx, skills in REPORT_SKILLS order.
  */
 function windowValues(
@@ -52,9 +65,15 @@ function windowValues(
   playerId: string,
   keyOf: (e: LoggedEvent) => WindowKey,
 ): WindowValue[] {
+  const ordered = orderEvents(events.filter((e) => e.player_id === playerId));
+  const sessionStarts = new Map<string, LoggedEvent>();
+  for (const e of ordered) {
+    if (e.type === 'session.start' && !sessionStarts.has(e.session_id)) sessionStarts.set(e.session_id, e);
+  }
+
   const windows = new Map<string, { key: WindowKey; events: LoggedEvent[] }>();
-  for (const e of events) {
-    if (e.player_id !== playerId || !e.type.startsWith('obs.')) continue;
+  for (const e of ordered) {
+    if (!e.type.startsWith('obs.')) continue;
     const key = keyOf(e);
     const id = `${key[0]}/${key[1]}`;
     let w = windows.get(id);
@@ -70,7 +89,11 @@ function windowValues(
   );
   const out: WindowValue[] = [];
   for (const { key, events: windowEvents } of sorted) {
-    const acc = rebuildProfileWithStats(withFinalFold(windowEvents), playerId).accumulator;
+    const starts = [...new Set(windowEvents.map((e) => e.session_id))]
+      .map((id) => sessionStarts.get(id))
+      .filter((e): e is LoggedEvent => e !== undefined);
+    const replayInput = [...starts, ...withFinalFold(windowEvents)];
+    const acc = rebuildProfileWithStats(replayInput, playerId).accumulator;
     for (const skill of REPORT_SKILLS) {
       const sampleSize = acc.sampleSize(skill, 'trait');
       out.push({
@@ -91,9 +114,9 @@ function windowValues(
  * If evidence follows the window's last room boundary (an open room or run),
  * append ONE synthetic room boundary after the window's last event; a window
  * already ending in a room boundary gets none (no double fold).
+ * `ordered` must already be in global chronological order.
  */
-function withFinalFold(windowEvents: readonly LoggedEvent[]): LoggedEvent[] {
-  const ordered = orderEvents(windowEvents);
+function withFinalFold(ordered: readonly LoggedEvent[]): LoggedEvent[] {
   let pending = false;
   for (let i = ordered.length - 1; i >= 0; i--) {
     const e = ordered[i];
@@ -103,7 +126,7 @@ function withFinalFold(windowEvents: readonly LoggedEvent[]): LoggedEvent[] {
       break;
     }
   }
-  if (!pending) return ordered;
+  if (!pending) return [...ordered];
   const last = ordered[ordered.length - 1];
   const fold: LoggedEvent = {
     v: last.v,
