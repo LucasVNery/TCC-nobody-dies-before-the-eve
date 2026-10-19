@@ -1,23 +1,37 @@
-// Draws the procedural floor (playable rectangle plus darkened skirt) into one
-// container created once; rebuilds replace its children. Structural scene slice,
-// no Phaser import, so it runs against an in-memory stub in tests.
+// Draws the procedural floor (playable rectangle plus darkened skirt) pre-rendered into a
+// few dozen dynamic-texture chunks at the tiles' native resolution, so a frame costs one
+// quad per chunk instead of one per cell. The chunk images live in one container created
+// at construction (before CameraRig.attach, so the UI camera ignores it). A rebuild with
+// the same chunk geometry (every room of the game) clears and redraws the same textures;
+// otherwise it replaces them. Structural scene slice, no Phaser import, so it runs
+// against a stub in tests.
 import type { AABB } from '../../combat/types';
-import { toScreen, type GroundProjection } from '../../visual/groundProjection';
-import { FLOOR_TILE_KEYS } from '../../visual/floor/floorAssets';
+import type { GroundProjection } from '../../visual/groundProjection';
+import { FLOOR_TILE_KEYS, FLOOR_TILE_TEXTURE } from '../../visual/floor/floorAssets';
 import type { FloorLayout } from '../../visual/floor/composeFloor';
-import { skirtTint } from '../../visual/floor/skirtTint';
+import { planFloorChunks, type FloorChunk } from '../../visual/floor/floorChunks';
 
 const FLOOR_DEPTH_BASE = -100000;
 
-export interface FloorImage {
+/** The slice of a Phaser DynamicTexture the floor draws into. */
+export interface FloorChunkTexture {
+  readonly key: string;
+  clear(): unknown;
+  beginDraw(): unknown;
+  batchDrawFrame(key: string, frame?: string | number, x?: number, y?: number, alpha?: number, tint?: number): unknown;
+  endDraw(): unknown;
+  destroy(): unknown;
+}
+
+/** The slice of a Phaser Image that shows one chunk. */
+export interface FloorChunkImage {
   setOrigin(x: number, y: number): unknown;
-  setDisplaySize(w: number, h: number): unknown;
-  setDepth(d: number): unknown;
-  setTint(color: number): unknown;
+  setScale(s: number): unknown;
+  setCrop(x: number, y: number, width: number, height: number): unknown;
 }
 
 /** I is the concrete image type, so a Phaser container (whose add wants a GameObject) satisfies it. */
-export interface FloorContainer<I extends FloorImage = FloorImage> {
+export interface FloorContainer<I extends FloorChunkImage = FloorChunkImage> {
   add(child: I): unknown;
   removeAll(destroyChild?: boolean): unknown;
   setDepth(d: number): unknown;
@@ -25,66 +39,73 @@ export interface FloorContainer<I extends FloorImage = FloorImage> {
   readonly length: number;
 }
 
-export interface FloorScene<I extends FloorImage = FloorImage> {
+export interface FloorScene<I extends FloorChunkImage = FloorChunkImage, T extends FloorChunkTexture = FloorChunkTexture> {
   add: { container(x: number, y: number): FloorContainer<I>; image(x: number, y: number, key: string): I };
-  textures: { exists(key: string): boolean };
+  textures: { exists(key: string): boolean; addDynamicTexture(key: string, width: number, height: number): T | null };
 }
 
-export class FloorView<I extends FloorImage = FloorImage> {
+let chunkSeq = 0;
+
+export class FloorView<I extends FloorChunkImage = FloorChunkImage, T extends FloorChunkTexture = FloorChunkTexture> {
   readonly container: FloorContainer<I>;
-  private readonly keys = new Map<string, string>();
+  private readonly keys: string[];
+  private chunks: { geometry: string; texture: T }[] = [];
 
   constructor(
-    private readonly scene: FloorScene<I>,
+    private readonly scene: FloorScene<I, T>,
     private readonly bounds: AABB,
     private readonly projection: GroundProjection,
-    tileIds: readonly string[],
+    private readonly tileIds: readonly string[],
   ) {
-    for (const id of tileIds) {
+    this.keys = tileIds.map((id) => {
       const key = FLOOR_TILE_KEYS[id] ?? `floor:${id}`;
       if (!scene.textures.exists(key)) throw new Error(`FloorView: missing floor texture "${key}" (tile ${id})`);
-      this.keys.set(id, key);
-    }
+      return key;
+    });
     this.container = scene.add.container(0, 0);
     this.container.setDepth(FLOOR_DEPTH_BASE); // below every sprite (depth = world x + y >= 0)
   }
 
   rebuild(layout: FloorLayout): void {
-    for (const row of layout.tiles) {
-      for (const id of row) {
-        if (!this.keys.has(id)) throw new Error(`FloorView: unknown floor tile id "${id}"`);
-      }
-    }
-    this.container.removeAll(true);
-    const p = this.projection;
-    const { col0, row0, cols, rows } = layout.playable;
-    // The ring width of this layout (SKIRT_TILES in the game): darkest at its outer edge.
-    const skirt = Math.max(col0, row0);
-    const T = p.tileWorldSize;
-    const totalRows = layout.tiles.length;
-    const totalCols = totalRows > 0 ? layout.tiles[0].length : 0;
-    // Back-to-front: increasing diagonal r + c, ties by increasing r.
-    for (let d = 0; d <= totalRows + totalCols - 2; d++) {
-      for (let r = Math.max(0, d - totalCols + 1); r <= Math.min(totalRows - 1, d); r++) {
-        const c = d - r;
-        const id = layout.tiles[r][c];
-        if (id === undefined) continue;
-        // (x, y) is the cell's top world corner, i.e. the diamond's top vertex.
-        const pos = toScreen({ x: this.bounds.x + (c - col0) * T, y: this.bounds.y + (r - row0) * T }, p);
-        const img = this.scene.add.image(pos.x, pos.y, this.keys.get(id) as string);
-        img.setOrigin(0.5, 0);
-        img.setDisplaySize(p.tileScreenWidth, p.tileScreenHeight);
-        img.setDepth(FLOOR_DEPTH_BASE + r + c);
-        const dx = Math.max(col0 - c, c - (col0 + cols - 1), 0);
-        const dy = Math.max(row0 - r, r - (row0 + rows - 1), 0);
-        const distance = Math.max(dx, dy);
-        if (distance > 0) img.setTint(skirtTint(distance, skirt));
+    // Plan first: an unknown id throws here and leaves the current floor in place.
+    const plan = planFloorChunks(layout, this.tileIds, this.bounds, this.projection, FLOOR_TILE_TEXTURE);
+    const geometry = plan.chunks.map(geometryOf);
+    const reuse = geometry.length === this.chunks.length && geometry.every((g, i) => g === this.chunks[i].geometry);
+    if (!reuse) {
+      this.releaseChunks();
+      this.chunks = plan.chunks.map((chunk, i) => {
+        const key = `floor:chunk:${chunkSeq++}`;
+        const texture = this.scene.textures.addDynamicTexture(key, chunk.width, chunk.height);
+        if (!texture) throw new Error(`FloorView: could not create floor chunk texture "${key}"`);
+        const img = this.scene.add.image(chunk.x, chunk.y, key);
+        img.setOrigin(0, 0);
+        img.setScale(plan.scale);
+        img.setCrop(chunk.crop.x, chunk.crop.y, chunk.crop.width, chunk.crop.height);
         this.container.add(img);
-      }
+        return { geometry: geometry[i], texture };
+      });
     }
+    plan.chunks.forEach((chunk, i) => {
+      const t = this.chunks[i].texture;
+      t.clear();
+      t.beginDraw();
+      for (const s of chunk.stamps) t.batchDrawFrame(this.keys[s.index], undefined, s.x, s.y, 1, s.tint);
+      t.endDraw();
+    });
   }
 
   destroy(): void {
+    this.releaseChunks();
     this.container.destroy();
   }
+
+  private releaseChunks(): void {
+    this.container.removeAll(true); // images first, then the textures they show
+    for (const c of this.chunks) c.texture.destroy();
+    this.chunks = [];
+  }
+}
+
+function geometryOf(c: FloorChunk): string {
+  return `${c.x},${c.y},${c.width},${c.height},${c.crop.x},${c.crop.y},${c.crop.width},${c.crop.height}`;
 }

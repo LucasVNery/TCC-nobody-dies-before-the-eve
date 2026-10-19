@@ -18,7 +18,7 @@ const WALK_FRAME_COUNT = 6;
 export class WorldView {
   readonly playerSprite: DirectionalSprite;
   readonly assaltanteSprite: DirectionalSprite;
-  private readonly floor: FloorView<Phaser.GameObjects.Image>;
+  private readonly floor: FloorView<Phaser.GameObjects.Image, Phaser.Textures.DynamicTexture>;
   private readonly floorTracker: FloorTracker;
 
   constructor(scene: Phaser.Scene) {
@@ -29,7 +29,7 @@ export class WorldView {
       SKIRT_TILES,
       FLOOR_TILESET,
     );
-    this.floor = new FloorView<Phaser.GameObjects.Image>(scene, ARENA_BOUNDS, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    this.floor = new FloorView<Phaser.GameObjects.Image, Phaser.Textures.DynamicTexture>(scene, ARENA_BOUNDS, GROUND_PROJECTION, FLOOR_TILE_IDS);
     this.floor.rebuild(this.floorTracker.initial());
     this.playerSprite = new DirectionalSprite(
       scene,

@@ -13,6 +13,9 @@ export const FLOOR_TILE_URLS: Record<string, string> = Object.fromEntries(
   FLOOR_TILE_IDS.map((id) => [id, `/assets/tiles/floor/${id}.png`]),
 );
 
+/** Native pixel size of every floor tile PNG (drawn at half size as a 64x32 diamond). */
+export const FLOOR_TILE_TEXTURE = { width: 128, height: 64 } as const;
+
 export interface FloorTileLoaderScene {
   load: { image(key: string, url: string): unknown };
 }

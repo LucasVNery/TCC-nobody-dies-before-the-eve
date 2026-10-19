@@ -1,47 +1,82 @@
 import { describe, it, expect } from 'vitest';
-import { FloorView, type FloorScene, type FloorImage, type FloorContainer } from './floorView';
-import { GROUND_PROJECTION, toScreen } from '../../visual/groundProjection';
-import { FLOOR_TILE_IDS, FLOOR_TILE_KEYS } from '../../visual/floor/floorAssets';
+import { FloorView, type FloorScene, type FloorChunkImage, type FloorChunkTexture, type FloorContainer } from './floorView';
+import { GROUND_PROJECTION } from '../../visual/groundProjection';
+import { FLOOR_TILE_IDS, FLOOR_TILE_KEYS, FLOOR_TILE_TEXTURE } from '../../visual/floor/floorAssets';
 import { SKIRT_TILES, type FloorLayout } from '../../visual/floor/composeFloor';
-import { skirtTint } from '../../visual/floor/skirtTint';
+import { planFloorChunks } from '../../visual/floor/floorChunks';
 import { worldCameraBounds } from '../../visual/cameraDefaults';
 import { MIN_ZOOM } from '../../visual/cameraZoom';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 
-class StubImage implements FloorImage {
-  origin: [number, number] | null = null;
-  size: [number, number] | null = null;
-  depth: number | null = null;
-  tint: number | null = null;
-  constructor(readonly x: number, readonly y: number, readonly key: string) {}
-  setOrigin(x: number, y: number): this { this.origin = [x, y]; return this; }
-  setDisplaySize(w: number, h: number): this { this.size = [w, h]; return this; }
-  setDepth(d: number): this { this.depth = d; return this; }
-  setTint(c: number): this { this.tint = c; return this; }
+interface Draw { key: string; frame: string | number | undefined; x: number; y: number; alpha: number; tint: number }
+
+class StubTexture implements FloorChunkTexture {
+  draws: Draw[] = [];
+  drawing = false;
+  batches = 0;
+  clears = 0;
+  destroyed = false;
+  constructor(readonly key: string, readonly width: number, readonly height: number) {}
+  clear(): this { this.clears++; this.draws = []; return this; }
+  beginDraw(): this { this.drawing = true; this.batches++; return this; }
+  batchDrawFrame(key: string, frame?: string | number, x = 0, y = 0, alpha = 1, tint = 0xffffff): this {
+    if (!this.drawing) throw new Error('batchDrawFrame outside beginDraw/endDraw');
+    this.draws.push({ key, frame, x, y, alpha, tint });
+    return this;
+  }
+  endDraw(): this { this.drawing = false; return this; }
+  destroy(): void { this.destroyed = true; }
 }
 
-class StubContainer implements FloorContainer {
+class StubImage implements FloorChunkImage {
+  origin: [number, number] | null = null;
+  scale: number | null = null;
+  crop: [number, number, number, number] | null = null;
+  destroyed = false;
+  constructor(readonly x: number, readonly y: number, readonly key: string) {}
+  setOrigin(x: number, y: number): this { this.origin = [x, y]; return this; }
+  setScale(s: number): this { this.scale = s; return this; }
+  setCrop(x: number, y: number, w: number, h: number): this { this.crop = [x, y, w, h]; return this; }
+}
+
+class StubContainer implements FloorContainer<StubImage> {
   children: StubImage[] = [];
   removeAllCalls: (boolean | undefined)[] = [];
   destroyed = false;
   depth = 0;
   setDepth(d: number): this { this.depth = d; return this; }
-  add(child: FloorImage): this { this.children.push(child as StubImage); return this; }
-  removeAll(destroyChild?: boolean): this { this.removeAllCalls.push(destroyChild); this.children = []; return this; }
+  add(child: StubImage): this { this.children.push(child); return this; }
+  removeAll(destroyChild?: boolean): this {
+    this.removeAllCalls.push(destroyChild);
+    if (destroyChild) for (const c of this.children) c.destroyed = true;
+    this.children = [];
+    return this;
+  }
   destroy(): void { this.destroyed = true; }
   get length(): number { return this.children.length; }
 }
 
 function stubScene(missing: string[] = []) {
   const containers: StubContainer[] = [];
-  const scene: FloorScene = {
+  const textures = new Map<string, StubTexture>();
+  const created: StubTexture[] = [];
+  const scene: FloorScene<StubImage, StubTexture> = {
     add: {
       container: () => { const c = new StubContainer(); containers.push(c); return c; },
       image: (x, y, key) => new StubImage(x, y, key),
     },
-    textures: { exists: (key) => !missing.includes(key) },
+    textures: {
+      exists: (key) => !missing.includes(key),
+      addDynamicTexture: (key, w, h) => {
+        if (textures.has(key)) return null;
+        const t = new StubTexture(key, w, h);
+        textures.set(key, t);
+        created.push(t);
+        return t;
+      },
+    },
   };
-  return { scene, containers };
+  return { scene, containers, created, textureOf: (key: string) => textures.get(key) as StubTexture };
 }
 
 function layout(rows: number, cols: number, skirt: number): FloorLayout {
@@ -50,17 +85,8 @@ function layout(rows: number, cols: number, skirt: number): FloorLayout {
 }
 
 const ORIGIN = { x: 0, y: 0, width: 192, height: 192 };
-
-/** Finds the child for layout cell (r, c) by its projected position (insertion order is diagonal). */
-function grid(view: FloorView, bounds: { x: number; y: number }, col0: number, row0: number): (r: number, c: number) => StubImage {
-  const children = (view.container as StubContainer).children;
-  return (r, c) => {
-    const p = toScreen({ x: bounds.x + (c - col0) * 64, y: bounds.y + (r - row0) * 64 }, GROUND_PROJECTION);
-    const hit = children.find((img) => img.x === p.x && img.y === p.y);
-    if (!hit) throw new Error(`no image at cell (${r},${c})`);
-    return hit;
-  };
-}
+type View = FloorView<StubImage, StubTexture>;
+const stubContainer = (v: View) => v.container as StubContainer;
 
 describe('FloorView', () => {
   it('construction fails fast naming the missing texture', () => {
@@ -68,105 +94,99 @@ describe('FloorView', () => {
     expect(() => new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS)).toThrow(/floor_worn/);
   });
 
-  it('rebuild places one image per cell at the projected top vertex with origin (0.5,0) and display size 64x32', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 0));
-    const children = (view.container as StubContainer).children;
-    expect(children).toHaveLength(9);
-    const at = grid(view, ORIGIN, 0, 0);
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 3; c++) {
-        const img = at(r, c);
-        const p = toScreen({ x: c * 64, y: r * 64 }, GROUND_PROJECTION);
-        expect([img.x, img.y]).toEqual([p.x, p.y]);
-        expect(img.key).toBe(FLOOR_TILE_KEYS.floor_base);
-        expect(img.origin).toEqual([0.5, 0]);
-        expect(img.size).toEqual([64, 32]);
-        expect(img.depth).toBe(-100000 + r + c);
-      }
-    }
-  });
-
-  it('rebuild inserts cells by increasing diagonal r + c, ties broken by increasing r', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 0));
-    const children = (view.container as StubContainer).children;
-    const at = grid(view, ORIGIN, 0, 0);
-    expect(children[0]).toBe(at(0, 0));
-    expect(children[children.length - 1]).toBe(at(2, 2));
-    const order: [number, number][] = [];
-    for (let d = 0; d <= 4; d++) {
-      for (let r = 0; r < 3; r++) {
-        const c = d - r;
-        if (c >= 0 && c < 3) order.push([r, c]);
-      }
-    }
-    expect(children).toEqual(order.map(([r, c]) => at(r, c)));
-  });
-
-  it('cells outside the playable rectangle are tinted with skirtTint of their Chebyshev distance and playable cells are not', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 2));
-    const at = grid(view, ORIGIN, 2, 2);
-    expect(at(0, 0).tint).toBe(skirtTint(2, 2));
-    expect(at(1, 3).tint).toBe(skirtTint(1, 2));
-    expect(at(0, 6).tint).toBe(skirtTint(2, 2));
-    expect(at(6, 1).tint).toBe(skirtTint(2, 2));
-    expect(at(2, 2).tint).toBeNull();
-    expect(at(3, 3).tint).toBeNull();
-    expect(at(4, 4).tint).toBeNull();
-  });
-
-  it('the layout origin is shifted by the skirt so the playable rectangle sits at the bounds', () => {
-    const { scene } = stubScene();
-    const bounds = { x: 128, y: 64, width: 192, height: 192 };
-    const view = new FloorView(scene, bounds, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 2));
-    const p = toScreen({ x: bounds.x, y: bounds.y }, GROUND_PROJECTION);
-    const children = (view.container as StubContainer).children;
-    // Cell (2,2) is the playable top-left: it sits at the projected bounds origin with depth base + 4.
-    const cell = children.find((img) => img.x === p.x && img.y === p.y);
-    expect(cell).toBeDefined();
-    expect(cell?.depth).toBe(-100000 + 4);
-    // The outer corner (0,0) is two tiles up-left in world space.
-    const corner = toScreen({ x: bounds.x - 128, y: bounds.y - 128 }, GROUND_PROJECTION);
-    expect([children[0].x, children[0].y]).toEqual([corner.x, corner.y]);
-  });
-
-  it('rebuilding twice leaves exactly rows x cols children', () => {
+  it('creates its one container at construction, at the floor depth, before any rebuild (so CameraRig.attach sees it)', () => {
     const { scene, containers } = stubScene();
     const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 1));
-    view.rebuild(layout(4, 3, 1));
-    expect(view.container.length).toBe(6 * 5);
     expect(containers).toHaveLength(1);
+    expect(view.container).toBe(containers[0]);
     expect(containers[0].depth).toBe(-100000);
   });
 
-  it('rebuild clears previous children with destroy', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
-    view.rebuild(layout(3, 3, 0));
-    view.rebuild(layout(3, 3, 0));
-    expect((view.container as StubContainer).removeAllCalls).toContain(true);
+  it('rebuild draws each planned chunk once into its own texture, shown by an image at the chunk, origin (0,0), half scale, cropped to its cell', () => {
+    const { scene, textureOf } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    const l = layout(19, 25, SKIRT_TILES);
+    l.tiles[12][14] = 'floor_worn';
+    view.rebuild(l);
+    const expected = planFloorChunks(l, FLOOR_TILE_IDS, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_TEXTURE);
+    const children = stubContainer(view).children;
+    expect(children).toHaveLength(expected.chunks.length);
+    expect(new Set(children.map((c) => c.key)).size).toBe(children.length);
+    children.forEach((img, i) => {
+      const plan = expected.chunks[i];
+      const tex = textureOf(img.key);
+      expect([img.x, img.y]).toEqual([plan.x, plan.y]);
+      expect([tex.width, tex.height]).toEqual([plan.width, plan.height]);
+      expect(img.origin).toEqual([0, 0]);
+      expect(img.scale).toBe(0.5);
+      expect(img.crop).toEqual([plan.crop.x, plan.crop.y, plan.crop.width, plan.crop.height]);
+      expect(tex.batches).toBe(1);
+      expect(tex.drawing).toBe(false);
+      expect(tex.draws).toEqual(
+        plan.stamps.map((s) => ({ key: FLOOR_TILE_KEYS[FLOOR_TILE_IDS[s.index]], frame: undefined, x: s.x, y: s.y, alpha: 1, tint: s.tint })),
+      );
+    });
+    const keys = new Set(children.flatMap((img) => textureOf(img.key).draws.map((d) => d.key)));
+    expect(keys).toEqual(new Set([FLOOR_TILE_KEYS.floor_base, FLOOR_TILE_KEYS.floor_worn]));
+    // The darkened skirt reaches the chunks: some stamps are untinted, the darkest at the outer ring.
+    const tints = children.flatMap((img) => textureOf(img.key).draws.map((d) => d.tint));
+    expect(tints).toContain(0xffffff);
+    expect(tints).toContain(0x666666);
   });
 
-  it('unknown tile id in the layout throws naming the id', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+  it('rebuilding with the same chunk geometry (a new room) redraws the same textures without creating objects', () => {
+    const { scene, containers, created } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(19, 25, SKIRT_TILES));
+    const firstChildren = [...stubContainer(view).children];
+    const firstTextures = created.length;
+    const other = layout(19, 25, SKIRT_TILES);
+    other.tiles[5][5] = 'floor_a';
+    view.rebuild(other);
+    expect(created).toHaveLength(firstTextures);
+    expect(stubContainer(view).children).toEqual(firstChildren);
+    expect(containers).toHaveLength(1);
+    expect(created.every((t) => !t.destroyed && t.clears === 2 && t.batches === 2 && !t.drawing)).toBe(true);
+    // The redraw replaced the content: the new id is drawn somewhere, and no texture kept old draws on top.
+    expect(created.some((t) => t.draws.some((d) => d.key === FLOOR_TILE_KEYS.floor_a))).toBe(true);
+  });
+
+  it('rebuilding with a different geometry destroys the old images and textures and leaves exactly the new chunks', () => {
+    const { scene, containers, created } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(19, 25, SKIRT_TILES));
+    const old = [...created];
+    const oldImages = [...stubContainer(view).children];
+    view.rebuild(layout(3, 3, 0));
+    expect(view.container.length).toBe(1);
+    expect(containers).toHaveLength(1);
+    expect(old.every((t) => t.destroyed)).toBe(true);
+    expect(oldImages.every((img) => img.destroyed)).toBe(true);
+    expect(created.filter((t) => !t.destroyed)).toHaveLength(1);
+    expect(stubContainer(view).removeAllCalls.every((d) => d === true)).toBe(true);
+  });
+
+  it('an unknown tile id throws naming the id and leaves the previous floor in place', () => {
+    const { scene, created } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(3, 3, 0));
+    const before = [...stubContainer(view).children];
+    const draws = created.map((t) => [...t.draws]);
     const bad = layout(3, 3, 0);
     bad.tiles[1][1] = 'floor_lava';
     expect(() => view.rebuild(bad)).toThrow(/floor_lava/);
+    expect(stubContainer(view).children).toEqual(before);
+    expect(created.map((t) => t.draws)).toEqual(draws);
   });
 
-  it('destroy removes the container', () => {
-    const { scene } = stubScene();
-    const view = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+  it('destroy removes the container and frees the chunk textures', () => {
+    const { scene, created } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(19, 25, SKIRT_TILES));
     view.destroy();
-    expect((view.container as StubContainer).destroyed).toBe(true);
+    expect(stubContainer(view).destroyed).toBe(true);
+    expect(created.length).toBeGreaterThan(0);
+    expect(created.every((t) => t.destroyed)).toBe(true);
   });
 
   it('camera bounds with SKIRT_TILES cover the viewport at MIN_ZOOM', () => {
