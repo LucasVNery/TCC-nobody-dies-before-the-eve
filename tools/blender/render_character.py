@@ -11,7 +11,7 @@ Usage:
     --walk-action "Rig_Medium|Walking_A" \
     --walk-frames 6 \
     --out-key player
-    [--elevation 48.59]  # camera elevation in degrees; default matches the 64x48 game tile
+    [--elevation 30.0]  # camera elevation in degrees; default = asin(H/W) of the 2:1 diamond ground
 """
 import sys
 import os
@@ -21,7 +21,8 @@ import mathutils
 
 DIRECTIONS = 8
 FRAME_SIZE = 128  # render resolution per frame, square, cropped later if needed
-DEFAULT_ELEVATION_DEG = 48.59  # asin(0.75): elevation matching the game's 64x48 ground tile (ratio 0.75)
+# asin(H/W) for the 2:1 diamond ground projection (H/W = 0.5) = 30 degrees
+DEFAULT_ELEVATION_DEG = 30.0
 
 
 def parse_args():
