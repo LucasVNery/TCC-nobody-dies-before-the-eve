@@ -151,6 +151,47 @@ describe('agent runner', () => {
     }
   });
 
+  describe('run classes: completed, truncated, empty', () => {
+    const noEvidence = (events: readonly LoggedEvent[]) => {
+      const withEvidence = new Set(
+        events.filter((e) => e.type.startsWith('obs.') && e.type !== 'obs.boundary').map((e) => e.run_idx),
+      );
+      return [...new Set(ofType(events, 'run.start').map((e) => e.run_idx))]
+        .filter((r) => !withEvidence.has(r))
+        .sort((a, b) => a - b);
+    };
+    const check = (log: ReturnType<typeof playAgent>) => {
+      expect(ofType(log.events, 'run.start').length).toBe(log.completedRuns + log.truncatedRuns + log.emptyRuns.length);
+      expect(log.emptyRuns).toEqual(noEvidence(log.events));
+      expect(log.completedRuns).toBe(ofType(log.events, 'run.end').filter((e) => e.cause === 'death').length);
+      for (const r of log.emptyRuns) {
+        expect(log.events.some((e) => e.type === 'run.end' && e.run_idx === r && e.cause === 'death')).toBe(false);
+      }
+    };
+
+    it('multi-session: run.start count = completed + truncated + empty, and empty = no evidence', () => {
+      const logs = runExperiment(tiny({ agents: ['agressivo', 'repetitivo'], runsPerAgent: 4, runsPerSession: 2, runCapMs: 60_000 }));
+      for (const log of logs) {
+        check(log);
+        expect(log.emptyRuns.length).toBeGreaterThan(0);
+        expect([...log.emptyRuns].sort((a, b) => a - b)).toEqual(log.emptyRuns);
+      }
+    });
+
+    it('a capped agent has truncated runs and consistent empty runs', () => {
+      const log = playAgent('evasivo', tiny({ runsPerAgent: 3, runsPerSession: 2, runCapMs: 2000 }), 1);
+      expect(log.truncatedRuns).toBeGreaterThan(0);
+      check(log);
+    });
+  });
+
+  it('a subset of agents reproduces the same log per style (agentIndex = position in STYLE_IDS)', () => {
+    const cfg = tiny({ runsPerAgent: 1, runCapMs: 10_000 });
+    const all = runExperiment({ ...cfg, agents: STYLE_IDS });
+    const alone = runExperiment({ ...cfg, agents: ['variado'] });
+    expect(alone[0].events).toEqual(all[STYLE_IDS.indexOf('variado')].events);
+  });
+
   it('does not touch the game PRNG: nextSeed is called once per run, seeds derive from (seed, agent, run)', () => {
     let calls = 0;
     const cfg = tiny({ runsPerAgent: 3, runsPerSession: 2, runCapMs: 8000 });

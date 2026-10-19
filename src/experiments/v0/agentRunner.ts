@@ -32,6 +32,24 @@ export const DEFAULT_EXPERIMENT: ExperimentConfig = {
   stepMs: 1000 / 60,
 };
 
+/**
+ * One agent's play. Every logged run falls in exactly one of three classes
+ * (mutually exclusive and exhaustive), so
+ *   run.start count = completedRuns + truncatedRuns + emptyRuns.length
+ * - completed: ended by the agent's death (run.end cause 'death');
+ * - truncated: hit runCapMs (no run.end in its session; the next session, if
+ *   any, closes it as abandoned, otherwise it stays open);
+ * - empty: the run the director opens right after a death when that death
+ *   also ends the session (runsPerSession reached, or the agent's last run).
+ *   It has a run.start and no evidence (no obs.* but obs.boundary); the next
+ *   session closes it as abandoned with duration ~0 (or it stays open at the
+ *   very end). Faithful to the live game (a player who closes the tab after
+ *   dying); downstream analysis should drop these run_idx.
+ *
+ * Note: a logged `-0` (e.g. in ctx.aim) does not survive a JSON round trip
+ * (it comes back as 0). Harmless for replay, but comparisons of saved vs
+ * in-memory logs should normalise -0 first.
+ */
 export interface AgentLog {
   styleId: StyleId;
   playerId: string;
@@ -43,6 +61,8 @@ export interface AgentLog {
   completedRuns: number;
   /** Runs that hit runCapMs (left open; the next session, if any, closes them as abandoned). */
   truncatedRuns: number;
+  /** run_idx (ascending) of the empty runs: started, no evidence, not ended by death, not truncated. */
+  emptyRuns: number[];
   simulatedMs: number;
   sessions: number;
 }
@@ -130,6 +150,7 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
   let simulatedMs = 0;
   let sessions = 0;
   let live: ProfileAccumulator | null = null;
+  const truncatedIdx = new Set<number>();
 
   while (completedRuns + truncatedRuns < cfg.runsPerAgent) {
     const n = sessions;
@@ -178,6 +199,7 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
         runStartMs = recorder.nowMs;
       } else if (recorder.nowMs - runStartMs >= cfg.runCapMs) {
         truncatedRuns++;
+        truncatedIdx.add(stack.director.runIdx);
         break; // tab closed mid-run: no run.end
       }
     }
@@ -195,12 +217,29 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
     live: live ?? rebuildProfileWithStats(history, playerId).accumulator,
     completedRuns,
     truncatedRuns,
+    emptyRuns: findEmptyRuns(history, truncatedIdx),
     simulatedMs,
     sessions,
   };
 }
 
-/** Every configured agent, in order (agentIndex = position in cfg.agents). */
+/** Runs with a run.start, no evidence (obs.* other than obs.boundary), no death end, and not truncated; ascending. */
+export function findEmptyRuns(events: readonly LoggedEvent[], truncated: ReadonlySet<number>): number[] {
+  const started = new Set<number>();
+  const busy = new Set<number>();
+  for (const e of events) {
+    if (e.type === 'run.start') started.add(e.run_idx);
+    else if (e.type === 'run.end' && e.cause === 'death') busy.add(e.run_idx);
+    else if (e.type.startsWith('obs.') && e.type !== 'obs.boundary') busy.add(e.run_idx);
+  }
+  return [...started].filter((r) => !busy.has(r) && !truncated.has(r)).sort((a, b) => a - b);
+}
+
+/**
+ * Every configured agent, in cfg.agents order. agentIndex is the style's
+ * position in STYLE_IDS (not in cfg.agents), so running a subset of agents
+ * reproduces exactly the same log per style.
+ */
 export function runExperiment(cfg: ExperimentConfig): AgentLog[] {
-  return cfg.agents.map((styleId, i) => playAgent(styleId, cfg, i));
+  return cfg.agents.map((styleId) => playAgent(styleId, cfg, STYLE_IDS.indexOf(styleId)));
 }
