@@ -253,9 +253,13 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
     let reacted = 0;
     for (const id of ['evasivo', 'bloqueador', 'aleatorio'] as StyleId[]) {
       for (let seed = 1; seed <= 30; seed++) {
-        const p = makePolicy(id, seed, cfg);
+        // no charged actions: a valid charge would (by design) fire first and postpone the defence
+        const base = AGENT_STYLES[id];
+        const actionWeights = Object.fromEntries(Object.entries(base.actionWeights).filter(([k]) => !k.endsWith('.charged')));
+        const p = makePolicy(id, seed, cfg, { ...base, actionWeights });
         const body = { weapon: 'sword_shield', blocking: false };
         const threatAt = 1000;
+        let firstSeenThreat: number | null = null;
         for (let i = 0; i < 120; i++) {
           const t = 900 + i * STEP;
           const seenT = t - PERCEPTION_LAG_MS;
@@ -263,9 +267,13 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
           const seen = obsOf(seenT, { enemyState: seenState, offset: { x: 30, y: 0 } }, body);
           const now = obsOf(t, { enemyState: t >= threatAt ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }, body);
           const intent = p.decide({ now, seen, nowMs: t });
+          if (firstSeenThreat === null && seenState === 'attacking') firstSeenThreat = seenT;
           if (isDefense(intent)) {
             // first sight of the threat is at seen.tMs >= threatAt; reaction ~300 ms from there
             expect(t, `${id}#${seed}`).toBeGreaterThanOrEqual(threatAt + 299);
+            // ...and no extra delay: within one tick of seen.tMs + sampled delay (parry aims at 325 ms)
+            const planned = p.lastPlannedDefense === 'parry' ? 325 : 300;
+            expect(t, `${id}#${seed}`).toBeLessThanOrEqual(firstSeenThreat! + planned + 5 + STEP);
             reacted++;
             break;
           }
@@ -301,6 +309,156 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
     const forbidden = ['phaseElapsedMs', 'activeRuleId', 'predictThreatMs', 'threatPrediction', 'blackboard', 'accumulator', 'ProfileView', 'ProfileAccumulator'];
     for (const [f, src] of Object.entries(files)) {
       for (const word of forbidden) expect(src.includes(word), `${f} contains ${word}`).toBe(false);
+    }
+  });
+});
+
+/**
+ * Stateful stand-in for PlayerController's input rules that matter for
+ * executability: a charge blocks new tryAction (never buffered), the locked
+ * part of an action blocks it, recovery accepts it, switching needs idle and
+ * locks attacks for 150 ms, a dash lasts 180 ms. Intents are applied in the
+ * documented order: move, aim, switchTo, block, dodge, startAction, release.
+ */
+class FakeBody {
+  weapon = 'sword_shield';
+  state: 'idle' | 'charging' | 'acting' | 'blocking' | 'dodging' = 'idle';
+  private action: { id: string; locked: number; total: number; min: number; max: number; charged: boolean } | null = null;
+  private elapsed = 0;
+  private held = 0;
+  private attackLock = 0;
+  private move = { x: 0, y: 0 };
+  dropped: string[] = [];
+  executed: string[] = [];
+  chargedStarts = 0;
+
+  get blocking(): boolean {
+    return this.state === 'blocking';
+  }
+  private get inRecovery(): boolean {
+    return this.state === 'acting' && this.action !== null && this.elapsed >= this.action.locked;
+  }
+
+  apply(i: AgentIntent): void {
+    this.move = i.move;
+    if (i.switchTo && this.state === 'idle' && i.switchTo !== this.weapon) {
+      this.weapon = i.switchTo;
+      this.attackLock = 150;
+    }
+    if (i.block === 'start' && this.state === 'idle') this.state = 'blocking';
+    if (i.block === 'stop' && this.state === 'blocking') this.state = 'idle';
+    if (i.dodge && (this.state !== 'acting' || this.inRecovery)) {
+      this.state = 'dodging';
+      this.action = null;
+      this.elapsed = 0;
+    }
+    if (i.startAction) {
+      const a = ACTION_REGISTRY.get(i.startAction)!;
+      const charged = a.actionType === 'charged';
+      if (charged) this.chargedStarts++;
+      const can = a.weaponId === this.weapon && (this.inRecovery || (this.state === 'idle' && this.attackLock <= 0));
+      if (!can) this.dropped.push(i.startAction);
+      else {
+        this.action = {
+          id: a.id,
+          locked: charged ? a.timing.activeMs : a.timing.startupMs + a.timing.activeMs,
+          total: charged ? a.timing.activeMs + a.timing.recoveryMs : a.timing.startupMs + a.timing.activeMs + a.timing.recoveryMs,
+          min: a.charge?.minHoldMs ?? 0,
+          max: a.charge?.maxHoldMs ?? 0,
+          charged,
+        };
+        this.elapsed = 0;
+        this.held = 0;
+        this.state = charged ? 'charging' : 'acting';
+        if (!charged) this.executed.push(a.id);
+      }
+    }
+    if (i.release && this.state === 'charging') {
+      if (this.held >= this.action!.min) this.fire();
+      else {
+        this.state = 'idle';
+        this.action = null;
+      }
+    }
+  }
+
+  private fire(): void {
+    this.state = 'acting';
+    this.elapsed = 0;
+    this.executed.push(this.action!.id);
+  }
+
+  step(dt: number): void {
+    this.attackLock = Math.max(0, this.attackLock - dt);
+    if (this.inRecovery && (this.move.x !== 0 || this.move.y !== 0)) {
+      this.state = 'idle';
+      this.action = null;
+    }
+    if (this.state === 'charging') {
+      this.held = Math.min(this.held + dt, this.action!.max);
+      if (this.held >= this.action!.max) this.fire();
+      return;
+    }
+    if (this.state === 'acting') {
+      this.elapsed += dt;
+      if (this.elapsed >= this.action!.total) {
+        this.state = 'idle';
+        this.action = null;
+      }
+      return;
+    }
+    if (this.state === 'dodging') {
+      this.elapsed += dt;
+      if (this.elapsed >= 180) this.state = 'idle';
+    }
+  }
+}
+
+function driveBody(policy: AgentPolicy, ms: number, world: (t: number) => World): { body: FakeBody; intents: AgentIntent[] } {
+  const body = new FakeBody();
+  const intents: AgentIntent[] = [];
+  for (let i = 0; i < Math.round(ms / STEP); i++) {
+    const t = i * STEP;
+    const b = { weapon: body.weapon, blocking: body.blocking };
+    const seenT = t - PERCEPTION_LAG_MS;
+    const seen = seenT >= 0 ? obsOf(seenT, world(seenT), b) : null;
+    const intent = policy.decide({ now: obsOf(t, world(t), b), seen, nowMs: t });
+    intents.push(intent);
+    body.apply(intent);
+    body.step(STEP);
+  }
+  return { body, intents };
+}
+
+describe('AgentPolicy action lifecycle (fix round 1)', () => {
+  it('no intent ever carries both startAction and release, for every style', () => {
+    for (const id of STYLE_IDS) {
+      for (const world of [cycleWorld(30), still('idle', 30), still('chasing', 180)]) {
+        const { intents } = driveBody(makePolicy(id, 6, DEFAULT_HUMANIZER), 60_000, world);
+        expect(intents.length).toBeGreaterThan(3000);
+        expect(intents.some((i) => i.startAction !== undefined && i.release === true), id).toBe(false);
+      }
+    }
+  });
+
+  it('every start the policy emits is executable by a body where charging blocks tryAction (5 min)', () => {
+    for (const id of ['agressivo', 'aleatorio'] as StyleId[]) {
+      for (const world of [still('idle', 30), cycleWorld(30)]) {
+        const { body } = driveBody(makePolicy(id, 9), 300_000, world);
+        expect(body.executed.length, id).toBeGreaterThan(200);
+        expect(body.dropped, id).toEqual([]);
+      }
+    }
+  });
+
+  it('aleatorio executes each of the 7 actions with roughly uniform frequency', () => {
+    const { body } = driveBody(makePolicy('aleatorio', 13), 20 * 60_000, still('idle', 30));
+    const n = body.executed.length;
+    expect(n).toBeGreaterThan(1000);
+    for (const a of ALL_ACTIONS) {
+      const f = body.executed.filter((x) => x === a).length / n;
+      expect(f, a).toBeGreaterThanOrEqual(0.1);
+      expect(f, a).toBeLessThanOrEqual(0.18);
     }
   });
 });

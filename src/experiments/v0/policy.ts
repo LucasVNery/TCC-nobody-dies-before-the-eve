@@ -1,6 +1,6 @@
 import type { EnemyState, Vec2 } from '../../combat/types';
-import { ACTION_REGISTRY, type ActionDef } from '../../combat/actionRegistry';
-import { PARRY_WINDOW_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
+import { ACTION_REGISTRY, lockedMs, type ActionDef } from '../../combat/actionRegistry';
+import { DODGE, PARRY_WINDOW_MS, STAGGER_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { MIN_REACTION_MS, type Humanizer } from './humanizer';
 import type { Observation } from './perception';
@@ -11,12 +11,20 @@ import type { AgentStyle, DefenseWeights } from './styles';
  * Reactions are timed from the observation's own tMs, so with a lag no larger
  * than the shortest possible reaction the total delay from the world event to
  * the response is exactly the humanizer's sampled reaction.
+ *
+ * Two latencies, on purpose: continuous decisions (movement, distance/reach
+ * checks, attack gating on the seen enemy state) use the fixed
+ * PERCEPTION_LAG_MS view of the world, while discrete event reactions (a new
+ * telegraph -> defence, a new recovery -> opening) fire after the humanizer's
+ * sampled reaction (~250 ms) counted from the event's observation time.
  */
 export const PERCEPTION_LAG_MS = MIN_REACTION_MS;
 
 /**
  * What a player learns by playing (not read from the enemy's code): the swing
- * lands about this long after the telegraph becomes visible.
+ * lands about this long after the telegraph becomes visible. It is a copy of
+ * the Assaltante's TELEGRAPH_MS (assaltanteController.ts, private there):
+ * if combat balance changes that value, update this one too (drift risk).
  */
 const SEEN_TELEGRAPH_MS = 400;
 /** Parry plans aim the press at the middle of the parry window before the hit. */
@@ -31,6 +39,8 @@ const REACH_SLACK_PX = 10;
 const SAFE_DISTANCE_PX = 120;
 /** A plan not executed for this long is redrawn (weapon included). */
 const PLAN_STALE_MS = 4000;
+/** Extra wait after a seen stagger (two 60 Hz steps). */
+const STAGGER_MARGIN_MS = 34;
 /** Retreat stops pushing into a wall closer than this. */
 const WALL_MARGIN_PX = 60;
 
@@ -96,6 +106,11 @@ export class AgentPolicy {
   private plan: Plan | null = null;
   private lastAttackAt = -Infinity;
   private chargeReleaseAt: number | null = null;
+  private chargeAction: ActionDef | null = null;
+  /** Own body is inside an action's non-cancelable part until then (own timer: lockedMs from the registry). */
+  private lockedUntil = -Infinity;
+  private lastHp: number | null = null;
+  private lastPoise: number | null = null;
   private pending: { kind: Exclude<DefenseKind, 'none'>; at: number } | null = null;
   private wantBlock = false;
   private blockSince = 0;
@@ -123,11 +138,9 @@ export class AgentPolicy {
       if (this.lastEquipped !== null) this.weaponReadyAt = nowMs + SWITCH_RECOVERY_MS;
       this.lastEquipped = now.equippedWeaponId;
     }
+    this.readOwnBody(now, nowMs);
     const intent: AgentIntent = { move: { x: 0, y: 0 }, aim: this.aim };
-    if (this.chargeReleaseAt !== null && nowMs >= this.chargeReleaseAt) {
-      intent.release = true;
-      this.chargeReleaseAt = null;
-    }
+    if (this.chargeReleaseAt !== null && nowMs >= this.chargeReleaseAt) this.releaseCharge(intent, nowMs);
 
     if (!seen || seen.enemyDead) {
       this.prevSeenState = null;
@@ -154,17 +167,22 @@ export class AgentPolicy {
     intent.aim = this.aim;
 
     let dodgeNow = false;
+    if (this.pending && nowMs >= this.pending.at && this.chargeAction?.charge && nowMs - this.lastAttackAt >= this.chargeAction.charge.minHoldMs) {
+      // a defence falls due mid-charge with the charge already valid: fire it, defend right after
+      this.releaseCharge(intent, nowMs);
+      this.pending.at = this.lockedUntil;
+    }
     if (this.pending && nowMs >= this.pending.at) {
       if (this.pending.kind === 'dodge') {
         dodgeNow = true;
         intent.dodge = true;
         this.chargeReleaseAt = null; // the dash cancels a charge
+        this.chargeAction = null;
+        this.lockedUntil = nowMs + DODGE.durationMs; // no attack can start mid-dash
         this.wantBlock = false;
       } else {
-        if (this.chargeReleaseAt !== null) {
-          intent.release = true; // let go of the charge to get the guard up sooner
-          this.chargeReleaseAt = null;
-        }
+        // let go of the charge to get the guard up sooner
+        if (this.chargeReleaseAt !== null) this.releaseCharge(intent, nowMs);
         if (!this.wantBlock) this.blockSince = nowMs;
         this.wantBlock = true;
       }
@@ -176,7 +194,16 @@ export class AgentPolicy {
 
     // offence
     const plan = this.currentPlan(nowMs);
-    const busy = this.chargeReleaseAt !== null || this.wantBlock || now.isBlocking || this.pending !== null || dodgeNow;
+    // A release tick, and the released action's locked phase after it, are busy: a start
+    // there would be dropped by the engine (charging/locked) or would cancel the old charge.
+    const busy =
+      intent.release === true ||
+      this.chargeReleaseAt !== null ||
+      nowMs < this.lockedUntil ||
+      this.wantBlock ||
+      now.isBlocking ||
+      this.pending !== null ||
+      dodgeNow;
     const reachOk = dist <= plan.action.reach + REACH_SLACK_PX;
     const opening =
       !this.style.waitForOpening ||
@@ -200,6 +227,37 @@ export class AgentPolicy {
     return intent;
   }
 
+  /**
+   * Own HP/poise bars are visible to a player: an HP drop (or poise broken)
+   * means the body was staggered, which also ends any charge; an HP rise means
+   * a fresh run (full reset), so every own-body timer is cleared.
+   */
+  private readOwnBody(now: Observation, nowMs: number): void {
+    if (this.lastHp !== null && this.lastPoise !== null) {
+      if (now.playerHp > this.lastHp) {
+        this.chargeReleaseAt = null;
+        this.chargeAction = null;
+        this.lockedUntil = -Infinity;
+        this.wantBlock = false;
+        this.pending = null;
+      } else if (now.playerHp < this.lastHp || (now.playerPoise <= 0 && this.lastPoise > 0)) {
+        this.chargeReleaseAt = null;
+        this.chargeAction = null;
+        // the hit lands after this tick's body step, so the stagger ends one step later than STAGGER_MS
+        this.lockedUntil = Math.max(this.lockedUntil, nowMs + STAGGER_MS + STAGGER_MARGIN_MS);
+      }
+    }
+    this.lastHp = now.playerHp;
+    this.lastPoise = now.playerPoise;
+  }
+
+  private releaseCharge(intent: AgentIntent, nowMs: number): void {
+    intent.release = true;
+    if (this.chargeAction) this.lockedUntil = nowMs + lockedMs(this.chargeAction);
+    this.chargeReleaseAt = null;
+    this.chargeAction = null;
+  }
+
   private planDefense(threatSeenAtMs: number): void {
     const kind = pick(this.style.defenseWeights, DEFENSE_KINDS, this.rng) ?? 'none';
     this._lastPlannedDefense = kind;
@@ -219,7 +277,12 @@ export class AgentPolicy {
     intent.aim = this.humanizer.noisyAim(this.aim);
     this.lastAttackAt = nowMs;
     const charge = plan.action.charge;
-    if (charge) this.chargeReleaseAt = nowMs + charge.minHoldMs + this.rng() * (charge.maxHoldMs - charge.minHoldMs);
+    if (charge) {
+      this.chargeReleaseAt = nowMs + charge.minHoldMs + this.rng() * (charge.maxHoldMs - charge.minHoldMs);
+      this.chargeAction = plan.action;
+    } else {
+      this.lockedUntil = nowMs + lockedMs(plan.action);
+    }
     this.plan = this.makePlan(nowMs, false);
   }
 

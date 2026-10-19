@@ -19,7 +19,10 @@ export interface DefenseWeights {
 
 /**
  * A parameterized play style (spec §4.1). Weights are relative (they need not
- * sum to 1); a missing key counts as 0.
+ * sum to 1); a missing key counts as 0. Distance/cadence gating acts on the
+ * world seen with the fixed PERCEPTION_LAG_MS (80 ms); defenceWeights and
+ * waitForOpening act on events after the humanizer's sampled reaction (~250 ms).
+ * See policy.ts.
  */
 export interface AgentStyle {
   id: StyleId;
