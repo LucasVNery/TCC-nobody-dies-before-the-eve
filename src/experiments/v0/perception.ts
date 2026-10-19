@@ -18,11 +18,14 @@ export interface Observation {
 /** Reads only public, player-visible members; builds a fresh object with exactly the Observation keys. */
 export function observe(encounter: Encounter<ProfileSink>, tMs: number): Observation {
   const { player, assaltante } = encounter;
+  const ep = assaltante.position;
+  const pp = player.position;
   return {
     tMs,
     enemyState: assaltante.state,
-    enemyPos: assaltante.position,
-    playerPos: player.position,
+    // copies, not references: a live reference would let the agent see the present through the reaction delay
+    enemyPos: { x: ep.x, y: ep.y },
+    playerPos: { x: pp.x, y: pp.y },
     playerHp: player.hp,
     playerPoise: player.poise,
     isBlocking: player.isBlocking,
@@ -31,13 +34,19 @@ export function observe(encounter: Encounter<ProfileSink>, tMs: number): Observa
   };
 }
 
-/** Time-ordered history of observations, queried with a reaction delay. */
+/**
+ * Time-ordered history of observations, queried with a reaction delay.
+ * Pushes must be monotone in tMs (equal tMs: the last push wins); a
+ * decreasing tMs throws.
+ */
 export class PerceptionBuffer {
   private items: Observation[] = [];
 
   constructor(private readonly capacityMs = 2000) {}
 
   push(o: Observation): void {
+    const last = this.items[this.items.length - 1];
+    if (last && o.tMs < last.tMs) throw new Error(`PerceptionBuffer: non-monotone tMs ${o.tMs} < ${last.tMs}`);
     this.items.push(o);
     const cutoff = o.tMs - this.capacityMs;
     let drop = 0;

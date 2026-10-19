@@ -53,6 +53,7 @@ export class Humanizer {
     return Math.max(MIN_REACTION_MS, Math.exp(this.mu + this.sigma * this.normal()));
   }
 
+  /** lapseProb 1 always lapses because it relies on rng() < 1 (true for the project PRNG). */
   lapses(): boolean {
     return this.rng() < this.cfg.lapseProb;
   }
