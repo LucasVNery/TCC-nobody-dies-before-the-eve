@@ -25,7 +25,22 @@ class StubTexture implements FloorChunkTexture {
     return this;
   }
   endDraw(): this { this.drawing = false; return this; }
-  destroy(): void { this.destroyed = true; }
+  destroy(): void { this.destroys++; this.destroyed = true; }
+  destroys = 0;
+}
+
+/** Minimal emitter with Phaser's once/on/off semantics for the events FloorView uses. */
+class StubEmitter {
+  private listeners: { event: string; fn: () => void; once: boolean }[] = [];
+  once(event: string, fn: () => void): this { this.listeners.push({ event, fn, once: true }); return this; }
+  on(event: string, fn: () => void): this { this.listeners.push({ event, fn, once: false }); return this; }
+  off(event: string, fn: () => void): this { this.listeners = this.listeners.filter((l) => !(l.event === event && l.fn === fn)); return this; }
+  emit(event: string): void {
+    const hit = this.listeners.filter((l) => l.event === event);
+    this.listeners = this.listeners.filter((l) => !(l.event === event && l.once));
+    for (const l of hit) l.fn();
+  }
+  count(event: string): number { return this.listeners.filter((l) => l.event === event).length; }
 }
 
 class StubImage implements FloorChunkImage {
@@ -60,7 +75,11 @@ function stubScene(missing: string[] = []) {
   const containers: StubContainer[] = [];
   const textures = new Map<string, StubTexture>();
   const created: StubTexture[] = [];
+  const events = new StubEmitter();
+  const renderer = new StubEmitter();
   const scene: FloorScene<StubImage, StubTexture> = {
+    events,
+    renderer,
     add: {
       container: () => { const c = new StubContainer(); containers.push(c); return c; },
       image: (x, y, key) => new StubImage(x, y, key),
@@ -76,7 +95,7 @@ function stubScene(missing: string[] = []) {
       },
     },
   };
-  return { scene, containers, created, textureOf: (key: string) => textures.get(key) as StubTexture };
+  return { scene, containers, created, events, renderer, textureOf: (key: string) => textures.get(key) as StubTexture };
 }
 
 function layout(rows: number, cols: number, skirt: number): FloorLayout {
@@ -187,6 +206,64 @@ describe('FloorView', () => {
     expect(stubContainer(view).destroyed).toBe(true);
     expect(created.length).toBeGreaterThan(0);
     expect(created.every((t) => t.destroyed)).toBe(true);
+  });
+
+  it('scene shutdown destroys every chunk texture exactly once, plus the images and the container', () => {
+    const { scene, created, events, renderer } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(19, 25, SKIRT_TILES));
+    view.rebuild(layout(3, 3, 0)); // a geometry change in between: the first set is already freed
+    const images = [...stubContainer(view).children];
+    expect(renderer.count('restorewebgl')).toBe(1);
+    events.emit('shutdown');
+    expect(created.length).toBeGreaterThan(1);
+    expect(created.map((t) => t.destroys)).toEqual(created.map(() => 1));
+    expect(images.every((img) => img.destroyed)).toBe(true);
+    expect(stubContainer(view).destroyed).toBe(true);
+    expect(renderer.count('restorewebgl')).toBe(0);
+    // A later scene destroy (game teardown) is harmless.
+    events.emit('destroy');
+    expect(created.map((t) => t.destroys)).toEqual(created.map(() => 1));
+  });
+
+  it('destroy twice is safe and frees each texture once', () => {
+    const { scene, created } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(19, 25, SKIRT_TILES));
+    view.destroy();
+    expect(() => view.destroy()).not.toThrow();
+    expect(created.map((t) => t.destroys)).toEqual(created.map(() => 1));
+  });
+
+  it('rebuild after destroy throws a clear error and creates nothing', () => {
+    const { scene, created, events } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    events.emit('shutdown');
+    expect(() => view.rebuild(layout(3, 3, 0))).toThrow(/after destroy/);
+    expect(created).toHaveLength(0);
+  });
+
+  it('a WebGL context restore redraws the last layout into the same textures', () => {
+    const { scene, created, renderer } = stubScene();
+    const view: View = new FloorView(scene, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    renderer.emit('restorewebgl'); // nothing built yet: no-op
+    expect(created).toHaveLength(0);
+    const l = layout(19, 25, SKIRT_TILES);
+    l.tiles[4][4] = 'floor_worn';
+    view.rebuild(l);
+    const before = created.map((t) => [...t.draws]);
+    for (const t of created) t.draws = []; // what a context loss leaves: empty render targets
+    renderer.emit('restorewebgl');
+    expect(created.map((t) => t.draws)).toEqual(before);
+    expect(created.every((t) => t.batches === 2 && !t.destroyed)).toBe(true);
+  });
+
+  it('works without a renderer slice (Canvas or tests): no restore hook', () => {
+    const { scene } = stubScene();
+    const noRenderer: FloorScene<StubImage, StubTexture> = { ...scene, renderer: undefined };
+    const view: View = new FloorView(noRenderer, ORIGIN, GROUND_PROJECTION, FLOOR_TILE_IDS);
+    view.rebuild(layout(3, 3, 0));
+    expect(() => view.destroy()).not.toThrow();
   });
 
   it('camera bounds with SKIRT_TILES cover the viewport at MIN_ZOOM', () => {

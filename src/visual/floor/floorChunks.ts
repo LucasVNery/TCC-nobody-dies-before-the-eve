@@ -8,8 +8,11 @@ import { toScreen, type GroundProjection } from '../groundProjection';
 
 /**
  * Max chunk side in native (texture) pixels, apron included. 1024 keeps the game floor at
- * ~15 textures (~51 MB; at most ~12 on screen at the minimum zoom, one batch) and a room
- * rebuild cheap: each render target costs a fixed setup, so fewer, larger chunks rebuild faster.
+ * 15 textures (3 of the 6x3 grid have no tiles and are skipped; at most ~12 on screen at the
+ * minimum zoom, one batch) and a room rebuild cheap: each render target costs a fixed
+ * setup, so fewer, larger chunks rebuild faster. GPU memory: ~51 MB of RGBA colour, and
+ * Phaser's DynamicTexture always attaches a DEPTH_STENCIL renderbuffer of the same size,
+ * so ~100 MB in all (512 would be 43 chunks, ~41 + ~41 MB; 256: 148 chunks, ~37 + ~37 MB).
  */
 export const FLOOR_CHUNK_SIZE = 1024;
 
