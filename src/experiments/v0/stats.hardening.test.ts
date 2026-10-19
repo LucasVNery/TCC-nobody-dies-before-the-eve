@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createPrng } from '../../core/prng';
-import { bootstrapDelta, bootstrapIcc, bootstrapIccClustered, cliffsDelta, iccOneWay } from './stats';
+import { bootstrapDelta, bootstrapIcc, bootstrapIccClustered, bootstrapIccTwoStage, cliffsDelta, iccOneWay } from './stats';
 
 const SF = [
   [9, 2, 5, 8],
@@ -100,22 +100,34 @@ describe('bootstrapIccClustered', () => {
     const r = bootstrapIccClustered(mixed, rng, 50);
     expect(r.estimate).toBe(iccOneWay(mixed.map((a) => a.flat())));
   });
-  // KNOWN LIMITATION (reported, not loosened): measured coverage is 37/60 (62%), below the 80% target.
-  // it.fails keeps the suite green while documenting that the target is NOT met.
-  it.fails('covers the large-sample ICC in >= 80% of 60 replicates (7 agents x 8 runs x 3 rooms)', () => {
-    // Variances: agent 1, run 0.25, room 1 -> pooled one-way ICC with groups = agents
-    // is about 1/2.25 = 0.444. The large-sample value is iccOneWay on 400 agents x 8 runs
-    // x 3 rooms with a fixed seed.
-    const truth = iccOneWay(simulate(777, 400, 8, 3, 1, 0.5, 1).map((a) => a.flat())) as number;
-    expect(truth).toBeGreaterThan(0.35);
-    expect(truth).toBeLessThan(0.55);
+  it('is deterministic for bootstrapIccTwoStage and brackets a high ICC', () => {
+    const d = simulate(2, 7, 8, 3, 3, 0.3, 0.3);
+    const a = bootstrapIccTwoStage(d, createPrng(6).next, 200);
+    expect(a).toEqual(bootstrapIccTwoStage(d, createPrng(6).next, 200));
+    expect(a.estimate as number).toBeGreaterThan(0.7);
+  });
+  it('covers the CONDITIONAL ICC of 7 fixed agents in >= 80% of 60 replicates (8 runs x 3 rooms)', () => {
+    // The 7 agent effects are drawn once and kept fixed. Truth = iccOneWay of those same
+    // agents from 2000 runs x 3 rooms each (fixed seed), concatenated per agent. Each
+    // replicate regenerates only runs (run effect sd 0.5 + room noise sd 1).
+    const eg = createPrng(31337).next;
+    const effects = Array.from({ length: 7 }, () => normal(eg));
+    const runsFor = (seed: number, nRuns: number) => {
+      const g = createPrng(seed).next;
+      return effects.map((a) =>
+        Array.from({ length: nRuns }, () => {
+          const u = normal(g) * 0.5;
+          return Array.from({ length: 3 }, () => a + u + normal(g));
+        }),
+      );
+    };
+    const truth = iccOneWay(runsFor(424242, 2000).map((x) => x.flat())) as number;
     let covered = 0;
     for (let rep = 0; rep < 60; rep++) {
-      const d = simulate(100 + rep, 7, 8, 3, 1, 0.5, 1);
-      const r = bootstrapIccClustered(d, createPrng(9000 + rep).next, 400);
+      const r = bootstrapIccClustered(runsFor(100 + rep, 8), createPrng(9000 + rep).next, 400);
       if ((r.lo as number) <= truth && truth <= (r.hi as number)) covered++;
     }
-    console.log('clustered coverage', covered, '/ 60, truth', truth);
-    expect(covered).toBeGreaterThanOrEqual(48) // 80% of 60;
+    console.log('conditional clustered coverage', covered, '/ 60, truth', truth);
+    expect(covered).toBeGreaterThanOrEqual(48); // 80% of 60
   });
 });

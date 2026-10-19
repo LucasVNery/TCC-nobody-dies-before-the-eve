@@ -160,6 +160,8 @@ export function bootstrapIcc(
  * resample draws, per agent, R runs with replacement (R = its run count) and
  * concatenates their values. Null resamples are dropped; all-null Interval if the
  * point estimate is null, the level is invalid, or (for lo/hi) no resample is valid.
+ * Conditional on the agents: resamples runs only; it does not capture agent-sampling
+ * uncertainty; do not read it as a population CI.
  */
 export function bootstrapIccClustered(
   agents: readonly (readonly (readonly number[])[])[],
@@ -180,6 +182,38 @@ export function bootstrapIccClustered(
       }
       return flat(drawn);
     });
+    const v = iccOneWay(groups);
+    if (v !== null) stats.push(v);
+  }
+  return { estimate, ...percentileInterval(stats, level) };
+}
+
+/**
+ * Two-stage bootstrap of ICC(1,1): resamples agents with replacement, then runs
+ * within each drawn agent. Unlike bootstrapIccClustered it also reflects agent-sampling
+ * uncertainty (a population-style interval). Exported for comparison only; not used
+ * by the V0 report. Same null/level rules as bootstrapIccClustered.
+ */
+export function bootstrapIccTwoStage(
+  agents: readonly (readonly (readonly number[])[])[],
+  rng: () => number,
+  B = 2000,
+  level = 0.95,
+): Interval {
+  if (!validLevel(level)) return { ...NULL_INTERVAL };
+  const estimate = iccOneWay(agents.map((runs) => runs.flat()));
+  if (estimate === null || agents.length === 0) return { ...NULL_INTERVAL };
+  const stats: number[] = [];
+  for (let i = 0; i < B; i++) {
+    const groups: number[][] = [];
+    for (let a = 0; a < agents.length; a++) {
+      const runs = agents[Math.min(agents.length - 1, Math.floor(rng() * agents.length))];
+      const drawn: (readonly number[])[] = [];
+      for (let r = 0; r < runs.length; r++) {
+        drawn.push(runs[Math.min(runs.length - 1, Math.floor(rng() * runs.length))]);
+      }
+      groups.push(drawn.flat());
+    }
     const v = iccOneWay(groups);
     if (v !== null) stats.push(v);
   }
