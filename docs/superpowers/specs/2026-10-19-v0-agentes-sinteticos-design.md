@@ -68,8 +68,10 @@ Unidade de comparação: o valor de cada dimensão calculado **só com as observ
 
 | Id | Dimensão | Hipótese (direção esperada) |
 |---|---|---|
-| H1 | repertório de armas | `variado` > `agressivo`; `repetitivo` indefinido em ≥ 95% das runs |
-| H2 | repertório de ações | `variado` > `bloqueador`; `repetitivo` indefinido em ≥ 95% das runs |
+| H1 | repertório de armas | `variado` > `agressivo` |
+| H1u | repertório de armas | `repetitivo` indefinido em ≥ 95% das runs |
+| H2 | repertório de ações | `variado` > `bloqueador` |
+| H2u | repertório de ações | `repetitivo` indefinido em ≥ 95% das runs |
 | H3 | aproveitamento de punição | `paciente` > `evasivo` |
 | H4 | aproveitamento de punição | `bloqueador` > `evasivo` |
 | H5 | repertório defensivo | `aleatorio` > `agressivo` (ou `agressivo` indefinido) |
