@@ -168,7 +168,11 @@ export class AgentPolicy {
 
     let dodgeNow = false;
     if (this.pending && nowMs >= this.pending.at && this.chargeAction?.charge && nowMs - this.lastAttackAt >= this.chargeAction.charge.minHoldMs) {
-      // a defence falls due mid-charge with the charge already valid: fire it, defend right after
+      // a defence falls due mid-charge with the charge already valid: fire it, defend right after.
+      // When a defence falls due while a valid charge (held >= minHoldMs) is in progress the charge
+      // fires first and the defence runs after its locked phase, up to ~11 ticks (~183 ms) late for
+      // heavy_weapon charges and ~9 ticks (~150 ms) for sword_shield — accepted as commitment to the
+      // attack; the reaction-delay guarantee holds only when no valid charge is in progress.
       this.releaseCharge(intent, nowMs);
       this.pending.at = this.lockedUntil;
     }
