@@ -10,6 +10,7 @@ import { DEFAULT_EXPERIMENT, gameSeed, playAgent, runExperiment, type Experiment
 
 const tiny = (over: Partial<ExperimentConfig> = {}): ExperimentConfig => ({
   ...DEFAULT_EXPERIMENT,
+  seed: 4242,
   runsPerAgent: 2,
   runsPerSession: 2,
   runCapMs: 20_000,

@@ -7,7 +7,7 @@ import { checkAgentLog, type PipelineCheck } from './pipelineChecks';
 // One small real log, shared by every test (2 sessions of 1 run: exercises the rebuild across sessions).
 const LOG: AgentLog = playAgent(
   'agressivo',
-  { ...DEFAULT_EXPERIMENT, runsPerAgent: 2, runsPerSession: 1, runCapMs: 15_000 },
+  { ...DEFAULT_EXPERIMENT, seed: 4242, runsPerAgent: 2, runsPerSession: 1, runCapMs: 15_000 },
   0,
 );
 

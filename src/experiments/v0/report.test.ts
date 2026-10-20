@@ -116,7 +116,7 @@ function smallInput(over: Partial<ReportInput> = {}): ReportInput {
   roomValues.agressivo = [wv(0, 0, 'punish', 0.25), wv(0, 1, 'punish', 1 / 3)];
   roomValues.evasivo = [wv(0, 0, 'punish', 0.75)];
   return {
-    config: { ...DEFAULT_EXPERIMENT, agents: ['agressivo', 'evasivo'], runsPerAgent: 2, runsPerSession: 1 },
+    config: { ...DEFAULT_EXPERIMENT, seed: 4242, agents: ['agressivo', 'evasivo'], runsPerAgent: 2, runsPerSession: 1 },
     gameVersion: 'v-test',
     generatedAtIso: '2026-10-19T12:00:00.000Z',
     elapsedMs: 4321,

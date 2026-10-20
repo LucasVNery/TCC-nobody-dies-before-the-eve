@@ -3,7 +3,7 @@
 ## 1. Configuração
 
 - Versão do jogo: v-test
-- Seed do experimento: 20261019 (todas as seeds de jogo, política e humanizador derivam dela, por agente e por run)
+- Seed do experimento: 4242 (todas as seeds de jogo, política e humanizador derivam dela, por agente e por run)
 - Humanizador: reação 250 ms (desvio 60 ms), probabilidade de lapso 0,05, ruído de mira 0,05 rad
 - Passo da simulação: 16,667 ms
 - Teto de tempo simulado por run: 300000 ms
