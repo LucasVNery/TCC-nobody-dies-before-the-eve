@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { createPrng } from '../../core/prng';
 import type { SkillId } from '../../profile/types';
 import { HYPOTHESES } from './hypotheses';
-import { dropEmptyRuns, evaluateHypotheses, iccBySkill, type HypothesisResult } from './evaluate';
+import { DEFAULT_EXPERIMENT, playAgent } from './agentRunner';
+import { dropEmptyRuns, evaluateHypotheses, iccBySkill, prepareValues, type HypothesisResult } from './evaluate';
 import { STYLE_IDS, type StyleId } from './styles';
-import { REPORT_SKILLS, type WindowValue } from './windowValues';
+import { REPORT_SKILLS, runWindowValues, type WindowValue } from './windowValues';
 
 describe('HYPOTHESES', () => {
   it('HYPOTHESES are pre-registered', () => {
@@ -144,21 +145,71 @@ describe('evaluateHypotheses', () => {
   it('H1u: 29 of 30 null confirms; 20 of 30 refutes; < 10 runs is indefinida', () => {
     const conf = result(evaluateHypotheses(byStyle({ repetitivo: runs('weapon_repertoire', 30, 0, 0, 29) }), rngOf(), 10), 'H1u');
     expect(conf.verdict).toBe('confirmada');
-    expect(conf.undefinedRateLower).toBeCloseTo(29 / 30, 9);
-    expect(conf.nLower).toBe(1);
-    expect([conf.delta, conf.lo, conf.hi]).toEqual([null, null, null]);
+    expect(conf.style).toBe('repetitivo');
+    expect(conf.undefinedRate).toBeCloseTo(29 / 30, 9);
+    expect(conf.nRuns).toBe(30);
+    expect([conf.delta, conf.lo, conf.hi, conf.nHigher, conf.nLower, conf.undefinedRateLower]).toEqual([
+      null,
+      null,
+      null,
+      0,
+      0,
+      null,
+    ]);
 
     const ref = result(evaluateHypotheses(byStyle({ repetitivo: runs('weapon_repertoire', 30, 0, 0, 20) }), rngOf(), 10), 'H1u');
     expect(ref.verdict).toBe('refutada');
-    expect(ref.undefinedRateLower).toBeCloseTo(20 / 30, 9);
+    expect(ref.undefinedRate).toBeCloseTo(20 / 30, 9);
 
     const ind = result(evaluateHypotheses(byStyle({ repetitivo: runs('weapon_repertoire', 9, 0, 0, 9) }), rngOf(), 10), 'H1u');
     expect(ind.verdict).toBe('indefinida');
   });
 
-  it('H1u: exactly 95% undefined confirms (integer comparison, no float drift)', () => {
+  it('H1u: 19/20 undefined (exactly 95%) confirms, 18/20 refutes (integer comparison)', () => {
     const r = result(evaluateHypotheses(byStyle({ repetitivo: runs('weapon_repertoire', 20, 0, 0, 19) }), rngOf(), 10), 'H1u');
     expect(r.verdict).toBe('confirmada');
+    const r2 = result(evaluateHypotheses(byStyle({ repetitivo: runs('weapon_repertoire', 20, 0, 0, 18) }), rngOf(), 10), 'H1u');
+    expect(r2.verdict).toBe('refutada');
+  });
+
+  it('greater results carry no undefinedRate fields', () => {
+    const h1 = result(evaluateHypotheses(byStyle({}), rngOf(), 10), 'H1');
+    expect([h1.style, h1.undefinedRate, h1.nRuns]).toEqual([undefined, null, null]);
+  });
+
+  /**
+   * lower = 0..9; each value 6.5 beats 7 and loses 3 (+4), 4.5 ties the score (0),
+   * 3 ties one lower value and beats 3, loses 6 (-3). Replicated x10 per group
+   * (delta unchanged, interval well above 0).
+   */
+  const rep = (xs: number[]) => Array.from({ length: 10 }, () => xs).flat();
+  const asRuns = (skill: SkillId, xs: number[]) => xs.map((x, i) => wv(i, skill, x));
+  const LOWER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+  it('delta exactly 0.33 confirms', () => {
+    const higher = [...Array(9).fill(6.5), 3];
+    const rs = evaluateHypotheses(
+      byStyle({ variado: asRuns('weapon_repertoire', rep(higher)), agressivo: asRuns('weapon_repertoire', rep(LOWER)) }),
+      rngOf(),
+      500,
+    );
+    const h1 = result(rs, 'H1');
+    expect(h1.delta).toBe(0.33);
+    expect(h1.lo!).toBeGreaterThan(0);
+    expect(h1.verdict).toBe('confirmada');
+  });
+
+  it('delta 0.32 refutes even with the interval above 0', () => {
+    const higher = [...Array(8).fill(6.5), 4.5, 4.5];
+    const rs = evaluateHypotheses(
+      byStyle({ variado: asRuns('weapon_repertoire', rep(higher)), agressivo: asRuns('weapon_repertoire', rep(LOWER)) }),
+      rngOf(),
+      500,
+    );
+    const h1 = result(rs, 'H1');
+    expect(h1.delta).toBe(0.32);
+    expect(h1.lo!).toBeGreaterThan(0);
+    expect(h1.verdict).toBe('refutada');
   });
 
   it('orLowerUndefined: a 100% undefined lower group confirms regardless of delta', () => {
@@ -172,6 +223,39 @@ describe('evaluateHypotheses', () => {
     expect(h12.undefinedRateLower).toBe(1);
     expect(h12.nLower).toBe(0);
     expect(h12.delta).toBeNull();
+  });
+
+  it('orLowerUndefined needs >= 10 defined values in the higher group', () => {
+    const bothNull = evaluateHypotheses(
+      byStyle({ aleatorio: runs('action_repertoire', 30, 0, 0, 30), repetitivo: runs('action_repertoire', 30, 0, 0, 30) }),
+      rngOf(),
+      50,
+    );
+    expect(result(bothNull, 'H12').verdict).toBe('indefinida');
+
+    const higherEmpty = evaluateHypotheses(byStyle({ agressivo: runs('defensive_repertoire', 30, 0, 0, 30) }), rngOf(), 50);
+    expect(result(higherEmpty, 'H5').verdict).toBe('indefinida');
+    expect(result(higherEmpty, 'H5').nHigher).toBe(0);
+
+    const higher12 = evaluateHypotheses(
+      byStyle({
+        aleatorio: runs('defensive_repertoire', 12, 0.2, 0.9),
+        agressivo: runs('defensive_repertoire', 30, 0, 0, 30),
+      }),
+      rngOf(),
+      50,
+    );
+    expect(result(higher12, 'H5').verdict).toBe('confirmada');
+    expect(result(higher12, 'H5').nHigher).toBe(12);
+  });
+
+  it('orLowerUndefined with a lower group of 5 runs, all null, is indefinida', () => {
+    const rs = evaluateHypotheses(
+      byStyle({ aleatorio: runs('action_repertoire', 30, 0.2, 0.9), repetitivo: runs('action_repertoire', 5, 0, 0, 5) }),
+      rngOf(),
+      50,
+    );
+    expect(result(rs, 'H12').verdict).toBe('indefinida');
   });
 
   it('orLowerUndefined does not apply without the flag (H6)', () => {
@@ -212,6 +296,43 @@ describe('dropEmptyRuns', () => {
     expect(dropEmptyRuns(values, [1])).toEqual([values[0], values[3]]);
     expect(dropEmptyRuns(values, [])).toEqual(values);
   });
+
+  it('feeding undropped empty-run windows changes an undefinedRate verdict', () => {
+    // 10 real runs, 9 undefined (90%: refutada) + 10 empty runs (all null) -> 19/20 = 95%: confirmada.
+    const real = runs('weapon_repertoire', 10, 0.5, 0.5, 9);
+    const empty = Array.from({ length: 10 }, (_, i) => wv(100 + i, 'weapon_repertoire', null));
+    const emptyIdx = empty.map((v) => v.runIdx);
+    const raw = result(evaluateHypotheses(byStyle({ repetitivo: [...real, ...empty] }), rngOf(), 10), 'H1u');
+    const dropped = result(
+      evaluateHypotheses(byStyle({ repetitivo: dropEmptyRuns([...real, ...empty], emptyIdx) }), rngOf(), 10),
+      'H1u',
+    );
+    expect(raw.verdict).toBe('confirmada');
+    expect(dropped.verdict).toBe('refutada');
+    expect(dropped.nRuns).toBe(10);
+  });
+});
+
+describe('prepareValues', () => {
+  // seed 4242, 3 runs, 2 per session: the deaths that end sessions leave empty runs 2 and 4.
+  const LOG = playAgent('agressivo', { ...DEFAULT_EXPERIMENT, seed: 4242, runsPerAgent: 3, runsPerSession: 2, runCapMs: 20_000 }, 0);
+
+  it('drops the empty runs and keeps the others', () => {
+    expect(LOG.emptyRuns).toEqual([2, 4]);
+    const raw = runWindowValues(LOG.events, LOG.playerId);
+    expect(new Set(raw.map((v) => v.runIdx)).has(2)).toBe(true); // the raw windows do include them
+    const { runValues, roomValues } = prepareValues([LOG]);
+    const runIdxs = new Set(runValues.agressivo.map((v) => v.runIdx));
+    const roomRunIdxs = new Set(roomValues.agressivo.map((v) => v.runIdx));
+    for (const set of [runIdxs, roomRunIdxs]) {
+      expect(set.has(2)).toBe(false);
+      expect(set.has(4)).toBe(false);
+    }
+    expect([...runIdxs].sort()).toEqual([0, 1, 3]);
+    expect(roomValues.agressivo.every((v) => v.roomIdx !== null)).toBe(true);
+    expect(runValues.agressivo.every((v) => v.roomIdx === null)).toBe(true);
+    for (const s of STYLE_IDS) if (s !== 'agressivo') expect([runValues[s], roomValues[s]]).toEqual([[], []]);
+  });
 });
 
 /** roomValues for one style: `runsN` runs x `roomsN` rooms, value from `f(run, room)`. */
@@ -227,7 +348,7 @@ describe('iccBySkill', () => {
     expect(rs.map((r) => r.skill)).toEqual(REPORT_SKILLS);
     for (const r of rs) {
       expect(r.styleId).toBeUndefined();
-      expect([r.icc, r.lo, r.hi, r.belowCriterion]).toEqual([null, null, null, null]);
+      expect([r.nAgents, r.icc, r.lo, r.hi, r.belowCriterion]).toEqual([0, null, null, null, null]);
     }
   });
 
@@ -256,7 +377,19 @@ describe('iccBySkill', () => {
       Object.fromEntries(STYLE_IDS.map((s, k) => [s, rooms('patience', 3, 2, (r, m) => (r === 0 && m === 0 ? k * 0.1 : null))])),
     );
     const p = iccBySkill(data, rngOf(), 50).find((r) => r.skill === 'patience')!;
-    expect([p.icc, p.lo, p.hi, p.belowCriterion]).toEqual([null, null, null, null]);
+    expect([p.nAgents, p.icc, p.lo, p.hi, p.belowCriterion]).toEqual([0, null, null, null, null]);
+  });
+
+  it('nAgents counts only agents with >= 2 defined measures (all-null agents are dropped)', () => {
+    const rng = createPrng(13).next;
+    const data = byStyle(
+      Object.fromEntries(
+        STYLE_IDS.map((s, k) => [s, rooms('weapon_repertoire', 4, 3, () => (s === 'repetitivo' ? null : k * 0.1 + rng() * 0.02))]),
+      ),
+    );
+    const w = iccBySkill(data, rngOf(), 50).find((r) => r.skill === 'weapon_repertoire')!;
+    expect(w.nAgents).toBe(6);
+    expect(w.icc).not.toBeNull();
   });
 
   it('ignores run windows and undefined room values; deterministic', () => {
