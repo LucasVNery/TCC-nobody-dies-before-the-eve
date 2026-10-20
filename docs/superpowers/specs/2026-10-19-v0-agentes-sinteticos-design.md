@@ -1,7 +1,7 @@
 # V0: validação do perfil com agentes sintéticos e relatório — Design
 
 **Data:** 2026-10-19
-**Status:** rascunho para revisão do autor. O autor aprovou os três pontos de partida (estilos, unidade do ICC, tamanho); o restante são padrões do Claude, marcados como **[minha escolha]**.
+**Status:** implementado em 2026-10-19; execução completa pendente. Origem: rascunho revisado pelo autor. O autor aprovou os três pontos de partida (estilos, unidade do ICC, tamanho); o restante são padrões do Claude, marcados como **[minha escolha]**.
 **Contexto:** `Contexto_pesquisa/documento-tecnico-mestre.md` §4.3 (perfil), §8.4 (plano de validação V0 a V3), §8.5 (dados-piloto e congelamento). Decisão D-0: o sistema de perfil é o produto; o chefe preditivo é só validação.
 
 ## 1. Intenção

@@ -5,3 +5,6 @@ dist/
 # sprite sheets under public/assets/characters/ are versioned.
 tools/blender/source/
 tools/blender/renders/
+
+# V0 experiment outputs (regenerable)
+experiments/v0/out/

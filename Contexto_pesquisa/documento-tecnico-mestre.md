@@ -1064,7 +1064,7 @@ A D-0 muda o desenho experimental. O desenho antigo (Estudo 1 com ICC por sessã
 
 | # | Verificação | Pergunta | Dados | Métrica | Pré-requisito | Status |
 |---|---|---|---|---|---|---|
-| **V0** | **Separação de estilos por agentes sintéticos** (validade discriminante) | O perfil distingue estilos de jogo conhecidos? | Agentes scriptados com estilos distintos (por exemplo agressivo, evasivo, paciente, repetitivo), muitas runs | Os perfis divergem na direção esperada por dimensão | Agentes sintéticos (nova camada, ⬜) | ⬜ |
+| **V0** | **Separação de estilos por agentes sintéticos** (validade discriminante) | O perfil distingue estilos de jogo conhecidos? | Agentes scriptados com estilos distintos (por exemplo agressivo, evasivo, paciente, repetitivo), muitas runs | Os perfis divergem na direção esperada por dimensão | Agentes sintéticos (nova camada, ✅) | 🔵 infraestrutura ✅ em 2026-10-19 (`experiments/v0/README.md`); execução completa e leitura dos resultados pendentes do autor |
 | **V1** | **Estabilidade das dimensões** (P1) | As dimensões medem traços estáveis? | Valores por sala de cada jogador (ou agente) | `ICC(1,1)` por dimensão, intervalo por *bootstrap*; critério D1: `< 0,50` é removida | Dados de vários jogadores ou agentes | 🔵 |
 | **V2** | **Previsibilidade** (P2) | A acurácia de previsão sobe com o histórico? | Log de ações | Curva de acurácia top-1 e top-3 contra a quantidade de jogo; comparação com as linhas de base | Camada preditiva (5b) | ⬜ |
 | **V3** | **Ablação do boss** (P3) | O boss com o modelo é mais eficaz que sem ele? | Mesmo boss com e sem modelo, jogado por agentes e, se couber, por pessoas | "Eficácia" a definir | Boss (sub-projeto 6) | 🔵 |
