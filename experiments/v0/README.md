@@ -75,12 +75,12 @@ Política estacionária (os agentes não aprendem); validade discriminante entre
 
 ## Custo
 
-A simulação é rápida. Medido em 2026-10-19 (seed 4242, nunca a do experimento): `--agents agressivo --runs 5` levou 22 ms; `--agents agressivo --runs 30`, 66 ms; `--agents evasivo,variado,paciente --runs 10` (30 runs), 410 ms; a fumaça (6 runs), cerca de 46 ms. O tempo inclui simulação, bootstrap e verificações, não a escrita dos arquivos. Extrapolação para 7 × 30 = 210 runs: pelo agressivo, 66 ms/30 runs × 210 = ~0,5 s; pelos três agentes mais lentos medidos, 410 ms/30 × 210 = ~2,9 s. Ordem de grandeza: **de 1 a 10 segundos**, mais ~1 s de inicialização. Com 60 runs por agente, o dobro.
+A simulação é rápida. Medido em 2026-10-19 (seed 4242, nunca a do experimento): `--agents agressivo --runs 5` levou 22 ms; `--agents agressivo --runs 30`, 66 ms; `--agents evasivo,variado,paciente --runs 10` (30 runs), 410 ms; a fumaça (6 runs), cerca de 46 ms. O tempo inclui simulação, bootstrap e verificações, não a escrita dos arquivos. Extrapolação para 7 × 30 = 210 runs: pelo agressivo, 66 ms/30 runs × 210 = ~0,5 s; pelos três agentes mais lentos medidos, 410 ms/30 × 210 = ~2,9 s. Ordem de grandeza: **de 1 a 10 segundos**, mais ~1 s de inicialização. Com os 60 runs por agente (o padrão), o dobro: de 2 a 20 segundos.
 
 ## Decisões em aberto do autor (antes da primeira execução completa)
 
 1. **Revisar os 14 itens** (H1–H12, H1u, H2u) antes de rodar, e passar `--reviewed-before yes|no` conforme o caso. O relatório registra a resposta.
-2. **Considerar `runsPerAgent` 60** (o padrão é 30): o piloto mostrou poucos dados por run em defesa e punição, e com menos de 10 valores definidos por grupo a hipótese sai *indefinida*. Isso muda a spec §4.3 (30 runs) e deve ser anotado lá; basta `--runs 60`.
-3. **Observação da revisão independente, a decidir ANTES da primeira execução completa junto com `runsPerAgent` 60:** H1 provavelmente sairá *indefinida* por construção (o agressivo fica indefinido em weapon_repertoire quando usa só a espada, e H1 não tem a cláusula "ou indefinido"), e H5 provavelmente será confirmada pela indefinição do agressivo.
+2. ~~Considerar `runsPerAgent` 60~~ **Decidido pelo autor em 2026-10-20: o padrão agora é 60 runs por agente** (spec §4.3 atualizada). O piloto mostrou poucos dados por run em defesa e punição, e com menos de 10 valores definidos por grupo a hipótese sai *indefinida*.
+3. **Observação da revisão independente, a decidir ANTES da primeira execução completa (com 60 runs por agente já decidido):** H1 provavelmente sairá *indefinida* por construção (o agressivo fica indefinido em weapon_repertoire quando usa só a espada, e H1 não tem a cláusula "ou indefinido"), e H5 provavelmente será confirmada pela indefinição do agressivo.
 4. **Gráfico**: incluir ou não um mapa de calor estilo × dimensão (spec §8, item 3); hoje só há tabelas.
 5. **Confirmar a D-0 com o orientador** (o sistema de perfil é o produto; o chefe é validação), além da definição de "eficaz" do chefe (V3).

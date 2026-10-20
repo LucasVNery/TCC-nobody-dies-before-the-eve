@@ -24,7 +24,7 @@ describe('DEFAULT_EXPERIMENT', () => {
     expect(DEFAULT_EXPERIMENT).toEqual({
       seed: 20261019,
       agents: STYLE_IDS,
-      runsPerAgent: 30,
+      runsPerAgent: 60,
       runsPerSession: 10,
       runCapMs: 300_000,
       humanizer: DEFAULT_HUMANIZER,

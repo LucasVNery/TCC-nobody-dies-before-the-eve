@@ -25,7 +25,7 @@ export interface ExperimentConfig {
 export const DEFAULT_EXPERIMENT: ExperimentConfig = {
   seed: 20261019,
   agents: STYLE_IDS,
-  runsPerAgent: 30,
+  runsPerAgent: 60,
   runsPerSession: 10,
   runCapMs: 300_000,
   humanizer: DEFAULT_HUMANIZER,

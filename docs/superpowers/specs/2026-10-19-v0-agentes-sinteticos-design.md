@@ -60,7 +60,7 @@ Camada comum a todos os agentes: (a) **atraso de reação** amostrado por evento
 
 ### 4.3 Experimento
 
-7 agentes × 30 runs, em sessões de 10 runs (seeds fixas por agente e por run). Uma run termina por morte do agente; para não haver runs infinitas, **teto de 5 minutos de tempo simulado por run** **[minha escolha]**: ao atingir, a run é encerrada pelo caminho de run abandonada já existente (`cause: 'abandoned'`), como acontece com um jogador que fecha a aba. O relatório separa runs completas e truncadas. Estimativa de custo: ≈ 1,5 milhão de passos de 16,7 ms; deve rodar em minutos num Node comum (verificar e registrar).
+7 agentes × 60 runs (decisão do autor em 2026-10-20: o piloto mostrou poucos dados por run em defesa e punição com 30), em sessões de 10 runs (seeds fixas por agente e por run). Uma run termina por morte do agente; para não haver runs infinitas, **teto de 5 minutos de tempo simulado por run** **[minha escolha]**: ao atingir, a run é encerrada pelo caminho de run abandonada já existente (`cause: 'abandoned'`), como acontece com um jogador que fecha a aba. O relatório separa runs completas e truncadas. Estimativa de custo: ≈ 1,5 milhão de passos de 16,7 ms; deve rodar em minutos num Node comum (verificar e registrar).
 
 ### 4.4 Hipóteses pré-registradas **[palpite do Claude; o autor revisa antes da primeira execução completa]**
 
@@ -105,7 +105,7 @@ Gerado por `tools/run-v0.ts` em `experiments/v0/out/<data>-<seed>/` (pasta ignor
 - **Valores por janela:** o valor por run/sala calculado pelo auxiliar offline coincide com o perfil de um acumulador novo alimentado manualmente com as mesmas observações; uma janela sem dado devolve `null`, nunca `NaN`.
 - **Estatística:** delta de Cliff em arrays com valor conhecido; `ICC(1,1)` reproduz um exemplo de livro-texto; *bootstrap* semeado é determinístico e cobre o valor verdadeiro em um caso sintético.
 - **Relatório:** em uma configuração mínima (2 agentes × 3 runs) o `relatorio.md` e os CSVs saem idênticos em duas execuções (*golden*); tabelas bem formadas.
-- **Pipeline:** a execução completa 7 × 30 termina em tempo razoável, com `igualdade perfil vivo = reconstruído` e `malformed = 0` para todos os agentes; se falhar, o comando termina com erro e diz qual agente.
+- **Pipeline:** a execução completa 7 × 60 termina em tempo razoável, com `igualdade perfil vivo = reconstruído` e `malformed = 0` para todos os agentes; se falhar, o comando termina com erro e diz qual agente.
 - **A suíte atual (540 testes) passa sem alteração.** Nenhum arquivo de `core`, `combat`, `opportunity`, `profile`, `ai`, `game` ou `telemetry` muda.
 - Os **resultados** (hipóteses confirmadas ou não) não são critério de aceitação do código, e sim o conteúdo do relatório.
 
