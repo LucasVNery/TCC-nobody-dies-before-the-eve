@@ -1,5 +1,7 @@
 # V0: agentes sintéticos e relatório — Plano de implementação
 
+> Nota (2026-10-20): H12 retirada e H1 com a cláusula "ou indefinido"; o conjunto pré-registrado final tem 13 itens (H1 a H11, H1u, H2u). Os trechos abaixo sobre "H1 a H12" e "14 itens" são o histórico do plano original.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rodar 7 agentes sintéticos de estilos distintos no jogo de verdade, medir se o perfil os separa e quão estável é, e gerar um relatório (Markdown e CSV) a partir dos logs.

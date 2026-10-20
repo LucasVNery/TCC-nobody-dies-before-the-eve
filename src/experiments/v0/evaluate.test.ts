@@ -11,7 +11,14 @@ describe('HYPOTHESES', () => {
   it('HYPOTHESES are pre-registered', () => {
     // Pré-registro (spec §4.4): alterar exige decisão do autor e registro no relatório.
     expect(HYPOTHESES).toEqual([
-      { id: 'H1', skill: 'weapon_repertoire', kind: 'greater', higher: 'variado', lower: 'agressivo' },
+      {
+        id: 'H1',
+        skill: 'weapon_repertoire',
+        kind: 'greater',
+        higher: 'variado',
+        lower: 'agressivo',
+        orLowerUndefined: true,
+      },
       { id: 'H1u', skill: 'weapon_repertoire', kind: 'undefinedRate', style: 'repetitivo' },
       { id: 'H2', skill: 'action_repertoire', kind: 'greater', higher: 'variado', lower: 'bloqueador' },
       { id: 'H2u', skill: 'action_repertoire', kind: 'undefinedRate', style: 'repetitivo' },
@@ -31,15 +38,12 @@ describe('HYPOTHESES', () => {
       { id: 'H9', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'agressivo' },
       { id: 'H10', skill: 'patience', kind: 'greater', higher: 'evasivo', lower: 'agressivo' },
       { id: 'H11', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'aleatorio' },
-      {
-        id: 'H12',
-        skill: 'action_repertoire',
-        kind: 'greater',
-        higher: 'aleatorio',
-        lower: 'repetitivo',
-        orLowerUndefined: true,
-      },
     ]);
+    expect(HYPOTHESES).toHaveLength(13);
+  });
+
+  it('H12 was retired (author review 2026-10-20)', () => {
+    expect(HYPOTHESES.find((h) => h.id === 'H12')).toBeUndefined();
   });
 
   it('every hypothesis names a reported dimension and known styles', () => {
@@ -214,24 +218,58 @@ describe('evaluateHypotheses', () => {
 
   it('orLowerUndefined: a 100% undefined lower group confirms regardless of delta', () => {
     const rs = evaluateHypotheses(
-      byStyle({ aleatorio: runs('action_repertoire', 30, 0.2, 0.9), repetitivo: runs('action_repertoire', 30, 0, 0, 30) }),
+      byStyle({ variado: runs('weapon_repertoire', 30, 0.2, 0.9), agressivo: runs('weapon_repertoire', 30, 0, 0, 30) }),
       rngOf(),
       100,
     );
-    const h12 = result(rs, 'H12');
-    expect(h12.verdict).toBe('confirmada');
-    expect(h12.undefinedRateLower).toBe(1);
-    expect(h12.nLower).toBe(0);
-    expect(h12.delta).toBeNull();
+    const h1 = result(rs, 'H1');
+    expect(h1.verdict).toBe('confirmada');
+    expect(h1.undefinedRateLower).toBe(1);
+    expect(h1.nLower).toBe(0);
+    expect(h1.delta).toBeNull();
+  });
+
+  it('H1 confirms when variado has >= 10 defined values and agressivo is undefined in >= 95% of >= 10 runs', () => {
+    const rs = evaluateHypotheses(
+      byStyle({ variado: runs('weapon_repertoire', 10, 0.2, 0.9), agressivo: runs('weapon_repertoire', 20, 0.5, 0.5, 19) }),
+      rngOf(),
+      100,
+    );
+    expect(result(rs, 'H1').verdict).toBe('confirmada');
+    expect(result(rs, 'H1').undefinedRateLower).toBeCloseTo(19 / 20, 9);
+  });
+
+  it('H1 is indefinida when variado has < 10 defined values', () => {
+    const rs = evaluateHypotheses(
+      byStyle({ variado: runs('weapon_repertoire', 30, 0.2, 0.9, 21), agressivo: runs('weapon_repertoire', 30, 0, 0, 30) }),
+      rngOf(),
+      100,
+    );
+    expect(result(rs, 'H1').verdict).toBe('indefinida');
+    expect(result(rs, 'H1').nHigher).toBe(9);
   });
 
   it('orLowerUndefined needs >= 10 defined values in the higher group', () => {
     const bothNull = evaluateHypotheses(
-      byStyle({ aleatorio: runs('action_repertoire', 30, 0, 0, 30), repetitivo: runs('action_repertoire', 30, 0, 0, 30) }),
+      byStyle({ variado: runs('weapon_repertoire', 30, 0, 0, 30), agressivo: runs('weapon_repertoire', 30, 0, 0, 30) }),
       rngOf(),
       50,
     );
-    expect(result(bothNull, 'H12').verdict).toBe('indefinida');
+    expect(result(bothNull, 'H1').verdict).toBe('indefinida');
+
+    const h1Higher9 = evaluateHypotheses(
+      byStyle({ variado: runs('weapon_repertoire', 9, 0.2, 0.9), agressivo: runs('weapon_repertoire', 30, 0, 0, 30) }),
+      rngOf(),
+      50,
+    );
+    expect(result(h1Higher9, 'H1').verdict).toBe('indefinida');
+
+    const h1Higher10 = evaluateHypotheses(
+      byStyle({ variado: runs('weapon_repertoire', 10, 0.2, 0.9), agressivo: runs('weapon_repertoire', 30, 0, 0, 30) }),
+      rngOf(),
+      50,
+    );
+    expect(result(h1Higher10, 'H1').verdict).toBe('confirmada');
 
     const higherEmpty = evaluateHypotheses(byStyle({ agressivo: runs('defensive_repertoire', 30, 0, 0, 30) }), rngOf(), 50);
     expect(result(higherEmpty, 'H5').verdict).toBe('indefinida');
@@ -251,11 +289,11 @@ describe('evaluateHypotheses', () => {
 
   it('orLowerUndefined with a lower group of 5 runs, all null, is indefinida', () => {
     const rs = evaluateHypotheses(
-      byStyle({ aleatorio: runs('action_repertoire', 30, 0.2, 0.9), repetitivo: runs('action_repertoire', 5, 0, 0, 5) }),
+      byStyle({ variado: runs('weapon_repertoire', 30, 0.2, 0.9), agressivo: runs('weapon_repertoire', 5, 0, 0, 5) }),
       rngOf(),
       50,
     );
-    expect(result(rs, 'H12').verdict).toBe('indefinida');
+    expect(result(rs, 'H1').verdict).toBe('indefinida');
   });
 
   it('orLowerUndefined does not apply without the flag (H6)', () => {

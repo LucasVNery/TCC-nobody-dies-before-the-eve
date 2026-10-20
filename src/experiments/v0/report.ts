@@ -21,7 +21,7 @@ export interface ReportInput {
   hypotheses: HypothesisResult[];
   icc: IccResult[];
   checks: Record<StyleId, PipelineCheck[]>;
-  /** Filled by the CLI from a flag: did the author review H1-H12/H1u/H2u BEFORE the full run? */
+  /** Filled by the CLI from a flag: did the author review H1-H11/H1u/H2u BEFORE the full run? */
   hypothesesReviewedBeforeFullRun?: boolean | null;
   /** Changes made to the hypotheses after the first full run (spec §2); none when omitted or empty. */
   hypothesisChanges?: readonly string[];
@@ -230,7 +230,8 @@ function markdown(
     `- Runs por agente: ${config.runsPerAgent}; runs por sessão: ${config.runsPerSession}`,
     `- Gerado em: ${input.generatedAtIso}`,
     `- Tempo decorrido: ${Math.round(input.elapsedMs)} ms`,
-    `- Hipóteses H1–H12 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
+    `- Hipóteses H1–H11 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
+    '- Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
     '- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.',
     `- Alterações nas hipóteses depois da primeira execução completa: ${changes.length === 0 ? 'nenhuma registrada' : changes.join('; ')}`,
     '',
@@ -301,7 +302,7 @@ function markdown(
     '',
     `Veredito: confirmada (IC 95% bootstrap do delta de Cliff acima de 0 e delta ≥ ${md(MIN_DELTA, 2)}, ou a taxa de indefinição pedida); refutada; indefinida (dados insuficientes: menos de ${MIN_VALUES} valores definidos por grupo, ou menos de ${MIN_VALUES} runs nas hipóteses de taxa de indefinição). Hipótese refutada ou indefinida é resultado, não defeito. N definidos = valores por run com domínio definido em cada grupo; Indef. = fração das runs do grupo com domínio indefinido.`,
     '',
-    'Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H5 e H12 também são confirmadas se o grupo menor tiver pelo menos 10 runs e for indefinido em pelo menos 95% delas (isto substitui só o teste do delta: o grupo maior ainda precisa de pelo menos 10 valores definidos); H6 NÃO tem a cláusula "ou indefinido".',
+    'Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H1 e H5 também são confirmadas se o grupo menor tiver pelo menos 10 runs e for indefinido em pelo menos 95% delas (isto substitui só o teste do delta: o grupo maior ainda precisa de pelo menos 10 valores definidos); H6 NÃO tem a cláusula "ou indefinido".',
     '',
     table(
       ['Id', 'Dimensão', 'Maior', 'Menor', 'Estilo', 'Delta', 'IC 95%', 'N definidos (maior)', 'N definidos (menor)', 'Indef. maior', 'Indef. menor', 'Indef. estilo', 'N runs estilo', 'Veredito'],
@@ -408,6 +409,7 @@ function markdown(
     '- A razão da janela de esquiva (`taken`) também premia parries.',
     '- Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.',
     '- Runs vazias são descartadas (contadas só na seção 2).',
+    '- Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.',
     `- As ${HYPOTHESES.length} hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length}).`,
     '',
   );

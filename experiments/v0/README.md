@@ -1,6 +1,6 @@
 # V0: validação do perfil com agentes sintéticos
 
-A V0 pergunta: **o perfil descritivo distingue estilos de jogo conhecidos?** (validade discriminante, sem participantes humanos nem chefe). Sete agentes scriptados (agressivo, evasivo, bloqueador, paciente, variado, repetitivo, aleatório) jogam o jogo real, run a run, pelo mesmo caminho de telemetria; o log de cada um é reconstruído em perfil, e um conjunto de hipóteses **pré-registradas** (H1 a H12, H1u, H2u) é avaliado. O mesmo relatório traz o ICC por dimensão (limite superior da estabilidade) e verificações de integridade do pipeline. Desenho completo: `docs/superpowers/specs/2026-10-19-v0-agentes-sinteticos-design.md`; contexto: `Contexto_pesquisa/documento-tecnico-mestre.md` §8.4.
+A V0 pergunta: **o perfil descritivo distingue estilos de jogo conhecidos?** (validade discriminante, sem participantes humanos nem chefe). Sete agentes scriptados (agressivo, evasivo, bloqueador, paciente, variado, repetitivo, aleatório) jogam o jogo real, run a run, pelo mesmo caminho de telemetria; o log de cada um é reconstruído em perfil, e um conjunto de hipóteses **pré-registradas** (H1 a H11, H1u, H2u) é avaliado. O mesmo relatório traz o ICC por dimensão (limite superior da estabilidade) e verificações de integridade do pipeline. Desenho completo: `docs/superpowers/specs/2026-10-19-v0-agentes-sinteticos-design.md`; contexto: `Contexto_pesquisa/documento-tecnico-mestre.md` §8.4.
 
 Código: `src/experiments/v0/` (puro: sem relógio nem arquivos) e `tools/run-v0.ts` (a linha de comando, único ponto com `node:fs`, `process.argv` e relógio).
 
@@ -56,7 +56,7 @@ CSV: ponto decimal e vazio para indefinido. Markdown: vírgula decimal (o tempo 
 - Linhas "a priori (sem dados)" na seção 2 não são desempenho: são o prior.
 - **ICC** é um limite superior (políticas estacionárias) e o IC é condicional aos agentes (reamostra runs, não agentes). O sinalizador "< 0,50" é mostrado, não aplicado.
 - Runs vazias (abertas pelo diretor depois de uma morte que encerra a sessão, sem evidência) são descartadas de todas as tabelas e contadas só na seção 2.
-- As 14 hipóteses não têm correção para comparações múltiplas (V0 exploratório).
+- As 13 hipóteses não têm correção para comparações múltiplas (V0 exploratório).
 - Seção 5: todas as verificações devem estar `ok`; se alguma falhar, os números das outras seções não valem.
 
 ## Pré-registro e como alterá-lo
@@ -71,7 +71,7 @@ Os estilos e a calibração (`styles.ts`, `policy.ts`) são decisões separadas 
 
 ## Limites
 
-Política estacionária (os agentes não aprendem); validade discriminante entre agentes sintéticos não é validade em humanos; dimensão 7 fora do experimento; atraso de reação humanizado, mas sem adaptação; 14 hipóteses sem correção para múltiplas comparações; ICC é limite superior. A lista completa vai na seção 6 de cada relatório.
+Política estacionária (os agentes não aprendem); validade discriminante entre agentes sintéticos não é validade em humanos; dimensão 7 fora do experimento; atraso de reação humanizado, mas sem adaptação; 13 hipóteses sem correção para múltiplas comparações; ICC é limite superior; em defensive_repertoire (H5, H6) só entram runs com pelo menos 2 rótulos de defesa, o que gera viés de seleção. A lista completa vai na seção 6 de cada relatório.
 
 ## Custo
 
@@ -79,8 +79,8 @@ A simulação é rápida. Medido em 2026-10-19 (seed 4242, nunca a do experiment
 
 ## Decisões em aberto do autor (antes da primeira execução completa)
 
-1. **Revisar os 14 itens** (H1–H12, H1u, H2u) antes de rodar, e passar `--reviewed-before yes|no` conforme o caso. O relatório registra a resposta.
+1. **Revisão dos 13 itens (H1–H11, H1u, H2u): decidida pelo autor em 2026-10-20**, depois do piloto e antes da execução completa. Duas mudanças: H1 recebeu a cláusula "ou indefinido" (`orLowerUndefined`) e H12 foi retirada (só confirmaria pela indefinição do repetitivo; redundante com H2u). Resta passar `--reviewed-before yes|no` na execução completa; o relatório registra a resposta.
 2. ~~Considerar `runsPerAgent` 60~~ **Decidido pelo autor em 2026-10-20: o padrão agora é 60 runs por agente** (spec §4.3 atualizada). O piloto mostrou poucos dados por run em defesa e punição, e com menos de 10 valores definidos por grupo a hipótese sai *indefinida*.
-3. **Observação da revisão independente, a decidir ANTES da primeira execução completa (com 60 runs por agente já decidido):** H1 provavelmente sairá *indefinida* por construção (o agressivo fica indefinido em weapon_repertoire quando usa só a espada, e H1 não tem a cláusula "ou indefinido"), e H5 provavelmente será confirmada pela indefinição do agressivo.
+3. ~~Observação da revisão independente (H1 e H5)~~ **Resolvida em 2026-10-20:** H1 agora tem a cláusula "ou indefinido", porque o agressivo quase sempre usa uma só arma por run. Correção de uma afirmação anterior sobre H5: ela só é confirmada pela indefinição se o agressivo ficar indefinido em pelo menos 95% das runs, e o piloto mostra 30 a 60%; o risco real é um viés de seleção (só entram runs com pelo menos 2 rótulos de defesa).
 4. **Gráfico**: incluir ou não um mapa de calor estilo × dimensão (spec §8, item 3); hoje só há tabelas.
 5. **Confirmar a D-0 com o orientador** (o sistema de perfil é o produto; o chefe é validação), além da definição de "eficaz" do chefe (V3).

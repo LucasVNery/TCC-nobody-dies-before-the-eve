@@ -423,3 +423,7 @@ Raising `runsPerAgent` for ALL agents (for example 60 instead of 30) would give 
 agent (more sessions, hence more weapon draws, and more defined per-run values for the thin
 dimensions) at negligible cost: the whole 70-run pilot runs in about 0.3 s of wall time. It
 changes spec §4.3, so it is the author's call before the first full run.
+
+## Revisão das hipóteses (2026-10-20)
+
+Added after the pilot and before the first full run; the pilot results above are unchanged. The author reviewed the pre-registered set and approved two changes: H1 (weapon_repertoire, variado > agressivo) gained the "or lower undefined" clause, because agressivo almost always uses a single weapon per run and its per-run weapon_repertoire is mostly undefined; H12 (action_repertoire, aleatorio > repetitivo) was retired, because it could only confirm through repetitivo's undefinedness and is redundant with H2u. The final set has 13 items (H1 to H11, H1u, H2u). The earlier worry that H5 would confirm by undefinedness is corrected: the pilot shows agressivo undefined in 30 to 60% of runs, below the 95% threshold; the real risk for H5 and H6 is a selection bias, since only runs with at least 2 defence labels count.

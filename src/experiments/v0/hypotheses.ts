@@ -1,6 +1,8 @@
 // src/experiments/v0/hypotheses.ts
 // Pre-registered hypotheses of the V0 experiment (spec §4.4). Pinned by a test:
 // changing them requires the author's decision and a note in the report.
+// Final set (author review 2026-10-20, after the pilot and before the full run):
+// H1 got `orLowerUndefined`; H12 was retired (redundant with H2u).
 import type { SkillId } from '../../profile/types';
 import type { StyleId } from './styles';
 
@@ -21,7 +23,14 @@ export interface Hypothesis {
 }
 
 export const HYPOTHESES: readonly Hypothesis[] = [
-  { id: 'H1', skill: 'weapon_repertoire', kind: 'greater', higher: 'variado', lower: 'agressivo' },
+  {
+    id: 'H1',
+    skill: 'weapon_repertoire',
+    kind: 'greater',
+    higher: 'variado',
+    lower: 'agressivo',
+    orLowerUndefined: true,
+  },
   { id: 'H1u', skill: 'weapon_repertoire', kind: 'undefinedRate', style: 'repetitivo' },
   { id: 'H2', skill: 'action_repertoire', kind: 'greater', higher: 'variado', lower: 'bloqueador' },
   { id: 'H2u', skill: 'action_repertoire', kind: 'undefinedRate', style: 'repetitivo' },
@@ -41,12 +50,4 @@ export const HYPOTHESES: readonly Hypothesis[] = [
   { id: 'H9', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'agressivo' },
   { id: 'H10', skill: 'patience', kind: 'greater', higher: 'evasivo', lower: 'agressivo' },
   { id: 'H11', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'aleatorio' },
-  {
-    id: 'H12',
-    skill: 'action_repertoire',
-    kind: 'greater',
-    higher: 'aleatorio',
-    lower: 'repetitivo',
-    orLowerUndefined: true,
-  },
 ];

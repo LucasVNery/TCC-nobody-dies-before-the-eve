@@ -68,7 +68,7 @@ Unidade de comparação: o valor de cada dimensão calculado **só com as observ
 
 | Id | Dimensão | Hipótese (direção esperada) |
 |---|---|---|
-| H1 | repertório de armas | `variado` > `agressivo` |
+| H1 | repertório de armas | `variado` > `agressivo` (ou `agressivo` indefinido) |
 | H1u | repertório de armas | `repetitivo` indefinido em ≥ 95% das runs |
 | H2 | repertório de ações | `variado` > `bloqueador` |
 | H2u | repertório de ações | `repetitivo` indefinido em ≥ 95% das runs |
@@ -81,7 +81,8 @@ Unidade de comparação: o valor de cada dimensão calculado **só com as observ
 | H9 | paciência | `paciente` > `agressivo` |
 | H10 | paciência | `evasivo` > `agressivo` |
 | H11 | paciência | `paciente` > `aleatorio` |
-| H12 | repertório de ações | `aleatorio` > `repetitivo` (ou `repetitivo` indefinido) |
+
+Revisão do autor em 2026-10-20 (depois do piloto de calibração, antes da primeira execução completa): H1 recebeu a cláusula "ou `agressivo` indefinido", porque o agressivo quase sempre usa uma só arma por run e seu repertório de armas por run fica quase sempre indefinido; H12 foi retirada, pois só poderia ser confirmada pela indefinição do repetitivo e é redundante com H2u. O conjunto pré-registrado final tem 13 itens: H1 a H11, H1u e H2u.
 
 Critério de uma hipótese **[minha escolha]**: o intervalo *bootstrap* de 95% do **delta de Cliff** (comparação das runs dos dois agentes) exclui 0 na direção esperada **e** `|delta| ≥ 0,33` (efeito médio). Hipóteses do tipo "indefinido em ≥ 95% das runs" são contagens simples. Hipóteses que falham são **resultado**, não defeito a corrigir; podem apontar uma dimensão mal definida ou um agente mal calibrado, e o relatório diz qual é a leitura mais provável sem alterar o registro.
 
@@ -126,6 +127,6 @@ Estrutura de módulos em `src/experiments/v0/`; valores iniciais dos parâmetros
 
 ## 8. Decisões do autor ainda abertas (não bloqueiam a implementação)
 
-1. Revisar as hipóteses H1 a H12 e o critério (`|delta| ≥ 0,33`, IC 95%) **antes da primeira execução completa**.
+1. ~~Revisar as hipóteses H1 a H12 e o critério~~ **FEITO em 2026-10-20**: hipóteses revistas (agora H1 a H11, mais H1u e H2u; ver nota na seção 4.4); critério (`|delta| ≥ 0,33`, IC 95%) mantido.
 2. Confirmar a D-0 com o orientador e a definição de "eficaz" do chefe (V3).
 3. Se quer que a casca de linha de comando também gere um gráfico (por exemplo, mapa de calor estilo × dimensão) além das tabelas; padrão: só tabelas e CSV.

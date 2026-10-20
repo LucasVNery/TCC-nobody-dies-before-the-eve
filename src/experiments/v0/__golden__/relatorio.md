@@ -10,7 +10,8 @@
 - Runs por agente: 2; runs por sessão: 1
 - Gerado em: 2026-10-19T12:00:00.000Z
 - Tempo decorrido: 4321 ms
-- Hipóteses H1–H12 e H1u, H2u (14 itens) pré-registradas; revisadas pelo autor ANTES da execução completa: sim
+- Hipóteses H1–H11 e H1u, H2u (13 itens) pré-registradas; revisadas pelo autor ANTES da execução completa: sim
+- Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.
 - A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.
 - Alterações nas hipóteses depois da primeira execução completa: nenhuma registrada
 
@@ -51,7 +52,7 @@ Perfil final (acumulador ao vivo, relógio de traço; déficit = 1 − domínio)
 
 Veredito: confirmada (IC 95% bootstrap do delta de Cliff acima de 0 e delta ≥ 0,33, ou a taxa de indefinição pedida); refutada; indefinida (dados insuficientes: menos de 10 valores definidos por grupo, ou menos de 10 runs nas hipóteses de taxa de indefinição). Hipótese refutada ou indefinida é resultado, não defeito. N definidos = valores por run com domínio definido em cada grupo; Indef. = fração das runs do grupo com domínio indefinido.
 
-Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H5 e H12 também são confirmadas se o grupo menor tiver pelo menos 10 runs e for indefinido em pelo menos 95% delas (isto substitui só o teste do delta: o grupo maior ainda precisa de pelo menos 10 valores definidos); H6 NÃO tem a cláusula "ou indefinido".
+Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H1 e H5 também são confirmadas se o grupo menor tiver pelo menos 10 runs e for indefinido em pelo menos 95% delas (isto substitui só o teste do delta: o grupo maior ainda precisa de pelo menos 10 valores definidos); H6 NÃO tem a cláusula "ou indefinido".
 
 | Id | Dimensão | Maior | Menor | Estilo | Delta | IC 95% | N definidos (maior) | N definidos (menor) | Indef. maior | Indef. menor | Indef. estilo | N runs estilo | Veredito |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -109,4 +110,5 @@ Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem a
 - A razão da janela de esquiva (`taken`) também premia parries.
 - Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.
 - Runs vazias são descartadas (contadas só na seção 2).
-- As 14 hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/14).
+- Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.
+- As 13 hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/13).
