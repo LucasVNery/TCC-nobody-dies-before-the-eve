@@ -58,22 +58,25 @@ const ALL_ACTIONS_EQUAL: Record<string, number> = {
   'bow.shot': 1,
 };
 
-/** Provisional values (Task 6 calibrates them against raw behaviour). */
+/**
+ * Values calibrated in a pilot against raw behaviour only (V0 Task 6; every
+ * change and its reason is in experiments/v0/calibration.md).
+ */
 export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
   // close, high cadence, almost no defence
   agressivo: {
     id: 'agressivo',
-    weaponWeights: { sword_shield: 0.6, heavy_weapon: 0.4 },
+    weaponWeights: { sword_shield: 0.8, heavy_weapon: 0.2 },
     weaponSwitchPerMin: 0.5,
     actionWeights: {
-      'sword_shield.light': 3,
+      'sword_shield.light': 4,
       'sword_shield.heavy': 2,
       'sword_shield.charged': 1,
       'heavy_weapon.light': 3,
-      'heavy_weapon.heavy': 2,
+      'heavy_weapon.heavy': 1,
       'heavy_weapon.charged': 1,
     },
-    attackCooldownMs: 450,
+    attackCooldownMs: 300,
     preferredDistance: 25,
     distanceTolerance: 10,
     defenseWeights: { dodge: 0.1, block: 0.05, parry: 0, none: 0.85 },
@@ -82,7 +85,7 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
   // keeps distance, prefers the bow, dodges
   evasivo: {
     id: 'evasivo',
-    weaponWeights: { bow: 0.75, sword_shield: 0.25 },
+    weaponWeights: { bow: 0.65, sword_shield: 0.35 },
     weaponSwitchPerMin: 2,
     actionWeights: { 'bow.shot': 1, 'sword_shield.light': 2, 'sword_shield.heavy': 1 },
     attackCooldownMs: 700,
@@ -101,7 +104,7 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     preferredDistance: 40,
     distanceTolerance: 15,
     defenseWeights: { dodge: 0.05, block: 0.55, parry: 0.35, none: 0.05 },
-    waitForOpening: false,
+    waitForOpening: true,
   },
   // waits: attacks only after the enemy's swing (recovery) or from safe range
   paciente: {
@@ -118,13 +121,13 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
   // switches weapons often, uses every action
   variado: {
     id: 'variado',
-    weaponWeights: { sword_shield: 1, heavy_weapon: 1, bow: 1 },
-    weaponSwitchPerMin: 8,
+    weaponWeights: { sword_shield: 1, heavy_weapon: 1.2, bow: 0.35 },
+    weaponSwitchPerMin: 15,
     actionWeights: { ...ALL_ACTIONS_EQUAL },
     attackCooldownMs: 600,
     preferredDistance: 50,
     distanceTolerance: 20,
-    defenseWeights: { dodge: 0.3, block: 0.3, parry: 0.2, none: 0.2 },
+    defenseWeights: { dodge: 0.35, block: 0.3, parry: 0.25, none: 0.1 },
     waitForOpening: false,
   },
   // one weapon, one move
@@ -136,7 +139,7 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     attackCooldownMs: 550,
     preferredDistance: 35,
     distanceTolerance: 10,
-    defenseWeights: { dodge: 0.3, block: 0.3, parry: 0, none: 0.4 },
+    defenseWeights: { dodge: 0.35, block: 0.35, parry: 0, none: 0.3 },
     waitForOpening: false,
   },
   // control: uniform over the 7 registered actions (weapon weights 3:3:1 x

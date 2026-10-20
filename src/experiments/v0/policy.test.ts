@@ -451,6 +451,29 @@ describe('AgentPolicy action lifecycle (fix round 1)', () => {
     }
   });
 
+  it('weapon switches stay within the style rate (stale plans and repeated checks add none) (Task 6)', () => {
+    // A redraw may keep the same weapon, so executed switches <= redraws ~ Poisson(rate x minutes).
+    const MIN = 30;
+    for (const id of STYLE_IDS) {
+      const rate = AGENT_STYLES[id].weaponSwitchPerMin;
+      if (rate > 10) continue; // aleatorio redraws for every attack by design
+      for (const world of [still('idle', 30), cycleWorld(40)]) {
+        const log = drive(makePolicy(id, 12, DEFAULT_HUMANIZER), Math.round((MIN * 60_000) / STEP), world);
+        const switches = log.filter((l) => l.intent.switchTo !== undefined).length;
+        expect(switches, id).toBeLessThanOrEqual(1 + rate * MIN * 1.5 + 3);
+      }
+    }
+  });
+
+  it('a dash refused inside an action locked phase does not shorten that lock (Task 6)', () => {
+    for (let seed = 1; seed <= 12; seed++) {
+      for (const id of ['agressivo', 'aleatorio', 'variado'] as StyleId[]) {
+        const { body } = driveBody(makePolicy(id, seed), 120_000, cycleWorld(30));
+        expect(body.dropped, `${id}#${seed}`).toEqual([]);
+      }
+    }
+  });
+
   it('aleatorio executes each of the 7 actions with roughly uniform frequency', () => {
     const { body } = driveBody(makePolicy('aleatorio', 13), 20 * 60_000, still('idle', 30));
     const n = body.executed.length;

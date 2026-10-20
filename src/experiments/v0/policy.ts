@@ -37,7 +37,7 @@ const MIN_BLOCK_HOLD_MS = 100;
 const REACH_SLACK_PX = 10;
 /** At or beyond this distance an idle/chasing enemy cannot punish a short action. */
 const SAFE_DISTANCE_PX = 120;
-/** A plan not executed for this long is redrawn (weapon included). */
+/** A plan not executed for this long is redrawn (the weapon only if it cannot reach from here). */
 const PLAN_STALE_MS = 4000;
 /** Extra wait after a seen stagger (two 60 Hz steps). */
 const STAGGER_MARGIN_MS = 34;
@@ -102,7 +102,7 @@ export class AgentPolicy {
   private readonly weaponKeys: readonly string[];
   private prevSeenState: EnemyState | null = null;
   private weaponId: string | null = null;
-  private lastRedrawAt = 0;
+  private lastSwitchCheckAt = 0;
   private plan: Plan | null = null;
   private lastAttackAt = -Infinity;
   private chargeReleaseAt: number | null = null;
@@ -182,7 +182,9 @@ export class AgentPolicy {
         intent.dodge = true;
         this.chargeReleaseAt = null; // the dash cancels a charge
         this.chargeAction = null;
-        this.lockedUntil = nowMs + DODGE.durationMs; // no attack can start mid-dash
+        // no attack can start mid-dash; a dash pressed inside an action's locked phase is refused by
+        // the body, and that action's own lock must not be shortened by it
+        this.lockedUntil = Math.max(this.lockedUntil, nowMs + DODGE.durationMs);
         this.wantBlock = false;
       } else {
         // let go of the charge to get the guard up sooner
@@ -197,7 +199,7 @@ export class AgentPolicy {
     else if (!this.wantBlock && now.isBlocking) intent.block = 'stop';
 
     // offence
-    const plan = this.currentPlan(nowMs);
+    const plan = this.currentPlan(nowMs, dist);
     // A release tick, and the released action's locked phase after it, are busy: a start
     // there would be dropped by the engine (charging/locked) or would cancel the old charge.
     const busy =
@@ -290,20 +292,36 @@ export class AgentPolicy {
     this.plan = this.makePlan(nowMs, false);
   }
 
-  private currentPlan(nowMs: number): Plan {
+  /**
+   * A stale plan (unused for PLAN_STALE_MS) redraws the action; the weapon is
+   * forced to a redraw only when no weighted action of the current weapon
+   * reaches the enemy from here (e.g. paciente holding a melee plan at range).
+   * Otherwise the weapon changes only at the style's weaponSwitchPerMin rate,
+   * so a stale plan never adds weapon switches the style did not ask for.
+   */
+  private currentPlan(nowMs: number, dist: number): Plan {
     if (!this.plan) this.plan = this.makePlan(nowMs, true);
-    else if (nowMs - this.plan.plannedAt > PLAN_STALE_MS) this.plan = this.makePlan(nowMs, true);
+    else if (nowMs - this.plan.plannedAt > PLAN_STALE_MS) this.plan = this.makePlan(nowMs, !this.weaponReaches(dist));
     return this.plan;
   }
 
+  private weaponReaches(dist: number): boolean {
+    return ACTIONS.some(
+      (a) => a.weaponId === this.weaponId && (this.style.actionWeights[a.id] ?? 0) > 0 && dist <= a.reach + REACH_SLACK_PX,
+    );
+  }
+
   private makePlan(nowMs: number, forceRedraw: boolean): Plan {
+    // Poisson redraws at weaponSwitchPerMin: each check covers only the time since the previous check
+    // (counting from the last redraw instead would make the hazard grow with every check and redraw
+    // far more often than the style's rate).
     const rate = this.style.weaponSwitchPerMin;
-    const elapsedMin = (nowMs - this.lastRedrawAt) / 60000;
+    const elapsedMin = (nowMs - this.lastSwitchCheckAt) / 60000;
+    this.lastSwitchCheckAt = nowMs;
     const redraw =
       forceRedraw || this.weaponId === null || (rate > 0 && this.rng() < 1 - Math.exp(-rate * Math.max(0, elapsedMin)));
     if (redraw) {
       this.weaponId = pick(this.style.weaponWeights, this.weaponKeys, this.rng) ?? this.weaponId;
-      this.lastRedrawAt = nowMs;
     }
     const candidates = ACTIONS.filter((a) => a.weaponId === this.weaponId && (this.style.actionWeights[a.id] ?? 0) > 0);
     const pool = candidates.length > 0 ? candidates : ACTIONS.filter((a) => (this.style.actionWeights[a.id] ?? 0) > 0);
