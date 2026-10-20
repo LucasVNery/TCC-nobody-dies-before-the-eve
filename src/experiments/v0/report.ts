@@ -23,6 +23,8 @@ export interface ReportInput {
   checks: Record<StyleId, PipelineCheck[]>;
   /** Filled by the CLI from a flag: did the author review H1-H12/H1u/H2u BEFORE the full run? */
   hypothesesReviewedBeforeFullRun?: boolean | null;
+  /** Changes made to the hypotheses after the first full run (spec §2); none when omitted or empty. */
+  hypothesisChanges?: readonly string[];
 }
 
 export interface ReportFiles {
@@ -89,8 +91,8 @@ export function buildReport(input: ReportInput): ReportFiles {
   const styles = input.config.agents;
   const logOf = (s: StyleId): AgentLog | undefined => input.logs.find((l) => l.styleId === s);
   const agentName = (s: StyleId): string => logOf(s)?.playerId ?? s;
-  const kept = (values: Record<StyleId, WindowValue[]>, s: StyleId): WindowValue[] =>
-    dropEmptyRuns(values[s] ?? [], logOf(s)?.emptyRuns ?? []);
+  const kept = (values: Record<StyleId, WindowValue[]>, s: StyleId | undefined): WindowValue[] =>
+    s === undefined ? [] : dropEmptyRuns(values[s] ?? [], logOf(s)?.emptyRuns ?? []);
 
   const windowRows = (values: Record<StyleId, WindowValue[]>, withRoom: boolean): CsvCell[][] =>
     styles.flatMap((s) =>
@@ -102,13 +104,16 @@ export function buildReport(input: ReportInput): ReportFiles {
         v.skill,
         v.domain,
         v.confidence,
-        int(v.sampleSize),
+        v.sampleSize,
       ]),
     );
+  const roomMeasures = (skill: string): number =>
+    styles.reduce((n, st) => n + kept(input.roomValues, st).filter((v) => v.skill === skill && v.domain !== null).length, 0);
   const tail = ['skill', 'domain', 'confidence', 'sampleSize'];
 
   const hypRows = input.hypotheses.map((r) => {
     const h = HYPOTHESES.find((x) => x.id === r.id);
+    const rate = r.style !== undefined;
     return [
       r.id,
       r.skill,
@@ -119,8 +124,9 @@ export function buildReport(input: ReportInput): ReportFiles {
       r.delta,
       r.lo,
       r.hi,
-      int(r.nHigher),
-      int(r.nLower),
+      rate ? null : int(r.nHigher),
+      rate ? null : int(r.nLower),
+      rate ? null : undefShare(kept(input.runValues, h?.higher), r.skill),
       r.undefinedRateLower,
       r.undefinedRate,
       int(r.nRuns),
@@ -135,33 +141,42 @@ export function buildReport(input: ReportInput): ReportFiles {
     'hipoteses.csv': csv(
       [
         'id', 'skill', 'kind', 'higher', 'lower', 'style', 'delta', 'ci_lo', 'ci_hi',
-        'n_higher', 'n_lower', 'undefined_rate_lower', 'undefined_rate', 'n_runs', 'verdict',
+        'n_higher', 'n_lower', 'undefined_rate_higher', 'undefined_rate_lower', 'undefined_rate', 'n_runs', 'verdict',
       ],
       hypRows,
     ),
     'icc.csv': csv(
-      ['skill', 'n_agents', 'icc', 'ci_lo', 'ci_hi', 'below_criterion', 'criterion'],
-      input.icc.map((r) => [r.skill, int(r.nAgents), r.icc, r.lo, r.hi, r.belowCriterion, ICC_CRITERION]),
+      ['skill', 'n_agents', 'n_room_measures', 'icc', 'ci_lo', 'ci_hi', 'below_criterion', 'criterion'],
+      input.icc.map((r) => [r.skill, int(r.nAgents), int(roomMeasures(r.skill)), r.icc, r.lo, r.hi, r.belowCriterion, ICC_CRITERION]),
     ),
     'perfil_final.csv': csv(
       ['agent', 'style', 'skill', 'domain', 'confidence', 'deficit', 'sampleSize'],
       styles.flatMap((s) => {
         const live = logOf(s)?.live;
-        return REPORT_SKILLS.map((k) => [
-          agentName(s),
-          s,
-          k,
-          live?.domain(k, 'trait') ?? null,
-          live ? live.confidence(k, 'trait') : null,
-          live?.deficit(k, 'trait') ?? null,
-          live ? int(live.sampleSize(k, 'trait')) : null,
-        ]);
+        return REPORT_SKILLS.map((k) => {
+          const prior = live !== undefined && live.sampleSize(k, 'trait') === 0;
+          return [
+            agentName(s),
+            s,
+            k,
+            prior ? null : (live?.domain(k, 'trait') ?? null),
+            live ? live.confidence(k, 'trait') : null,
+            prior ? null : (live?.deficit(k, 'trait') ?? null),
+            live ? live.sampleSize(k, 'trait') : null,
+          ];
+        });
       }),
     ),
   };
 }
 
 // --------------------------------------------------------------- markdown
+
+/** Fraction of the skill's run windows (roomIdx null) with domain null; null when there is none. */
+function undefShare(values: readonly WindowValue[], skill: string): number | null {
+  const runs = values.filter((v) => v.roomIdx === null && v.skill === skill);
+  return runs.length === 0 ? null : runs.filter((v) => v.domain === null).length / runs.length;
+}
 
 function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
@@ -173,7 +188,7 @@ function median(xs: number[]): number | null {
 function markdown(
   input: ReportInput,
   logOf: (s: StyleId) => AgentLog | undefined,
-  kept: (v: Record<StyleId, WindowValue[]>, s: StyleId) => WindowValue[],
+  kept: (v: Record<StyleId, WindowValue[]>, s: StyleId | undefined) => WindowValue[],
 ): string {
   const { config } = input;
   const styles = config.agents;
@@ -187,6 +202,7 @@ function markdown(
       : input.hypothesesReviewedBeforeFullRun === false
         ? 'não'
         : 'não informado';
+  const changes = input.hypothesisChanges ?? [];
   const weights = (w: Record<string, number>): string =>
     Object.entries(w)
       .map(([k, v]) => `${k} ${short(v)}`)
@@ -202,8 +218,9 @@ function markdown(
     `- Runs por agente: ${config.runsPerAgent}; runs por sessão: ${config.runsPerSession}`,
     `- Gerado em: ${input.generatedAtIso}`,
     `- Tempo decorrido: ${md(input.elapsedMs / 1000, 1)} s`,
-    `- Hipóteses H1–H12 e H1u, H2u (14 itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
+    `- Hipóteses H1–H12 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
     '- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.',
+    `- Alterações nas hipóteses depois da primeira execução completa: ${changes.length === 0 ? 'nenhuma registrada' : changes.join('; ')}`,
     '',
     'Parâmetros dos estilos (pesos relativos; distâncias em px):',
     '',
@@ -234,7 +251,7 @@ function markdown(
     'Runs vazias (iniciadas pelo diretor depois de uma morte que encerra a sessão, sem evidência) são DESCARTADAS de todas as tabelas e só contadas aqui. Identidade: run.start = completas + truncadas + vazias.',
     '',
     table(
-      ['Agente', 'Run.start', 'Completas', 'Truncadas', 'Vazias (descartadas)', 'Sessões', 'Tempo simulado (s)'],
+      ['Agente', 'Run.start (soma)', 'Completas', 'Truncadas', 'Vazias (descartadas)', 'Sessões', 'Tempo simulado (s)'],
       styles.flatMap((s) => {
         const l = logOf(s);
         if (!l) return [[s, '—', '—', '—', '—', '—', '—']];
@@ -243,19 +260,24 @@ function markdown(
       }),
     ),
     '',
-    'Perfil final (acumulador ao vivo, relógio de traço; déficit = 1 − domínio; — quando indefinido):',
+    'Perfil final (acumulador ao vivo, relógio de traço; déficit = 1 − domínio). Linhas com amostra 0 estão "a priori (sem dados)": o domínio e o déficit são o prior da Beta (ou indefinidos) e aparecem como —, sem leitura como desempenho; a confiança é 0. — também marca o indefinido.',
     '',
     table(
-      ['Agente', 'Dimensão', 'Domínio', 'Confiança', 'Déficit'],
+      ['Agente', 'Dimensão', 'Amostra', 'Domínio', 'Confiança', 'Déficit', 'Observação'],
       styles.flatMap((s) => {
         const live = logOf(s)?.live;
-        return REPORT_SKILLS.map((k) => [
-          s,
-          k,
-          md(live?.domain(k, 'trait')),
-          md(live ? live.confidence(k, 'trait') : null),
-          md(live?.deficit(k, 'trait')),
-        ]);
+        return REPORT_SKILLS.map((k) => {
+          const prior = live !== undefined && live.sampleSize(k, 'trait') === 0;
+          return [
+            s,
+            k,
+            md(live ? live.sampleSize(k, 'trait') : null),
+            prior ? '—' : md(live?.domain(k, 'trait')),
+            md(live ? live.confidence(k, 'trait') : null),
+            prior ? '—' : md(live?.deficit(k, 'trait')),
+            prior ? 'a priori (sem dados)' : '',
+          ];
+        });
       }),
     ),
     '',
@@ -265,12 +287,12 @@ function markdown(
   out.push(
     '## 3. Separação de estilos',
     '',
-    `Veredito: confirmada (IC 95% bootstrap do delta de Cliff acima de 0 e delta ≥ ${md(MIN_DELTA, 2)}, ou a taxa de indefinição pedida); refutada; indefinida (dados insuficientes: menos de ${MIN_VALUES} valores definidos por grupo, ou menos de ${MIN_VALUES} runs nas hipóteses de taxa de indefinição). Hipótese refutada ou indefinida é resultado, não defeito.`,
+    `Veredito: confirmada (IC 95% bootstrap do delta de Cliff acima de 0 e delta ≥ ${md(MIN_DELTA, 2)}, ou a taxa de indefinição pedida); refutada; indefinida (dados insuficientes: menos de ${MIN_VALUES} valores definidos por grupo, ou menos de ${MIN_VALUES} runs nas hipóteses de taxa de indefinição). Hipótese refutada ou indefinida é resultado, não defeito. N definidos = valores por run com domínio definido em cada grupo; Indef. = fração das runs do grupo com domínio indefinido.`,
     '',
-    'Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H5 e H12 também são confirmadas se o grupo menor for indefinido em pelo menos 95% das runs; H6 NÃO tem a cláusula "ou indefinido".',
+    'Linhas H1u e H2u (taxa de indefinição): as colunas Estilo, Indef. estilo e N runs substituem Maior/Menor, delta e IC. H5 e H12 também são confirmadas se o grupo menor tiver pelo menos 10 runs e for indefinido em pelo menos 95% delas (isto substitui só o teste do delta: o grupo maior ainda precisa de pelo menos 10 valores definidos); H6 NÃO tem a cláusula "ou indefinido".',
     '',
     table(
-      ['Id', 'Dimensão', 'Maior', 'Menor', 'Estilo', 'Delta', 'IC 95%', 'N maior', 'N menor', 'Indef. menor', 'Indef. estilo', 'N runs estilo', 'Veredito'],
+      ['Id', 'Dimensão', 'Maior', 'Menor', 'Estilo', 'Delta', 'IC 95%', 'N definidos (maior)', 'N definidos (menor)', 'Indef. maior', 'Indef. menor', 'Indef. estilo', 'N runs estilo', 'Veredito'],
       input.hypotheses.map((r) => {
         const h = HYPOTHESES.find((x) => x.id === r.id);
         const rate = r.style !== undefined;
@@ -284,6 +306,7 @@ function markdown(
           r.lo === null && r.hi === null ? '—' : `[${md(r.lo)}; ${md(r.hi)}]`,
           rate ? '—' : `${r.nHigher}`,
           rate ? '—' : `${r.nLower}`,
+          rate ? '—' : mdPct(undefShare(kept(input.runValues, h?.higher), r.skill)),
           rate ? '—' : mdPct(r.undefinedRateLower),
           rate ? mdPct(r.undefinedRate) : '—',
           rate ? (r.nRuns === null ? '—' : `${r.nRuns}`) : '—',
@@ -320,12 +343,13 @@ function markdown(
     `O sinalizador "< ${md(ICC_CRITERION, 2)}" é apenas mostrado, NÃO aplicado (nenhuma conclusão foi condicionada a ele).`,
     '',
     table(
-      ['Dimensão', 'ICC', 'IC 95%', 'N agentes', `< ${md(ICC_CRITERION, 2)} (não aplicado)`],
+      ['Dimensão', 'ICC', 'IC 95%', 'N agentes', 'N medidas por sala', `< ${md(ICC_CRITERION, 2)} (não aplicado)`],
       input.icc.map((r) => [
         r.skill,
         md(r.icc),
         r.lo === null && r.hi === null ? '—' : `[${md(r.lo)}; ${md(r.hi)}]`,
         `${r.nAgents}`,
+        `${styles.reduce((n, st) => n + kept(input.roomValues, st).filter((v) => v.skill === r.skill && v.domain !== null).length, 0)}`,
         r.belowCriterion === null ? '—' : r.belowCriterion ? 'sim' : 'não',
       ]),
     ),
@@ -361,6 +385,7 @@ function markdown(
     '- A razão da janela de esquiva (`taken`) também premia parries.',
     '- Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.',
     '- Runs vazias são descartadas (contadas só na seção 2).',
+    `- As ${HYPOTHESES.length} hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length}).`,
     '',
   );
 

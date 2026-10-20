@@ -54,6 +54,7 @@ const wv = (runIdx: number, roomIdx: number | null, skill: WindowValue['skill'],
 function liveWith(): ProfileAccumulator {
   const acc = new ProfileAccumulator();
   acc.record('punish', 3, 4);
+  acc.applyRoomBoundary();
   return acc;
 }
 
@@ -149,67 +150,86 @@ describe('buildReport', () => {
     expect(f['runs.csv']).toBe(
       [
         'agent,style,runIdx,skill,domain,confidence,sampleSize',
-        'agent-0,agressivo,0,punish,0.250,0.500,4',
-        'agent-0,agressivo,1,punish,,0.500,0',
-        'agent-1,evasivo,0,punish,0.750,0.500,4',
-        'agent-1,evasivo,1,punish,0.500,0.500,4',
+        'agent-0,agressivo,0,punish,0.250,0.500,4.000',
+        'agent-0,agressivo,1,punish,,0.500,0.000',
+        'agent-1,evasivo,0,punish,0.750,0.500,4.000',
+        'agent-1,evasivo,1,punish,0.500,0.500,4.000',
         '',
       ].join('\n'),
     );
     expect(f['rooms.csv']).toBe(
       [
         'agent,style,runIdx,roomIdx,skill,domain,confidence,sampleSize',
-        'agent-0,agressivo,0,0,punish,0.250,0.500,4',
-        'agent-0,agressivo,0,1,punish,0.333,0.500,4',
-        'agent-1,evasivo,0,0,punish,0.750,0.500,4',
+        'agent-0,agressivo,0,0,punish,0.250,0.500,4.000',
+        'agent-0,agressivo,0,1,punish,0.333,0.500,4.000',
+        'agent-1,evasivo,0,0,punish,0.750,0.500,4.000',
         '',
       ].join('\n'),
     );
     expect(f['hipoteses.csv']).toBe(
       [
-        'id,skill,kind,higher,lower,style,delta,ci_lo,ci_hi,n_higher,n_lower,undefined_rate_lower,undefined_rate,n_runs,verdict',
-        'H3,punish,greater,paciente,evasivo,,0.500,0.250,0.750,12,11,0.100,,,confirmada',
-        'H1u,weapon_repertoire,undefinedRate,,,repetitivo,,,,0,0,,1.000,4,indefinida',
+        'id,skill,kind,higher,lower,style,delta,ci_lo,ci_hi,n_higher,n_lower,undefined_rate_higher,undefined_rate_lower,undefined_rate,n_runs,verdict',
+        'H3,punish,greater,paciente,evasivo,,0.500,0.250,0.750,12,11,,0.100,,,confirmada',
+        'H1u,weapon_repertoire,undefinedRate,,,repetitivo,,,,,,,,1.000,4,indefinida',
         '',
       ].join('\n'),
     );
     expect(f['icc.csv']).toBe(
       [
-        'skill,n_agents,icc,ci_lo,ci_hi,below_criterion,criterion',
-        'punish,2,0.400,0.100,0.700,true,0.500',
-        'patience,0,,,,,0.500',
+        'skill,n_agents,n_room_measures,icc,ci_lo,ci_hi,below_criterion,criterion',
+        'punish,2,3,0.400,0.100,0.700,true,0.500',
+        'patience,0,0,,,,,0.500',
         '',
       ].join('\n'),
     );
     const lines = f['perfil_final.csv'].trimEnd().split('\n');
     expect(lines).toHaveLength(1 + 2 * 6);
     expect(lines[0]).toBe('agent,style,skill,domain,confidence,deficit,sampleSize');
-    expect(lines.find((l) => l.startsWith('agent-0,agressivo,punish'))).toBe('agent-0,agressivo,punish,0.500,0.000,0.500,0');
+    expect(lines.find((l) => l.startsWith('agent-0,agressivo,punish'))).toBe('agent-0,agressivo,punish,0.667,0.286,0.333,4.000');
     expect(lines.find((l) => l.startsWith('agent-0,agressivo,weapon_repertoire'))).toBe(
-      'agent-0,agressivo,weapon_repertoire,,0.000,,0',
+      'agent-0,agressivo,weapon_repertoire,,0.000,,0.000',
     );
   });
 
-  it('golden Markdown pieces for the same input', () => {
-    const md = buildReport(smallInput())['relatorio.md'];
-    expect(md).toContain('- Versão do jogo: v-test');
-    expect(md).toContain('- Tempo decorrido: 4,3 s');
-    expect(md).toContain(
-      'revisadas pelo autor ANTES da execução completa: sim',
+  it('golden: the WHOLE relatorio.md for the small hand-written input', () => {
+    const golden = Object.values(
+      import.meta.glob('./__golden__/relatorio.md', { query: '?raw', import: 'default', eager: true }),
+    )[0] as string;
+    const actual = buildReport(smallInput())['relatorio.md'];
+    expect(actual).toEqual(golden.replace(/\r\n/g, '\n'));
+  });
+
+  it('writes non-integer sample sizes with 3 decimals in runs.csv, rooms.csv and perfil_final.csv', () => {
+    const input = smallInput();
+    input.runValues.agressivo = [{ ...wv(0, null, 'distance', 0.4), sampleSize: 11.320115000000001 }];
+    input.roomValues.agressivo = [{ ...wv(0, 0, 'distance', 0.4), sampleSize: 12.999999999999996 }];
+    const live = new ProfileAccumulator();
+    live.record('distance', 1.5, 3.1);
+    live.applyRoomBoundary();
+    input.logs[0].live = live;
+    const f = buildReport(input);
+    expect(f['runs.csv']).toContain('agent-0,agressivo,0,distance,0.400,0.500,11.320\n');
+    expect(f['rooms.csv']).toContain('agent-0,agressivo,0,0,distance,0.400,0.500,13.000\n');
+    const row = f['perfil_final.csv'].split('\n').find((l) => l.startsWith('agent-0,agressivo,distance'))!;
+    expect(row).toMatch(/,\d+\.\d{3}$/);
+    for (const [name, text] of Object.entries(f)) if (name.endsWith('.csv')) expect(text, name).not.toMatch(/\d\.\d{4,}/);
+  });
+
+  it('marks sample-size-0 rows as a priori in section 2 and leaves domain/deficit empty in the CSV', () => {
+    const f = buildReport(smallInput());
+    const md = f['relatorio.md'];
+    expect(md).toContain('| agressivo | weapon_repertoire | 0,000 | — | 0,000 | — | a priori (sem dados) |');
+    expect(md).toContain('a priori (sem dados)');
+    expect(f['perfil_final.csv']).toContain('agent-0,agressivo,weapon_repertoire,,0.000,,0.000');
+  });
+
+  it('renders hypothesis changes in section 1', () => {
+    expect(buildReport(smallInput())['relatorio.md']).toContain(
+      'Alterações nas hipóteses depois da primeira execução completa: nenhuma registrada',
     );
-    expect(md).toContain('| agressivo | 2 | 2 | 0 | 0 | 2 | 12,5 |');
-    expect(md).toContain(
-      '| H3 | punish | paciente | evasivo | — | 0,500 | [0,250; 0,750] | 12 | 11 | 10% | — | — | confirmada |',
+    expect(buildReport(smallInput({ hypothesisChanges: ['H3 trocada', 'H7 removida'] }))['relatorio.md']).toContain(
+      'primeira execução completa: H3 trocada; H7 removida',
     );
-    expect(md).toContain(
-      '| H1u | weapon_repertoire | — | — | repetitivo | — | — | — | — | — | 100% | 4 | indefinida |',
-    );
-    expect(md).toContain('| punish | 0,400 | [0,100; 0,700] | 2 | sim |');
-    expect(md).toContain('| patience | — | — | 0 | — |');
-    // matrix: agressivo punish median of the defined value 0.25, half of runs undefined
-    expect(md).toContain('| agressivo | — | — | 0,250 (50%) | — | — | — |');
-    expect(md).toContain('| evasivo | — | — | 0,625 (0%) | — | — | — |');
-    expect(md).toContain('| evasivo | run-accounting | ok | a \\| b |');
   });
 
   it('the six sections exist, in order, and the fixed texts are present', () => {
@@ -298,7 +318,7 @@ describe('buildReport', () => {
       expect(m[5].replace(',', '.').replace('—', '')).toBe(c[6]);
       const ci = m[6].replace(/,/g, '.').replace('—', '');
       expect(ci).toBe(c[7] === '' ? '' : `[${c[7]}; ${c[8]}]`);
-      expect(m[12]).toBe(c[14]);
+      expect(m[13]).toBe(c[15]);
     }
   });
 
