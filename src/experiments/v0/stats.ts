@@ -132,6 +132,7 @@ export function iccOneWay(groups: readonly (readonly number[])[]): number | null
 }
 
 /**
+ * Not used by the V0 report; kept as an alternative / for sensitivity.
  * Approximate: resamples measures, not clusters; the V0 report uses
  * bootstrapIccClustered. Null resamples are dropped; B = 0 gives lo/hi null;
  * an invalid level (NaN or outside (0,1)) gives an all-null Interval.
@@ -191,7 +192,7 @@ export function bootstrapIccClustered(
 /**
  * Two-stage bootstrap of ICC(1,1): resamples agents with replacement, then runs
  * within each drawn agent. Unlike bootstrapIccClustered it also reflects agent-sampling
- * uncertainty (a population-style interval). Exported for comparison only; not used
+ * uncertainty (a population-style interval). Not used by the V0 report; kept as an alternative / for sensitivity. 
  * by the V0 report. Same null/level rules as bootstrapIccClustered.
  */
 export function bootstrapIccTwoStage(

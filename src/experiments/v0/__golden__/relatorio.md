@@ -9,7 +9,7 @@
 - Teto de tempo simulado por run: 300000 ms
 - Runs por agente: 2; runs por sessão: 1
 - Gerado em: 2026-10-19T12:00:00.000Z
-- Tempo decorrido: 4,3 s
+- Tempo decorrido: 4321 ms
 - Hipóteses H1–H12 e H1u, H2u (14 itens) pré-registradas; revisadas pelo autor ANTES da execução completa: sim
 - A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.
 - Alterações nas hipóteses depois da primeira execução completa: nenhuma registrada
@@ -84,6 +84,16 @@ O sinalizador "< 0,50" é apenas mostrado, NÃO aplicado (nenhuma conclusão foi
 | --- | --- | --- | --- |
 | agressivo | seq-contiguous | ok | 2 sessions |
 | evasivo | run-accounting | ok | a \| b |
+
+Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem alfabética do tipo):
+
+| Agente | Tipo de evento | Contagem |
+| --- | --- | --- |
+| agent-0 | obs.action | 3 |
+| agent-0 | run.end | 1 |
+| agent-0 | run.start | 2 |
+| agent-0 | **total** | 6 |
+| agent-1 | **total** | 0 |
 
 ## 6. Limitações
 

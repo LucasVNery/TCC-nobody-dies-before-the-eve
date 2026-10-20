@@ -2,69 +2,55 @@
 // Command line of the V0 experiment (synthetic agents; spec 2026-10-19-v0-agentes-sinteticos).
 //
 //   npx vite-node tools/run-v0.ts [--agents a,b,...] [--runs N] [--runs-per-session N]
-//                                 [--cap-ms N] [--seed N] [--out DIR]
-//                                 [--reviewed-before yes|no] [--smoke]
+//                                 [--cap-ms N] [--seed N] [--out DIR] [--reviewed-before yes|no]
+//                                 [--smoke] [--full] [--force]
 //
-// This is the ONLY file of the experiment that touches node:fs / node:path, process.argv and
-// the clock (report.ts and the rest of src/experiments/v0 are pure). tools/ is outside the
-// tsconfig include (src only), so `process` is declared minimally below instead of pulling in
-// @types/node; the node:* imports are resolved by vite-node at run time, not by `tsc`.
-import { mkdirSync, writeFileSync } from 'node:fs';
+// Argument parsing and validation are pure and tested (src/experiments/v0/cliArgs.ts). This is the
+// ONLY file of the experiment that touches node:fs / node:path, process.argv and the clock
+// (report.ts and the rest of src/experiments/v0 are pure). tools/ is outside the tsconfig include
+// (src only), so `process` is declared minimally below instead of pulling in @types/node; the
+// node:* imports are resolved by vite-node at run time, not by `tsc`.
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GAME_VERSION } from '../src/telemetry/schema';
 import { createPrng } from '../src/core/prng';
 import { DEFAULT_EXPERIMENT, mixSeed, runExperiment, type ExperimentConfig } from '../src/experiments/v0/agentRunner';
+import { defaultOutName, parseCliArgs } from '../src/experiments/v0/cliArgs';
 import { evaluateHypotheses, iccBySkill, prepareValues } from '../src/experiments/v0/evaluate';
 import { checkAgentLog, type PipelineCheck } from '../src/experiments/v0/pipelineChecks';
 import { buildReport } from '../src/experiments/v0/report';
-import { STYLE_IDS, type StyleId } from '../src/experiments/v0/styles';
+import type { StyleId } from '../src/experiments/v0/styles';
 
-declare const process: { argv: string[]; exit(code?: number): never; exitCode?: number };
+declare const process: { argv: string[]; exit(code?: number): never };
 
-/** Smoke preset: tiny, different seed from the experiment's (20261019) so the real data is never touched. */
-const SMOKE = { agents: ['agressivo', 'repetitivo'] as StyleId[], runs: 3, capMs: 60_000, seed: 4242 };
 /** Stream constant of the analysis rng (bootstrap), distinct from the agents' and the game's streams. */
 const STREAM_ANALYSIS = 0xa7a15;
 
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+const parsed = parseCliArgs(process.argv.slice(2), {
+  seed: DEFAULT_EXPERIMENT.seed,
+  runs: DEFAULT_EXPERIMENT.runsPerAgent,
+  runsPerSession: DEFAULT_EXPERIMENT.runsPerSession,
+  capMs: DEFAULT_EXPERIMENT.runCapMs,
+});
+if (!parsed.ok) {
+  console.error(`run-v0: invalid arguments\n  ${parsed.errors.join('\n  ')}`);
+  process.exit(2);
 }
-const flag = (name: string): boolean => process.argv.includes(`--${name}`);
+const o = parsed.options;
 
-function intArg(name: string, fallback: number): number {
-  const v = arg(name);
-  if (v === undefined) return fallback;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) {
-    console.error(`--${name} must be a positive integer (got "${v}")`);
-    process.exit(2);
-  }
-  return n;
-}
-
-const smoke = flag('smoke');
-const agentsArg = arg('agents');
-const agents: StyleId[] = agentsArg ? (agentsArg.split(',').map((s) => s.trim()) as StyleId[]) : smoke ? SMOKE.agents : [...STYLE_IDS];
-for (const a of agents) {
-  if (!(STYLE_IDS as readonly string[]).includes(a)) {
-    console.error(`unknown agent "${a}"; valid: ${STYLE_IDS.join(', ')}`);
-    process.exit(2);
-  }
-}
-const reviewed = arg('reviewed-before');
-if (reviewed !== undefined && reviewed !== 'yes' && reviewed !== 'no') {
-  console.error('--reviewed-before must be yes or no');
+const outDir = o.out ?? join('experiments', 'v0', 'out', defaultOutName(o.seed, o.smoke, new Date()));
+if (!o.force && existsSync(outDir) && readdirSync(outDir).length > 0) {
+  console.error(`run-v0: output folder "${outDir}" is not empty; use --force to overwrite or choose another --out`);
   process.exit(2);
 }
 
 const cfg: ExperimentConfig = {
   ...DEFAULT_EXPERIMENT,
-  seed: intArg('seed', smoke ? SMOKE.seed : DEFAULT_EXPERIMENT.seed),
-  agents,
-  runsPerAgent: intArg('runs', smoke ? SMOKE.runs : DEFAULT_EXPERIMENT.runsPerAgent),
-  runsPerSession: intArg('runs-per-session', DEFAULT_EXPERIMENT.runsPerSession),
-  runCapMs: intArg('cap-ms', smoke ? SMOKE.capMs : DEFAULT_EXPERIMENT.runCapMs),
+  seed: o.seed,
+  agents: o.agents,
+  runsPerAgent: o.runs,
+  runsPerSession: o.runsPerSession,
+  runCapMs: o.capMs,
 };
 
 const started = Date.now();
@@ -89,16 +75,14 @@ const files = buildReport({
   hypotheses,
   icc,
   checks,
-  hypothesesReviewedBeforeFullRun: reviewed === undefined ? null : reviewed === 'yes',
+  hypothesesReviewedBeforeFullRun: o.reviewedBefore,
 });
 
-const day = new Date().toISOString().slice(0, 10);
-const outDir = arg('out') ?? join('experiments', 'v0', 'out', `${day}-seed${cfg.seed}${smoke ? '-smoke' : ''}`);
 mkdirSync(outDir, { recursive: true });
 for (const [name, text] of Object.entries(files)) writeFileSync(join(outDir, name), text, 'utf8');
 
 console.log(`V0 report written to ${outDir}`);
-console.log(`elapsed: ${elapsedMs} ms = ${(elapsedMs / 1000).toFixed(2)} s (${agents.length} agents x ${cfg.runsPerAgent} runs, seed ${cfg.seed})`);
+console.log(`elapsed: ${elapsedMs} ms (${o.agents.length} agents x ${cfg.runsPerAgent} runs, seed ${cfg.seed})`);
 
 const failed: string[] = [];
 for (const log of logs) for (const c of checks[log.styleId]) if (!c.ok) failed.push(`${log.styleId}: ${c.id} (${c.detail})`);

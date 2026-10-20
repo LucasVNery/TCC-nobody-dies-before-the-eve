@@ -19,15 +19,23 @@ npx vite-node tools/run-v0.ts [opções]
 | `--runs-per-session N` | 10 | runs por sessão (o perfil persiste entre sessões) |
 | `--cap-ms N` | 300000 | teto de tempo simulado por run |
 | `--seed N` | 20261019 | semente do experimento; todas as outras derivam dela |
-| `--out DIR` | `experiments/v0/out/<aaaa-mm-dd>-seed<seed>[-smoke]/` | pasta de saída |
+| `--out DIR` | `experiments/v0/out/<aaaa-mm-dd-HHMM>-seed<seed>[-smoke]/` (data e hora LOCAIS) | pasta de saída; recusada se já tiver conteúdo, a menos que haja `--force` |
 | `--reviewed-before yes\|no` | não informado | o autor revisou as hipóteses antes da execução completa? Aparece na seção 1 do relatório |
 | `--smoke` | desligado | 2 agentes (agressivo, repetitivo) × 3 runs, teto 60000 ms, seed 4242 |
+| `--full` | desligado | confirma que é a execução completa; obrigatório com a seed pré-registrada |
+| `--force` | desligado | permite gravar em pasta de saída não vazia |
 
-A **execução completa** é `npm run v0 -- --reviewed-before yes` (ou `no`). Use a seed 20261019 **só** nela: pilotos, fumaça e estimativas usam outras seeds (a calibração usou a 1, a fumaça a 4242), para que o experimento não seja os dados da calibração.
+Com `npm run`, os argumentos precisam do separador `--`: `npm run v0 -- --smoke`. Regras de proteção (exit 2, nada é executado):
+
+- argumentos desconhecidos, valores faltando, flags repetidas e a forma `--flag=valor` são recusados (escreva `--flag valor`);
+- `--agents` não pode ser vazio, ter itens vazios nem ids repetidos;
+- **sem `--full` uma execução com a seed pré-registrada (20261019, o padrão) é recusada**: a execução completa exige `--full` E `--reviewed-before yes|no`. `--smoke` e outras seeds não exigem nenhum dos dois; `--smoke` com a seed pré-registrada e `--full` com outra seed são recusados.
+
+A **execução completa** é `npm run v0 -- --full --reviewed-before yes` (ou `no`). Use a seed 20261019 **só** nela: pilotos, fumaça e estimativas usam outras seeds (a calibração usou a 1, a fumaça a 4242), para que o experimento não seja os dados da calibração.
 
 O comando termina com código diferente de zero se qualquer verificação do pipeline falhar, nomeando agente e verificação.
 
-## Saídas (seis arquivos na pasta de saída; `experiments/v0/out/` é ignorada pelo git)
+## Saídas (sete arquivos na pasta de saída; `experiments/v0/out/` é ignorada pelo git)
 
 | Arquivo | Conteúdo |
 | --- | --- |
@@ -37,8 +45,9 @@ O comando termina com código diferente de zero se qualquer verificação do pip
 | `hipoteses.csv` | Um veredito por hipótese, com delta, IC e tamanhos de amostra |
 | `icc.csv` | ICC(1,1) por dimensão, com IC |
 | `perfil_final.csv` | Perfil final de cada agente |
+| `events_by_type.csv` | Contagem de eventos por agente e por tipo (também em tabela na seção 5 do relatório, com o total) |
 
-CSV: ponto decimal e vazio para indefinido. Markdown: vírgula decimal e "—" para indefinido.
+CSV: ponto decimal e vazio para indefinido. Markdown: vírgula decimal (o tempo decorrido sai em ms) e "—" para indefinido.
 
 ## Como ler o relatório
 
@@ -70,6 +79,8 @@ A simulação é rápida. Medido em 2026-10-19 (seed 4242, nunca a do experiment
 
 ## Decisões em aberto do autor (antes da primeira execução completa)
 
-1. **Revisar H1 a H14** (H1 a H12, H1u, H2u) antes de rodar, e passar `--reviewed-before yes|no` conforme o caso. O relatório registra a resposta.
+1. **Revisar os 14 itens** (H1–H12, H1u, H2u) antes de rodar, e passar `--reviewed-before yes|no` conforme o caso. O relatório registra a resposta.
 2. **Considerar `runsPerAgent` 60** (o padrão é 30): o piloto mostrou poucos dados por run em defesa e punição, e com menos de 10 valores definidos por grupo a hipótese sai *indefinida*. Isso muda a spec §4.3 (30 runs) e deve ser anotado lá; basta `--runs 60`.
-3. **Confirmar a D-0 com o orientador** (o sistema de perfil é o produto; o chefe é validação), além da definição de "eficaz" do chefe (V3).
+3. **Observação da revisão independente, a decidir ANTES da primeira execução completa junto com `runsPerAgent` 60:** H1 provavelmente sairá *indefinida* por construção (o agressivo fica indefinido em weapon_repertoire quando usa só a espada, e H1 não tem a cláusula "ou indefinido"), e H5 provavelmente será confirmada pela indefinição do agressivo.
+4. **Gráfico**: incluir ou não um mapa de calor estilo × dimensão (spec §8, item 3); hoje só há tabelas.
+5. **Confirmar a D-0 com o orientador** (o sistema de perfil é o produto; o chefe é validação), além da definição de "eficaz" do chefe (V3).

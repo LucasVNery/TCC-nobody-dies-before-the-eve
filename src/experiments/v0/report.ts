@@ -34,6 +34,7 @@ export interface ReportFiles {
   'hipoteses.csv': string;
   'icc.csv': string;
   'perfil_final.csv': string;
+  'events_by_type.csv': string;
 }
 
 // ---------------------------------------------------------------- numbers
@@ -86,6 +87,13 @@ function csv(header: string[], rows: CsvCell[][]): string {
 }
 
 // ------------------------------------------------------------------ build
+
+/** Event counts by `type` for one log: sorted by type (code-unit order), deterministic. */
+function eventCounts(log: AgentLog | undefined): [string, number][] {
+  const m = new Map<string, number>();
+  for (const e of log?.events ?? []) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
 
 export function buildReport(input: ReportInput): ReportFiles {
   const styles = input.config.agents;
@@ -148,6 +156,10 @@ export function buildReport(input: ReportInput): ReportFiles {
     'icc.csv': csv(
       ['skill', 'n_agents', 'n_room_measures', 'icc', 'ci_lo', 'ci_hi', 'below_criterion', 'criterion'],
       input.icc.map((r) => [r.skill, int(r.nAgents), int(roomMeasures(r.skill)), r.icc, r.lo, r.hi, r.belowCriterion, ICC_CRITERION]),
+    ),
+    'events_by_type.csv': csv(
+      ['agent', 'type', 'count'],
+      styles.flatMap((s) => eventCounts(logOf(s)).map(([type, n]) => [agentName(s), type, int(n)])),
     ),
     'perfil_final.csv': csv(
       ['agent', 'style', 'skill', 'domain', 'confidence', 'deficit', 'sampleSize'],
@@ -217,7 +229,7 @@ function markdown(
     `- Teto de tempo simulado por run: ${config.runCapMs} ms`,
     `- Runs por agente: ${config.runsPerAgent}; runs por sessão: ${config.runsPerSession}`,
     `- Gerado em: ${input.generatedAtIso}`,
-    `- Tempo decorrido: ${md(input.elapsedMs / 1000, 1)} s`,
+    `- Tempo decorrido: ${Math.round(input.elapsedMs)} ms`,
     `- Hipóteses H1–H12 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
     '- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.',
     `- Alterações nas hipóteses depois da primeira execução completa: ${changes.length === 0 ? 'nenhuma registrada' : changes.join('; ')}`,
@@ -365,6 +377,17 @@ function markdown(
       styles.flatMap((s) =>
         (input.checks[s] ?? []).map((c) => [s, c.id, c.ok ? 'ok' : '**FALHOU**', c.detail]),
       ),
+    ),
+    '',
+    'Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem alfabética do tipo):',
+    '',
+    table(
+      ['Agente', 'Tipo de evento', 'Contagem'],
+      styles.flatMap((s) => {
+        const counts = eventCounts(logOf(s));
+        const total = counts.reduce((a, [, n]) => a + n, 0);
+        return [...counts.map(([t, n]) => [(logOf(s)?.playerId ?? s), t, String(n)]), [(logOf(s)?.playerId ?? s), '**total**', String(total)]];
+      }),
     ),
     '',
   );

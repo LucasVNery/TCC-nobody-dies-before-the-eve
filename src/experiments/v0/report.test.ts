@@ -58,6 +58,8 @@ function liveWith(): ProfileAccumulator {
   return acc;
 }
 
+const ev = (...types: string[]): AgentLog['events'] => types.map((type) => ({ type }) as unknown as AgentLog['events'][number]);
+
 function log(styleId: StyleId, playerId: string, over: Partial<AgentLog> = {}): AgentLog {
   return {
     styleId,
@@ -120,7 +122,7 @@ function smallInput(over: Partial<ReportInput> = {}): ReportInput {
     gameVersion: 'v-test',
     generatedAtIso: '2026-10-19T12:00:00.000Z',
     elapsedMs: 4321,
-    logs: [log('agressivo', 'agent-0'), log('evasivo', 'agent-1')],
+    logs: [log('agressivo', 'agent-0', { events: ev('run.start', 'obs.action', 'run.start', 'run.end', 'obs.action', 'obs.action') }), log('evasivo', 'agent-1')],
     runValues,
     roomValues,
     hypotheses: HYP,
@@ -189,6 +191,16 @@ describe('buildReport', () => {
     expect(lines.find((l) => l.startsWith('agent-0,agressivo,weapon_repertoire'))).toBe(
       'agent-0,agressivo,weapon_repertoire,,0.000,,0.000',
     );
+  });
+
+  it('counts events by type per agent (sorted, with total) in section 5 and events_by_type.csv', () => {
+    const f = buildReport(smallInput());
+    expect(f['events_by_type.csv']).toBe(
+      ['agent,type,count', 'agent-0,obs.action,3', 'agent-0,run.end,1', 'agent-0,run.start,2', ''].join('\n'),
+    );
+    expect(f['relatorio.md']).toContain('| agent-0 | obs.action | 3 |');
+    expect(f['relatorio.md']).toContain('| agent-0 | **total** | 6 |');
+    expect(f['relatorio.md']).toContain('| agent-1 | **total** | 0 |');
   });
 
   it('golden: the WHOLE relatorio.md for the small hand-written input', () => {
