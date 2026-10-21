@@ -134,19 +134,19 @@ Cada mecânica traz a regra, os parâmetros, onde está no código e o que falta
 
 | Entrada | Efeito | Fonte | Status |
 |---|---|---|---|
-| WASD | Mover (caminhada **175**/s) com o teclado **girado 45°** (`mapMovement`: `dx = ix + iy`, `dy = iy − ix`) para continuar alinhado à tela (W vai para cima, D para a direita) na projeção em losango 2:1. A vista retangular de 17/10/2026 (sem giro) foi descartada em 19/10/2026 | `scenes/ArenaScene.ts` | ✅ |
-| Mouse | Mira em 360° (a posição do mouse é convertida pela inversa da projeção) | `ArenaScene.ts`, `visual/groundProjection.ts` | ✅ |
-| Clique esquerdo | Ataque leve da arma equipada; no arco, o disparo | `ArenaScene.ts` | ✅ |
-| Clique direito | Ataque pesado (sem efeito no arco) | `ArenaScene.ts` | ✅ |
-| Q (segurar e soltar) | Ataque carregado (sem efeito no arco) | `ArenaScene.ts` | ✅ |
-| 1 / 2 / 3 | Troca para espada e escudo / arco / arma pesada | `ArenaScene.ts` | ✅ |
+| WASD | Mover (caminhada **175**/s) com o teclado **girado 45°** (`mapMovement`: `dx = ix + iy`, `dy = iy − ix`) para continuar alinhado à tela (W vai para cima, D para a direita) na projeção em losango 2:1. A vista retangular de 17/10/2026 (sem giro) foi descartada em 19/10/2026 | `scenes/input/playerInput.ts` | ✅ |
+| Mouse | Mira em 360° (a posição do mouse é convertida pela inversa da projeção) | `scenes/input/playerInput.ts`, `visual/groundProjection.ts` | ✅ |
+| Clique esquerdo | Ataque leve da arma equipada; no arco, o disparo | `scenes/input/playerInput.ts` | ✅ |
+| Clique direito | Ataque pesado (sem efeito no arco) | `scenes/input/playerInput.ts` | ✅ |
+| Q (segurar e soltar) | Ataque carregado (sem efeito no arco) | `scenes/input/playerInput.ts` | ✅ |
+| 1 / 2 / 3 | Troca para espada e escudo / arco / arma pesada | `scenes/input/playerInput.ts` | ✅ |
 | Shift (segurar) | Corrida (**220**/s): gasta 10 de estamina por segundo, só em `idle` e só com estamina | `scenes/input/playerInput.ts` | 🟡 |
 | Espaço | Esquiva (dash); exige **30** de estamina | `playerInput.ts` | 🟡 |
 | E (segurar) | Guarda: apertar sobre o golpe = parry; segurar antes = bloqueio | `playerInput.ts` | ✅ |
 | F | Usa o item guardado no slot (ação `utility`) | `playerInput.ts` | 🟡 |
 | Tab | Abre e fecha o painel de análise (H: ajuda dos controles) | `scenes/input/hotkeys.ts` | ✅ |
 | Roda do mouse | Zoom da câmera, de 1× a 3× em passos de 0,25 (padrão 2×) | `visual/cameraZoom.ts` | 🟡 |
-| F2 / F8 / F9 | Resetar perfil / exportar histórico / importar histórico | `ArenaScene.ts` | 🟡 |
+| F2 / F8 / F9 | Resetar perfil / exportar histórico / importar histórico | `scenes/input/hotkeys.ts` | 🟡 |
 
 **Comportamentos conhecidos do combate B** (seguem a spec; observar no playtest): segurar E depois de um dash não volta ao bloqueio (é preciso apertar de novo); Q apertado durante a parte travada de um ataque é descartado, mesmo que continue pressionado; E e as teclas 1/2/3 apertadas na recuperação **não** a cancelam e **não** entram no buffer.
 
@@ -245,7 +245,7 @@ Mudança central do combate B, desenhada para reproduzir a sensação de combate
 |---|---|---|---|
 | Regras (por prioridade) | `assaltante.attack` se a distância ≤ **60**; `assaltante.lunge` se a distância estiver entre **150** e **260** e a recarga do *lunge* tiver terminado; senão `assaltante.chase` | `ai/rules/assaltanteRules.ts` | ✅ |
 | Máquina de estados | `idle`, `chasing`, `attacking`, `lunging`, `recovering` | `combat/assaltanteController.ts` | ✅ |
-| Perseguição | **150** unidades/s *(antes 125; originalmente 90)*, entre a caminhada (175) e a corrida (220) do jogador, em linha reta; o sprite olha para a direção de perseguição | `movementDefs.ts` | 🟡 |
+| Perseguição | **150** unidades/s *(antes 125; originalmente 90)*, **mais lenta** que a caminhada (175) e que a corrida (220) do jogador, que pode se afastar dela, em linha reta; o sprite olha para a direção de perseguição | `movementDefs.ts` | 🟡 |
 | Ataque | Telegrafia **400 ms** (abre a janela de esquiva), golpe **150 ms** em leque de 90° com alcance 45 + meia largura, recuperação **500 ms** (abre a janela de punição) | `assaltanteController.ts` | ✅ |
 | Vida e dano | 60 de vida; golpe causa 20 | `movementDefs.ts` | ✅ |
 | ***Lunge*** (0.0.4) | Investida em linha reta. **Telegrafia de 500 ms** parado, mirando o jogador (a mira é atualizada e **trava no fim** da telegrafia); depois **carga a 450 u/s por até 260 u** (para na borda da arena). Acerta se chegar a **60** do jogador (`contactDistance`; conta também a posição do jogador na trava, para que uma esquiva lateral bem temporizada seja `dodge` e não `retreat`): mesmo dano (20) e *stagger*; esquiva com i-frames, bloqueio (15 de estamina) e parry funcionam como no golpe comum. Depois, `recovering` com janela de punição de **500 ms** (750 ms após parry). **Recarga de 6000 ms**, contada a partir do **início** do *lunge* anterior e que **começa no nascimento e no renascimento** do inimigo (nunca há *lunge* imediato). Janela de esquiva: 500 ms + tempo de carga (≈ 1078 ms). `enemy.attack_start` ganha `kind: 'swing'` ou `'lunge'` | `combat/assaltanteController.ts`, `ai/rules/assaltanteRules.ts`, `movementDefs.ts` (`LUNGE`) | 🟡 |
@@ -420,7 +420,7 @@ Princípio: **toda mecânica tem um sinal**, e o critério de suficiência é **
 | Golpe do inimigo (150 ms) | Slash da animação | Whoosh forte | O instante do golpe é inequívoco | ⬜ |
 | `enemy.hurt` / `enemy.death` | Flash branco; animação ou dissolução de morte | Acerto; som de morte | O acerto é percebido sem olhar a vida do inimigo | ⬜ |
 | **Janela de punição** (recuperação do inimigo, 500/750 ms) | Pose de recuperação legível; **sem destaque extra por padrão** | — | 🔵 Decisão metodológica: um destaque funciona como andaime e altera o sinal de omissão; se adotado, deve ser constante em todo o estudo | 🔵 |
-| **Perfect dodge** | A definir | A definir | Depende de definir a mecânica (janela e efeito); hoje a esquiva é binária | 🔵 |
+| **Perfect dodge** | A definir | A definir | Mecânica implementada na 0.0.4 (janela ≤ 80 ms, devolve 30 de estamina; ver 2.5); falta o sinal audiovisual | 🟡 mecânica; ⬜ sinal |
 | Troca de arma (1/2/3) | A arma muda na mão | Som de equipar | A arma ativa é identificável pela silhueta | ⬜ |
 | `run.start`, `room.enter`, saída de sala | Transição curta e texto | Estinger | Marca o ritmo sem tapar o combate | ⬜ |
 | `player.death` / `run.end` | Animação de morte e tela de fim de run | Estinger | O fim da run é inequívoco | ⬜ |

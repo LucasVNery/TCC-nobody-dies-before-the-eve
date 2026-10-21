@@ -4,7 +4,7 @@ import type { ActionType } from './actionRegistry';
 export const PLAYER_WALK_SPEED = 175; // px/s
 export const PLAYER_RUN_SPEED = 220; // px/s, sprint (costs stamina)
 export const BLOCK_MOVE_SPEED_FACTOR = 0.5; // fraction of PLAYER_WALK_SPEED while blocking
-export const ASSALTANTE_CHASE_SPEED = 150; // px/s, between the player's walk and run
+export const ASSALTANTE_CHASE_SPEED = 150; // px/s, slower than the player's walk (175) and run (220)
 export const DASH_DISTANCE = 120; // px, total displacement over DODGE.durationMs
 export const ARENA_BOUNDS: AABB = { x: 0, y: 0, width: 1600, height: 1200 };
 export const ATTACK_REACH = 45;
