@@ -106,6 +106,37 @@ describe('buildAnalysisView', () => {
     expect(ids.indexOf('tape.1')).toBeLessThan(ids.indexOf('tape.2'));
   });
 
+  it('stamina and items sections carry the Portuguese labels and render values from the windows', () => {
+    const agg = new MetricsAggregator();
+    const sample = (t: number, stam: number) =>
+      mk('pos.sample', t, { p: [0, 0], e: [0, 0], stam, spent: { attack: 5, sprint: 0, dodge: 0, block: 0 } });
+    agg.applyAll([
+      sample(0, 100), sample(250, 50), sample(500, 0),
+      mk('player.defense', 600, { label: 'dodge', perfect: true }),
+      mk('item.spawn', 610, { item_id: 'a', kind: 'heal', x: 0, y: 0 }),
+      mk('item.pickup', 620, { item_id: 'a', kind: 'heal', wait_ms: 4000 }),
+      mk('item.use', 630, { kind: 'heal', hp: 10, dist_to_enemy: 5, held_ms: 100, effective: false }),
+    ]);
+    const v = buildAnalysisView(input({ metrics: agg.snapshot() }));
+    const st = sec(v, 'stamina');
+    const names = st.rows.map((r) => r.cells[0]);
+    for (const n of ['estamina média', 'estamina ≥ 80%', 'tempo exausto', 'gasto/min', 'gasto por tipo', 'negadas', 'guard breaks', 'perfect dodges']) {
+      expect(names).toContain(n);
+    }
+    const hist = (s: string, label: string) => sec(v, s).rows.find((r) => r.cells[0] === label)!.cells[4];
+    expect(hist('stamina', 'estamina média')).toBe('25,0 n=3');
+    expect(hist('stamina', 'tempo exausto')).toBe('50% n=3');
+    expect(hist('stamina', 'perfect dodges')).toBe('1/1 (100%) n=1');
+    const items = sec(v, 'items').rows.map((r) => r.cells[0]).join('|');
+    for (const n of ['itens oferecidos/pegos', 'itens taxa', 'itens espera', 'usos por tipo', 'usos desperdiçados']) {
+      expect(items).toContain(n);
+    }
+    expect(hist('items', 'itens espera média')).toBe('4000 ms n=1');
+    expect(hist('items', 'usos desperdiçados')).toBe('1 n=1');
+    for (const s of [st, sec(v, 'items')]) for (const r of s.rows) expect(r.cells).toHaveLength(5);
+    for (const t of allText(v)) expect(t).not.toMatch(/NaN|undefined|Infinity/);
+  });
+
   it('predictor section says não implementado (5b)', () => {
     expect(sec(buildAnalysisView(input()), 'predictor').rows[0].cells[0]).toBe('não implementado (5b)');
   });

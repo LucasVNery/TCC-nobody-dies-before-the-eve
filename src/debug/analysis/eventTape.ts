@@ -29,6 +29,22 @@ export function summarize(ev: LoggedEvent): string {
       }
       case 'player.hurt':
         return fin(e.dmg) && fin(e.hp_after) ? `dmg=${e.dmg} hp=${e.hp_after}` : '';
+      case 'player.stamina_denied':
+        return str(e.action) ? `negada ${e.action}` : '';
+      case 'player.guard_break':
+        return 'guard break';
+      case 'item.spawn':
+        return str(e.kind) ? `surgiu ${e.kind}` : '';
+      case 'item.pickup':
+        return str(e.kind) && fin(e.wait_ms) ? `pegou ${e.kind} (${Math.round(e.wait_ms)} ms)` : '';
+      case 'item.expire':
+        return str(e.kind) ? `sumiu ${e.kind}${str(e.reason) ? ` (${e.reason})` : ''}` : '';
+      case 'item.use':
+        return str(e.kind) ? `usou ${e.kind}${e.effective === false ? ' (desperdício)' : ''}` : '';
+      case 'projectile.hit':
+        return fin(e.dmg) ? `projétil acertou dmg=${e.dmg}` : '';
+      case 'projectile.expire':
+        return 'projétil expirou';
       default:
         return '';
     }

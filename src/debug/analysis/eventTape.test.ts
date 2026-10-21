@@ -59,6 +59,20 @@ describe('summarize', () => {
     expect(summarize(mk('player.hurt', 0, { dmg: 20, hp_after: 80 }))).toBe('dmg=20 hp=80');
   });
 
+  it('summarizes stamina, item and projectile events and rejects bad payloads', () => {
+    expect(summarize(mk('player.stamina_denied', 0, { action: 'dodge' }))).toBe('negada dodge');
+    expect(summarize(mk('player.guard_break', 0))).toBe('guard break');
+    expect(summarize(mk('item.spawn', 0, { kind: 'heal' }))).toBe('surgiu heal');
+    expect(summarize(mk('item.pickup', 0, { kind: 'bomb', wait_ms: 4000.4 }))).toBe('pegou bomb (4000 ms)');
+    expect(summarize(mk('item.expire', 0, { kind: 'power', reason: 'timeout' }))).toBe('sumiu power (timeout)');
+    expect(summarize(mk('item.use', 0, { kind: 'heal', effective: false }))).toBe('usou heal (desperdício)');
+    expect(summarize(mk('item.use', 0, { kind: 'heal', effective: true }))).toBe('usou heal');
+    expect(summarize(mk('projectile.hit', 0, { id: 1, dmg: 7 }))).toBe('projétil acertou dmg=7');
+    expect(summarize(mk('projectile.expire', 0, { id: 1 }))).toBe('projétil expirou');
+    expect(summarize(mk('item.pickup', 0, { kind: 'bomb', wait_ms: 'x' }))).toBe('');
+    expect(summarize(mk('player.stamina_denied', 0, {}))).toBe('');
+  });
+
   it('summarizes pos.sample as pos', () => {
     expect(summarize(mk('pos.sample', 0, { p: [1, 2], e: [3, 4] }))).toBe('pos');
   });

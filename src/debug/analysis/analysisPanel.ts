@@ -24,7 +24,7 @@ export function needsRebuild(prev: ViewSection | null, next: ViewSection): boole
 
 const COLUMN_LAYOUT: ViewSection['id'][][] = [
   ['inputs', 'events'],
-  ['metrics'],
+  ['metrics', 'stamina', 'items'],
   ['profile', 'registry', 'predictor', 'perf'],
 ];
 

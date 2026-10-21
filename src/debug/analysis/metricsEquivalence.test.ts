@@ -38,10 +38,15 @@ describe('metrics equivalence', () => {
     expect(count((e) => e.type === 'player.dodge')).toBeGreaterThanOrEqual(1);
     expect(count((e) => e.type === 'opp.close')).toBeGreaterThanOrEqual(1);
     expect(count((e) => e.type === 'session.start')).toBe(2);
+    // the new stamina fields are exercised by this log, so the equality below covers them
+    expect(count((e) => e.type === 'pos.sample' && typeof e.stam === 'number')).toBeGreaterThanOrEqual(10);
+    expect(count((e) => e.type === 'pos.sample' && e.spent !== undefined)).toBeGreaterThanOrEqual(10);
 
     const live = agg.snapshot();
     expect(live).toEqual(metricsFromLog(log));
     expect(live.malformed).toBe(0);
+    expect(live.windows.history.stamina.meanLevel).not.toBeNull();
+    expect(live.windows.history.stamina.spentPerMinute).not.toBeNull();
     // elapsedMs spans both sessions: history skips the t_ms reset jump at session.start
     const hist = live.windows.history.elapsedMs;
     const sess = live.windows.session.elapsedMs;

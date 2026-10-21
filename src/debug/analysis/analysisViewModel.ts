@@ -33,7 +33,7 @@ export interface AnalysisInput {
 export interface ViewRow { id: string; cells: string[] }
 
 export interface ViewSection {
-  id: 'inputs' | 'events' | 'metrics' | 'profile' | 'registry' | 'predictor' | 'perf';
+  id: 'inputs' | 'events' | 'metrics' | 'stamina' | 'items' | 'profile' | 'registry' | 'predictor' | 'perf';
   title: string;
   columns: string[];
   rows: ViewRow[];
@@ -87,6 +87,42 @@ function metricsSection(m: MetricsSnapshot, p: ProfileView): ViewSection {
   rows.push(profileMetricRow('m13', 'M13 pacientes (decaído)', 'patience', p));
   rows.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   return { id: 'metrics', title: 'Métricas', columns: ['métrica', 'encontro', 'run', 'sessão', 'histórico'], rows };
+}
+
+const SPEND_LABEL: [string, 'attack' | 'sprint' | 'dodge' | 'block'][] = [
+  ['atq', 'attack'], ['corr', 'sprint'], ['esq', 'dodge'], ['def', 'block'],
+];
+const USE_LABEL: [string, 'heal' | 'power' | 'bomb'][] = [['cura', 'heal'], ['poder', 'power'], ['bomba', 'bomb']];
+const SAMPLE_OF = (w: WindowMetrics): string => fmtSample(w.samples);
+
+const STAMINA_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [
+  { id: 's1', name: 'estamina média', cell: (w) => `${fmtNum(w.stamina.meanLevel, 1)} ${SAMPLE_OF(w)}` },
+  { id: 's2', name: 'estamina ≥ 80%', cell: (w) => `${fmtPercent(w.stamina.highFraction)} ${SAMPLE_OF(w)}` },
+  { id: 's3', name: 'tempo exausto', cell: (w) => `${fmtPercent(w.stamina.exhaustedFraction)} ${SAMPLE_OF(w)}` },
+  { id: 's4', name: 'gasto/min', cell: (w) => `${fmtNum(w.stamina.spentPerMinute, 1)} ${SAMPLE_OF(w)}` },
+  { id: 's5', name: 'gasto por tipo', cell: (w) => SPEND_LABEL.map(([l, k]) => `${l}:${fmtNum(w.stamina.spentByKind[k], 0)}`).join(' ') },
+  { id: 's6', name: 'negadas', cell: (w) => String(w.stamina.denied) },
+  { id: 's7', name: 'guard breaks', cell: (w) => String(w.stamina.guardBreaks) },
+  { id: 's8', name: 'perfect dodges', cell: (w) => `${w.stamina.perfectDodges}/${w.stamina.dodges} (${fmtPercent(w.stamina.perfectRate)}) ${fmtSample(w.stamina.dodges)}` },
+];
+
+const ITEM_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [
+  { id: 'i1', name: 'itens oferecidos/pegos', cell: (w) => `${w.items.spawned}/${w.items.picked} (expirados ${w.items.expired})` },
+  { id: 'i2', name: 'itens taxa de coleta', cell: (w) => `${fmtPercent(w.items.pickRate)} ${fmtSample(w.items.picked + w.items.expired)}` },
+  { id: 'i3', name: 'itens espera média', cell: (w) => `${fmtMs(w.items.meanWaitMs)} ${fmtSample(w.items.picked)}` },
+  { id: 'i4', name: 'usos por tipo', cell: (w) => USE_LABEL.map(([l, k]) => `${l}:${w.items.uses[k]}`).join(' ') },
+  { id: 'i5', name: 'usos desperdiçados', cell: (w) => `${w.items.wastedUses} ${fmtSample(sum(w.items.uses))}` },
+  { id: 'i6', name: 'itens retenção média', cell: (w) => `${fmtMs(w.items.meanHeldMs)} ${fmtSample(sum(w.items.uses))}` },
+];
+
+function windowSection(
+  id: 'stamina' | 'items', title: string,
+  defs: { id: string; name: string; cell: (w: WindowMetrics) => string }[], m: MetricsSnapshot,
+): ViewSection {
+  return {
+    id, title, columns: ['métrica', 'encontro', 'run', 'sessão', 'histórico'],
+    rows: defs.map((r) => ({ id: r.id, cells: [r.name, ...WINDOW_IDS.map((w) => r.cell(m.windows[w]))] })),
+  };
 }
 
 function profileSection(p: ProfileView): ViewSection {
@@ -178,6 +214,8 @@ export function buildAnalysisView(input: AnalysisInput): AnalysisView {
     inputsSection(live),
     eventsSection(metrics, tape),
     metricsSection(metrics, profile),
+    windowSection('stamina', 'Estamina', STAMINA_ROWS, metrics),
+    windowSection('items', 'Itens', ITEM_ROWS, metrics),
     profileSection(profile),
     registrySection(status),
     { id: 'predictor', title: 'Preditor', columns: ['estado'], rows: [{ id: 'status', cells: ['não implementado (5b)'] }] },

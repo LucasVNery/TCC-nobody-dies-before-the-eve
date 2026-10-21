@@ -1,7 +1,7 @@
 // One metrics window: O(1) folding of events into running sums.
 import type { LoggedEvent } from '../../telemetry/schema';
 import { MOVING_SPEED_EPS, type Derived } from './streamTracker';
-import type { Distribution, OppStats, WindowMetrics } from './metricsTypes';
+import type { Distribution, ItemKindId, OppStats, SpendKind, WindowMetrics } from './metricsTypes';
 
 const div = (a: number, b: number): number | null => (b > 0 && Number.isFinite(a / b) ? a / b : null);
 const bump = (m: Record<string, number>, k: string): void => {
@@ -10,6 +10,11 @@ const bump = (m: Record<string, number>, k: string): void => {
 const neutralOpp = (): OppStats => ({
   taken: 0, missed: 0, expired: 0, invalid: 0, rate: null, omission: null,
 });
+
+const HIGH_STAMINA = 80;
+const SPEND_KINDS: SpendKind[] = ['attack', 'sprint', 'dodge', 'block'];
+const zeroSpent = (): Record<SpendKind, number> => ({ attack: 0, sprint: 0, dodge: 0, block: 0 });
+const zeroUses = (): Record<ItemKindId, number> => ({ heal: 0, power: 0, bomb: 0 });
 
 const CELL_SIZE = 64;
 // ceil(1600/64) * ceil(1200/64) = 25 * 19, from ARENA_BOUNDS (1600x1200); a drift test guards it.
@@ -76,6 +81,24 @@ export class WindowAccumulator {
   private cancelByCause: Record<string, number> = {};
   private dealt = 0;
   private taken = 0;
+  private stamDt = 0;
+  private stamWeighted = 0;
+  private highDt = 0;
+  private exhaustedDt = 0;
+  private spentSeen = false;
+  private spentByKind = zeroSpent();
+  private denied = 0;
+  private guardBreaks = 0;
+  private dodges = 0;
+  private perfectDodges = 0;
+  private itemsSpawned = 0;
+  private itemsPicked = 0;
+  private itemsExpired = 0;
+  private waitSum = 0;
+  private itemUses = zeroUses();
+  private wastedUses = 0;
+  private heldSum = 0;
+  private useN = 0;
 
   apply(ev: LoggedEvent, d: Derived): void {
     if (this.lastT !== null && this.lastSession === ev.session_id) {
@@ -100,6 +123,18 @@ export class WindowAccumulator {
           // the denominator (dtSum) but is never idle.
           if (d.idle === true) this.idleDt += d.dtMs;
         }
+        if (d.dtMs !== null && typeof ev.stam === 'number') {
+          // Like distance, each interval weighs the value at its end.
+          this.stamDt += d.dtMs;
+          this.stamWeighted += ev.stam * d.dtMs;
+          if (ev.stam >= HIGH_STAMINA) this.highDt += d.dtMs;
+          if (ev.stam <= 0) this.exhaustedDt += d.dtMs;
+        }
+        if (ev.spent !== undefined) {
+          this.spentSeen = true;
+          const sp = ev.spent as Record<string, number>;
+          for (const k of SPEND_KINDS) if (typeof sp[k] === 'number') this.spentByKind[k] += sp[k];
+        }
         break;
       case 'player.action': {
         this.actionCount += 1;
@@ -115,6 +150,32 @@ export class WindowAccumulator {
       }
       case 'player.defense':
         bump(this.defenseCounts, ev.label as string);
+        if (ev.label === 'dodge') {
+          this.dodges += 1;
+          if (ev.perfect === true) this.perfectDodges += 1;
+        }
+        break;
+      case 'player.stamina_denied':
+        this.denied += 1;
+        break;
+      case 'player.guard_break':
+        this.guardBreaks += 1;
+        break;
+      case 'item.spawn':
+        this.itemsSpawned += 1;
+        break;
+      case 'item.pickup':
+        this.itemsPicked += 1;
+        this.waitSum += ev.wait_ms as number;
+        break;
+      case 'item.expire':
+        this.itemsExpired += 1;
+        break;
+      case 'item.use':
+        this.itemUses[ev.kind as ItemKindId] += 1;
+        this.useN += 1;
+        this.heldSum += ev.held_ms as number;
+        if (ev.effective === false) this.wastedUses += 1;
         break;
       case 'opp.close': {
         const o = this.opps[ev.opp_type as 'dodge' | 'punish'];
@@ -189,6 +250,24 @@ export class WindowAccumulator {
     this.cancelByCause = {};
     this.dealt = 0;
     this.taken = 0;
+    this.stamDt = 0;
+    this.stamWeighted = 0;
+    this.highDt = 0;
+    this.exhaustedDt = 0;
+    this.spentSeen = false;
+    this.spentByKind = zeroSpent();
+    this.denied = 0;
+    this.guardBreaks = 0;
+    this.dodges = 0;
+    this.perfectDodges = 0;
+    this.itemsSpawned = 0;
+    this.itemsPicked = 0;
+    this.itemsExpired = 0;
+    this.waitSum = 0;
+    this.itemUses = zeroUses();
+    this.wastedUses = 0;
+    this.heldSum = 0;
+    this.useN = 0;
   }
 
   /** Median of the reactions, cached until a new reaction arrives. */
@@ -248,6 +327,30 @@ export class WindowAccumulator {
       },
       idleFraction: div(this.idleDt, this.dtSum),
       coverage: this.samples > 0 ? this.cells.size / ARENA_CELLS : null,
+      stamina: {
+        meanLevel: div(this.stamWeighted, this.stamDt),
+        highFraction: div(this.highDt, this.stamDt),
+        exhaustedFraction: div(this.exhaustedDt, this.stamDt),
+        spentPerMinute: this.spentSeen
+          ? div(SPEND_KINDS.reduce((a, k) => a + this.spentByKind[k], 0), this.elapsedMs / 60000)
+          : null,
+        spentByKind: { ...this.spentByKind },
+        denied: this.denied,
+        guardBreaks: this.guardBreaks,
+        perfectDodges: this.perfectDodges,
+        dodges: this.dodges,
+        perfectRate: div(this.perfectDodges, this.dodges),
+      },
+      items: {
+        spawned: this.itemsSpawned,
+        picked: this.itemsPicked,
+        expired: this.itemsExpired,
+        pickRate: div(this.itemsPicked, this.itemsPicked + this.itemsExpired),
+        meanWaitMs: div(this.waitSum, this.itemsPicked),
+        uses: { ...this.itemUses },
+        wastedUses: this.wastedUses,
+        meanHeldMs: div(this.heldSum, this.useN),
+      },
     };
   }
 }

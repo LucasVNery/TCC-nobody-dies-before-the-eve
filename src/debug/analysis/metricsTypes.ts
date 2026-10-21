@@ -21,6 +21,40 @@ export interface Distribution {
   entropy: number | null;
 }
 
+export type SpendKind = 'attack' | 'sprint' | 'dodge' | 'block';
+export type ItemKindId = 'heal' | 'power' | 'bomb';
+
+export interface StaminaMetrics {
+  /** Sum(stam*dt)/Sum(dt) between consecutive samples of the same run; each interval weighs the stam at its end. */
+  meanLevel: number | null;
+  /** Time with stam >= 80 over total time. */
+  highFraction: number | null;
+  /** Time with stam <= 0 over total time. */
+  exhaustedFraction: number | null;
+  /** Sum(spent) per minute of elapsedMs; null when no sample carried spent. */
+  spentPerMinute: number | null;
+  spentByKind: Record<SpendKind, number>;
+  denied: number;
+  guardBreaks: number;
+  perfectDodges: number;
+  dodges: number;
+  /** perfectDodges / dodges. */
+  perfectRate: number | null;
+}
+
+export interface ItemMetrics {
+  spawned: number;
+  picked: number;
+  expired: number;
+  /** picked / (picked + expired). */
+  pickRate: number | null;
+  meanWaitMs: number | null;
+  uses: Record<ItemKindId, number>;
+  /** item.use with effective:false. */
+  wastedUses: number;
+  meanHeldMs: number | null;
+}
+
 export interface WindowMetrics {
   /** Sum of t_ms deltas between consecutive events of the same session. */
   elapsedMs: number;
@@ -57,6 +91,8 @@ export interface WindowMetrics {
   };
   idleFraction: number | null;
   coverage: number | null;
+  stamina: StaminaMetrics;
+  items: ItemMetrics;
 }
 
 export interface OpenOpportunity {

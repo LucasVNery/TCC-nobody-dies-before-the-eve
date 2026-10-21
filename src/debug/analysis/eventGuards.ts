@@ -6,6 +6,8 @@ const OUTCOMES = new Set(['taken', 'missed', 'expired', 'invalid']);
 const CANCEL_BY = new Set(['move', 'dash', 'attack']);
 const DEFENSE_LABELS = new Set(['dodge', 'block', 'parry', 'retreat']);
 
+const ITEM_KINDS = new Set(['heal', 'power', 'bomb']);
+
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const str = (v: unknown): v is string => typeof v === 'string';
 const vec2 = (v: unknown): boolean => Array.isArray(v) && v.length === 2 && fin(v[0]) && fin(v[1]);
@@ -39,6 +41,22 @@ export function isWellFormed(ev: LoggedEvent): boolean {
       );
     case 'run.end':
       return fin(e.duration_ms) && fin(e.rooms_cleared) && fin(e.encounters_cleared);
+    case 'player.stamina_denied':
+      return str(e.action);
+    case 'item.spawn':
+    case 'item.expire':
+      return str(e.item_id) && str(e.kind) && ITEM_KINDS.has(e.kind);
+    case 'item.pickup':
+      return str(e.item_id) && str(e.kind) && ITEM_KINDS.has(e.kind) && fin(e.wait_ms);
+    case 'item.use':
+      return (
+        str(e.kind) && ITEM_KINDS.has(e.kind) && fin(e.hp) && fin(e.dist_to_enemy) &&
+        fin(e.held_ms) && typeof e.effective === 'boolean'
+      );
+    case 'projectile.hit':
+      return fin(e.id) && fin(e.dmg);
+    case 'projectile.expire':
+      return fin(e.id);
     default:
       return true;
   }

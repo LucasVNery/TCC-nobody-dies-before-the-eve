@@ -35,6 +35,24 @@ describe('isWellFormed', () => {
     expect(isWellFormed(mk('player.cancel', 0, { by: 'dash' }))).toBe(true);
     expect(isWellFormed(mk('player.cancel', 0, { by: 'fly' }))).toBe(false);
   });
+  it('validates the stamina, item and projectile events', () => {
+    expect(isWellFormed(mk('player.stamina_denied', 0, { action: 'dodge' }))).toBe(true);
+    expect(isWellFormed(mk('player.stamina_denied', 0, {}))).toBe(false);
+    expect(isWellFormed(mk('player.guard_break', 0))).toBe(true);
+    expect(isWellFormed(mk('item.spawn', 0, { item_id: 'a', kind: 'bomb', x: 1, y: 2 }))).toBe(true);
+    expect(isWellFormed(mk('item.spawn', 0, { item_id: 'a', kind: 'axe' }))).toBe(false);
+    expect(isWellFormed(mk('item.pickup', 0, { item_id: 'a', kind: 'heal', wait_ms: 10 }))).toBe(true);
+    expect(isWellFormed(mk('item.pickup', 0, { item_id: 'a', kind: 'heal', wait_ms: NaN }))).toBe(false);
+    expect(isWellFormed(mk('item.expire', 0, { item_id: 'a', kind: 'power', reason: 'timeout' }))).toBe(true);
+    const use = { kind: 'heal', hp: 1, dist_to_enemy: 2, held_ms: 3, effective: true };
+    expect(isWellFormed(mk('item.use', 0, use))).toBe(true);
+    expect(isWellFormed(mk('item.use', 0, { ...use, effective: 'yes' }))).toBe(false);
+    expect(isWellFormed(mk('item.use', 0, { ...use, held_ms: Infinity }))).toBe(false);
+    expect(isWellFormed(mk('projectile.hit', 0, { id: 1, dmg: 5 }))).toBe(true);
+    expect(isWellFormed(mk('projectile.hit', 0, { id: 1 }))).toBe(false);
+    expect(isWellFormed(mk('projectile.expire', 0, { id: 1 }))).toBe(true);
+    expect(isWellFormed(mk('projectile.expire', 0, {}))).toBe(false);
+  });
   it('passes event types the metrics do not read', () => {
     expect(isWellFormed(mk('obs.record', 0, { anything: NaN }))).toBe(true);
   });
