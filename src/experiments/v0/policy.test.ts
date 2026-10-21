@@ -6,6 +6,8 @@ import type { EnemyState, Vec2 } from '../../combat/types';
 import { DEFAULT_HUMANIZER, Humanizer, type HumanizerConfig } from './humanizer';
 import type { Observation } from './perception';
 import { AGENT_STYLES, STYLE_IDS, type AgentStyle, type StyleId } from './styles';
+import { STAGGER_MS } from '../../combat/actionDefs';
+import { STAMINA_COST } from '../../combat/stamina';
 import { AgentPolicy, PERCEPTION_LAG_MS, type AgentIntent } from './policy';
 
 const STEP = 1000 / 60;
@@ -24,14 +26,14 @@ interface World {
 
 const PLAYER_POS = { x: 800, y: 600 };
 
-function obsOf(tMs: number, w: World, body: { weapon: string; blocking: boolean }): Observation {
+function obsOf(tMs: number, w: World, body: { weapon: string; blocking: boolean; stamina?: number }): Observation {
   return {
     tMs,
     enemyState: w.enemyState,
     enemyPos: { x: PLAYER_POS.x + w.offset.x, y: PLAYER_POS.y + w.offset.y },
     playerPos: { x: PLAYER_POS.x, y: PLAYER_POS.y },
     playerHp: 100,
-    playerStamina: 100,
+    playerStamina: body.stamina ?? 100,
     isBlocking: body.blocking,
     equippedWeaponId: body.weapon,
     enemyDead: false,
@@ -55,8 +57,9 @@ function drive(
   world: (tMs: number) => World,
   startWeapon = 'sword_shield',
   until?: (log: Step[]) => boolean,
+  stamina = 100,
 ): Step[] {
-  const body = { weapon: startWeapon, blocking: false };
+  const body = { weapon: startWeapon, blocking: false, stamina };
   const log: Step[] = [];
   for (let i = 0; i < steps; i++) {
     const t = i * STEP;
@@ -483,5 +486,63 @@ describe('AgentPolicy action lifecycle (fix round 1)', () => {
       expect(f, a).toBeGreaterThanOrEqual(0.1);
       expect(f, a).toBeLessThanOrEqual(0.18);
     }
+  });
+});
+
+describe('AgentPolicy under stamina limits (Task 9)', () => {
+  const dodger: AgentStyle = { ...AGENT_STYLES.agressivo, id: 'agressivo', defenseWeights: { dodge: 1, block: 0, parry: 0, none: 0 } };
+  const blocker: AgentStyle = { ...AGENT_STYLES.agressivo, id: 'agressivo', defenseWeights: { dodge: 0, block: 1, parry: 0, none: 0 } };
+  const STEPS = Math.round(30_000 / STEP);
+
+  it.each(STYLE_IDS)('%s: at 0 stamina never presses an attack, the guard or a dodge', (id) => {
+    const log = drive(makePolicy(id, 8), STEPS, cycleWorld(30), 'sword_shield', undefined, 0);
+    for (const l of log) {
+      expect(l.intent.startAction).toBeUndefined();
+      expect(l.intent.dodge).toBeUndefined();
+      expect(l.intent.block).not.toBe('start');
+    }
+  });
+
+  it('with 0 < stamina < dodge cost it still attacks and guards but never dodges', () => {
+    const attack = drive(makePolicy('agressivo', 8), STEPS, cycleWorld(30), 'sword_shield', undefined, STAMINA_COST.dodge - 1);
+    expect(starts(attack).length).toBeGreaterThan(0);
+    expect(attack.some((l) => l.intent.dodge)).toBe(false);
+    const dodgeStyle = drive(makePolicy('agressivo', 8, NO_LAPSE, dodger), STEPS, cycleWorld(30), 'sword_shield', undefined, STAMINA_COST.dodge - 1);
+    expect(dodgeStyle.some((l) => l.intent.dodge)).toBe(false);
+    // the planned dodge falls back to a block
+    expect(dodgeStyle.some((l) => l.intent.block === 'start')).toBe(true);
+  });
+
+  it('a dodging style does dodge when stamina covers the cost (the fallback is not always-on)', () => {
+    const log = drive(makePolicy('agressivo', 8, NO_LAPSE, dodger), STEPS, cycleWorld(30), 'sword_shield', undefined, STAMINA_COST.dodge);
+    expect(log.some((l) => l.intent.dodge)).toBe(true);
+  });
+
+  it('a planned block with no stamina is dropped, not pressed', () => {
+    const log = drive(makePolicy('agressivo', 8, NO_LAPSE, blocker), STEPS, cycleWorld(30), 'sword_shield', undefined, 0);
+    expect(log.some((l) => l.intent.block === 'start')).toBe(false);
+    const ok = drive(makePolicy('agressivo', 8, NO_LAPSE, blocker), STEPS, cycleWorld(30), 'sword_shield', undefined, 50);
+    expect(ok.some((l) => l.intent.block === 'start')).toBe(true);
+  });
+
+  it('does not crash on the lunging enemy state', () => {
+    for (const id of STYLE_IDS) {
+      const log = drive(makePolicy(id, 3), 600, still('lunging', 30));
+      expect(log).toHaveLength(600);
+    }
+  });
+
+  it('a guard break (stamina emptied while blocking, HP intact) is read as a stagger: no attack until it ends', () => {
+    const policy = makePolicy('agressivo', 4);
+    const world = { enemyState: 'idle' as EnemyState, offset: { x: 30, y: 0 } };
+    const step = (t: number, stamina: number, blocking: boolean) =>
+      policy.decide({ now: obsOf(t, world, { weapon: 'sword_shield', blocking, stamina }), seen: obsOf(t - PERCEPTION_LAG_MS, world, { weapon: 'sword_shield', blocking, stamina }), nowMs: t });
+    let t = 1000;
+    step(t, 40, true); // guard up with stamina left
+    t += STEP;
+    step(t, 0, true); // the hit drained the bar to 0: guard break
+    const during: AgentIntent[] = [];
+    for (; t < 1000 + STAGGER_MS; t += STEP) during.push(step(t + STEP, 0, false));
+    expect(during.some((i) => i.startAction)).toBe(false);
   });
 });

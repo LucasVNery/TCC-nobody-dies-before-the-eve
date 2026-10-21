@@ -2,6 +2,7 @@ import type { EnemyState, Vec2 } from '../../combat/types';
 import { ACTION_REGISTRY, lockedMs, type ActionDef } from '../../combat/actionRegistry';
 import { DODGE, PARRY_WINDOW_MS, STAGGER_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
+import { STAMINA_COST } from '../../combat/stamina';
 import { MIN_REACTION_MS, type Humanizer } from './humanizer';
 import type { Observation } from './perception';
 import type { AgentStyle, DefenseWeights } from './styles';
@@ -178,7 +179,12 @@ export class AgentPolicy {
       this.pending.at = this.lockedUntil;
     }
     if (this.pending && nowMs >= this.pending.at) {
-      if (this.pending.kind === 'dodge') {
+      // A player sees the stamina bar: a defence the bar cannot pay for is not pressed (the engine would
+      // deny it). A dodge falls back to the guard when there is any stamina, otherwise nothing.
+      let kind: Exclude<DefenseKind, 'none'> | 'none' = this.pending.kind;
+      if (kind === 'dodge' && now.playerStamina < STAMINA_COST.dodge) kind = now.playerStamina > 0 ? 'block' : 'none';
+      if ((kind === 'block' || kind === 'parry') && now.playerStamina <= 0) kind = 'none';
+      if (kind === 'dodge') {
         dodgeNow = true;
         intent.dodge = true;
         this.chargeReleaseAt = null; // the dash cancels a charge
@@ -187,7 +193,7 @@ export class AgentPolicy {
         // the body, and that action's own lock must not be shortened by it
         this.lockedUntil = Math.max(this.lockedUntil, nowMs + DODGE.durationMs);
         this.wantBlock = false;
-      } else {
+      } else if (kind !== 'none') {
         // let go of the charge to get the guard up sooner
         if (this.chargeReleaseAt !== null) this.releaseCharge(intent, nowMs);
         if (!this.wantBlock) this.blockSince = nowMs;
@@ -195,6 +201,8 @@ export class AgentPolicy {
       }
       this.pending = null;
     }
+    // an empty bar cannot raise the guard; a guard already up is released by the min-hold rule below
+    if (this.wantBlock && !now.isBlocking && now.playerStamina <= 0) this.wantBlock = false;
     if (this.wantBlock && st !== 'attacking' && nowMs - this.blockSince >= MIN_BLOCK_HOLD_MS) this.wantBlock = false;
     if (this.wantBlock && !now.isBlocking) intent.block = 'start';
     else if (!this.wantBlock && now.isBlocking) intent.block = 'stop';
@@ -221,7 +229,9 @@ export class AgentPolicy {
       if (plan.action.weaponId !== now.equippedWeaponId) intent.switchTo = plan.action.weaponId;
       else if (nowMs >= this.weaponReadyAt && nowMs - this.lastAttackAt >= this.style.attackCooldownMs && opening) {
         if (!reachOk) approach = true;
-        else if (this.humanizer.lapses()) this.lastAttackAt = nowMs;
+        else if (now.playerStamina <= 0) {
+          // exhausted: an attack press would be denied; wait for the bar to refill
+        } else if (this.humanizer.lapses()) this.lastAttackAt = nowMs;
         else this.startAttack(intent, plan, nowMs);
       }
     }

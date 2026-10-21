@@ -126,8 +126,8 @@ describe('agent runner', () => {
   it('repetitivo only produces sword_shield.light actions and no weapon switch', () => {
     const log = playAgent('repetitivo', tiny({ runCapMs: 30_000 }), 0);
     const actions = ofType(log.events, 'player.action');
-    // the policy is stamina-blind until a later task, so exhaustion throttles it (10 actions observed)
-    expect(actions.length).toBeGreaterThanOrEqual(5);
+    // seed 4242 gives 20 actions (other seeds 12-25); the stamina-blind policy managed only ~10
+    expect(actions.length).toBeGreaterThan(10);
     for (const a of actions) {
       expect(a.actionId).toBe('sword_shield.light');
       expect(a.weaponId).toBe('sword_shield');
@@ -151,6 +151,34 @@ describe('agent runner', () => {
       expect(s.game_version).toBe(GAME_VERSION);
       expect(s.schema_v).toBe(SCHEMA_VERSION);
     }
+  });
+
+  describe('stamina limits (Task 9)', () => {
+    // 60 runs of up to 60 s: every style simulates well over 600 s
+    const long = tiny({ runsPerAgent: 60, runsPerSession: 10, runCapMs: 60_000 });
+    const logs = runExperiment(long);
+
+    it.each(STYLE_IDS.map((id, i) => [id, i] as const))('%s: 600 s+ of play with no player.stamina_denied and >= 2 completed runs', (id, i) => {
+      const log = logs[i];
+      expect(log.styleId).toBe(id);
+      expect(log.simulatedMs).toBeGreaterThanOrEqual(600_000);
+      expect(ofType(log.events, 'player.stamina_denied')).toHaveLength(0);
+      expect(log.completedRuns).toBeGreaterThanOrEqual(2);
+      expect(ofType(log.events, 'player.action').length).toBeGreaterThan(0);
+    });
+
+    it('AgentLog is deterministic: same seed, same log', () => {
+      const again = runExperiment(long);
+      for (let i = 0; i < logs.length; i++) {
+        expect(again[i].events).toEqual(logs[i].events);
+        expect([again[i].completedRuns, again[i].truncatedRuns, again[i].emptyRuns, again[i].simulatedMs]).toEqual([
+          logs[i].completedRuns,
+          logs[i].truncatedRuns,
+          logs[i].emptyRuns,
+          logs[i].simulatedMs,
+        ]);
+      }
+    });
   });
 
   describe('run classes: completed, truncated, empty', () => {

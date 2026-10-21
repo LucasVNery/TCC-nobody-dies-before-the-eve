@@ -15,10 +15,11 @@ export const REPORT_SKILLS: readonly SkillId[] = [
 ];
 
 /**
- * Minimum number of RAW evidence events in the window (obs.action for the
- * weapon/action repertoires, obs.defense for the defensive one; only events
- * after the window's last obs.reset) for an entropy dimension to be defined in
- * a V0 window. Not the trait-decayed count. Analysis only: the game's
+ * Minimum number of RAW evidence events in the window for an entropy dimension
+ * to be defined in a V0 window: obs.action for the action repertoire, obs.action
+ * carrying a weaponId for the weapon repertoire (weaponId-less item-use actions
+ * do not count there), obs.defense for the defensive one; only events after the
+ * window's last obs.reset. Not the trait-decayed count. Analysis only: the game's
  * ProfileAccumulator is unchanged.
  */
 export const MIN_ACTIONS_FOR_ENTROPY = 8;

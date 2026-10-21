@@ -37,8 +37,6 @@ function play(id: StyleId, seed: number, ms: number) {
     buffer.push(now);
     const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
     const p = encounter.player;
-    // Stamina-blind policy (it becomes stamina-aware in a later task): keep stamina out of this charge-handling test.
-    p.stamina.refund(100);
     p.setMoveInput(intent.move.x, intent.move.y);
     p.setAimDirection(intent.aim);
     if (intent.switchTo) p.switchWeapon(intent.switchTo);
