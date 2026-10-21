@@ -164,3 +164,19 @@ Organização dos módulos novos (`combat/stamina.ts`, `combat/projectile.ts`, `
 1. Todos os valores numéricos de §4 (custos, tempos, raios) como ponto de partida, a ajustar no playtest.
 2. Se a V0.1 deve incluir comportamento de coleta e uso de itens nos agentes (recomendo que sim, para validar as métricas de itens).
 3. Se a oportunidade `item` deve virar, depois, a **sétima dimensão** do perfil (aproveitamento de itens, no lugar da de uso de espaço).
+
+## 10. Divergências do plano e rulings
+
+Registro do que a implementação decidiu de forma diferente do texto acima ou onde a spec era aberta (21/10/2026, tarefas 1 a 9). O documento técnico mestre (`Contexto_pesquisa/documento-tecnico-mestre.md`) traz os valores finais.
+
+1. **Itens não são um `OppType`.** A §3 falava em oportunidade `item`; na implementação os itens têm eventos próprios (`item.spawn`, `item.pickup`, `item.expire`, `item.use`), gravados sem `ctx`, e **não** entram no sistema de oportunidades. A conservação vale **por run** (`spawn = pickup + expire`); **runs abandonadas** (aba fechada) ficam isentas, porque seus itens nunca ganham `pickup` nem `expire`. O item que está no slot ao fim da run já tem o seu `pickup`, e os do chão expiram com `reason: 'run_end'`.
+2. **O tipo de ataque (`attack_kind`) vive em `enemy.attack_start.kind`** (`swing` ou `lunge`), não em `opp.open`.
+3. **Recarga do *lunge*:** conta a partir do **início** do *lunge* anterior (não do fim) e **começa no nascimento e no renascimento** do inimigo, de modo que o primeiro *lunge* só sai 6000 ms depois do spawn.
+4. **Regra de crédito da esquiva:** o crédito sai no golpe. No **primeiro tick** de aterrissagem a invulnerabilidade basta; nos ticks seguintes do mesmo golpe exige também sobreposição do leque com o jogador (impede que um dash apertado depois do golpe renda rótulo e reembolso). No *lunge*, a aterrissagem conta também a **proximidade com a posição do jogador na trava da mira**, para que um dash lateral bem temporizado seja `dodge` (e `perfect` se ≤ 80 ms) e não `retreat`. Um dash lateral que sai do raio de contato (60) antes do corpo chegar continua sendo `retreat`.
+5. **Orçamento fixo do PRNG dos itens:** cada compasso de surgimento sorteia **1 tipo e 10 posições candidatas** uma única vez; as candidatas ficam pendentes até uma passar nas distâncias mínimas. O consumo do PRNG não depende da trajetória do jogador. Semente: `seed ^ 0x1e7e55` da run. Com 2 itens no mapa o compasso é pulado.
+6. **Regra das 8 ações na análise usa contagens brutas:** conta eventos `obs.action` (dim 1) e `obs.defense` (dim 4) da janela, depois do último `obs.reset`, e **não** o `sampleSize` decaído (a decadência subestimaria runs de várias salas). Para o repertório de armas (dim 2) conta **só** as ações com `weaponId`, então o `utility` não ajuda a atingir 8. O `sampleSize` informado segue decaído. Vale só na análise offline; o perfil ao vivo do jogo não muda.
+7. **`pickRate` exclui expirações `run_end`:** o fim da run censura o item, então elas são contadas à parte (`expiredRunEnd`) e a taxa é `pegos ÷ (pegos + expirados por timeout)`. Acrescentadas as métricas `healsAtFullHp` e `bombHits`.
+8. **Agentes da V0:** ficam **cegos ao *lunge*** (o estado `lunging` não é tratado como ameaça) e **não usam corrida nem itens** até a spec da V0.1. Eles respeitam a estamina (não apertam ataque em 0, não bloqueiam em 0, não esquivam com menos de 30).
+9. **Resultados da V0 de 21/10/2026 (versão `0.0.3`):** são um **piloto arquivado**, não comparável com a `0.0.4`. A re-execução depende da spec da V0.1.
+10. **Detalhes de implementação úteis ao leitor:** ataque ou guarda só são negados com estamina **0** (com valor parcial o gasto é limitado ao que resta); a esquiva exige 30; entradas negadas nunca vão ao buffer; o ataque carregado só cobra ao soltar; o projétil do arco é varrido no mesmo tick em que nasce; o gasto de estamina depois da última amostra de uma run não é logado.
+
