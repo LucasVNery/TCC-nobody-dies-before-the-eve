@@ -57,6 +57,7 @@ export class ItemSystem {
   private powerRemainingMs = 0;
   private spawnTimerMs = 0;
   private nextId = 0;
+  private pending: { kind: ItemKind; candidates: Vec2[] } | null = null;
 
   constructor(private readonly bus: EventBus<GameEvents>) {}
 
@@ -68,10 +69,13 @@ export class ItemSystem {
     this.powerRemainingMs = 0;
     this.spawnTimerMs = 0;
     this.nextId = 0;
+    this.pending = null;
   }
 
   /** Run over: ground items expire as `run_end`; the held one is dropped silently (it already has its pickup). */
   endRun(): void {
+    // Runs abandoned by closing the tab are exempt from conservation: their items never get pickup/expire.
+    this.pending = null;
     for (const item of this.ground) {
       this.bus.emit('item.expire', { item_id: item.id, kind: item.kind, reason: 'run_end' });
     }
@@ -164,24 +168,38 @@ export class ItemSystem {
     return result;
   }
 
+  /**
+   * One spawn beat draws a FIXED PRNG budget (1 kind + SPAWN_TRIES candidate
+   * positions) the first time it is tried; the candidates stay pending and are
+   * re-tested against the current player/enemy positions on later ticks until
+   * one is valid. PRNG consumption therefore never depends on the trajectory.
+   */
   private trySpawn(player: AABB, enemyPos: Vec2): boolean {
-    const kind = KINDS[this.prng.nextInt(KINDS.length)];
-    const { margin, size, minDistance } = ITEM;
-    const spanX = ARENA_BOUNDS.width - 2 * margin - size;
-    const spanY = ARENA_BOUNDS.height - 2 * margin - size;
-    for (let attempt = 0; attempt < SPAWN_TRIES; attempt++) {
-      const pos = {
-        x: ARENA_BOUNDS.x + margin + this.prng.next() * spanX,
-        y: ARENA_BOUNDS.y + margin + this.prng.next() * spanY,
-      };
-      const farFromPlayer = Math.hypot(pos.x - player.x, pos.y - player.y) >= minDistance;
-      const farFromEnemy = Math.hypot(pos.x - enemyPos.x, pos.y - enemyPos.y) >= minDistance;
-      if (!farFromPlayer || !farFromEnemy) continue;
-      const item: MapItem = { id: `item-${this.nextId++}`, kind, pos, ageMs: 0 };
-      this.ground.push(item);
-      this.bus.emit('item.spawn', { item_id: item.id, kind, x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 });
-      return true;
+    if (!this.pending) {
+      const kind = KINDS[this.prng.nextInt(KINDS.length)];
+      const { margin, size } = ITEM;
+      const spanX = ARENA_BOUNDS.width - 2 * margin - size;
+      const spanY = ARENA_BOUNDS.height - 2 * margin - size;
+      const candidates: Vec2[] = [];
+      for (let i = 0; i < SPAWN_TRIES; i++) {
+        candidates.push({
+          x: ARENA_BOUNDS.x + margin + this.prng.next() * spanX,
+          y: ARENA_BOUNDS.y + margin + this.prng.next() * spanY,
+        });
+      }
+      this.pending = { kind, candidates };
     }
-    return false;
+    const { kind, candidates } = this.pending;
+    const pos = candidates.find(
+      (c) =>
+        Math.hypot(c.x - player.x, c.y - player.y) >= ITEM.minDistance &&
+        Math.hypot(c.x - enemyPos.x, c.y - enemyPos.y) >= ITEM.minDistance,
+    );
+    if (!pos) return false;
+    this.pending = null;
+    const item: MapItem = { id: `item-${this.nextId++}`, kind, pos, ageMs: 0 };
+    this.ground.push(item);
+    this.bus.emit('item.spawn', { item_id: item.id, kind, x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 });
+    return true;
   }
 }

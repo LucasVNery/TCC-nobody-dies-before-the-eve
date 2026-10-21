@@ -82,6 +82,59 @@ describe('ItemSystem spawning', () => {
   });
 });
 
+describe('ItemSystem PRNG budget', () => {
+  it('consumption does not depend on trajectory; a rejected candidate falls through to the next', () => {
+    const a = make(77);
+    run(a.items, 20100);
+    const firstA = a.items.onMap[0];
+    // Same seed, but the player stands exactly on candidate 0 at the first beat: it must be rejected.
+    const b = make(77);
+    run(b.items, 19900, onTop(firstA.pos), ENEMY);
+    run(b.items, 200, onTop(firstA.pos), ENEMY);
+    const firstB = b.items.onMap[0];
+    expect(firstB.kind).toBe(firstA.kind);
+    expect(firstB.pos).not.toEqual(firstA.pos);
+    expect(Math.hypot(firstB.pos.x - firstA.pos.x, firstB.pos.y - firstA.pos.y)).toBeGreaterThan(0);
+    expect(Math.hypot(firstB.pos.x - firstA.pos.x, firstB.pos.y - firstA.pos.y)).toBeGreaterThanOrEqual(ITEM.minDistance);
+    // Second beat, both in the same place afterwards: identical kind and position => same draws consumed.
+    run(a.items, 20000);
+    run(b.items, 20000);
+    const secondA = a.log.filter((e) => e.type === 'item.spawn')[1].payload;
+    const secondB = b.log.filter((e) => e.type === 'item.spawn')[1].payload;
+    expect(secondB).toEqual({ ...secondA, item_id: secondB.item_id });
+  });
+
+  it('keeps the drawn candidates pending: a blocked beat does not consume new draws', () => {
+    const a = make(5);
+    run(a.items, 20100);
+    const posA = a.items.onMap[0].pos;
+    // Blocked at the beat (player on candidate 0 and enemy on candidate 1 is not needed): free later.
+    const b = make(5);
+    run(b.items, 25000, onTop(posA), ENEMY); // spawns at 20 s on a later candidate
+    expect(b.items.onMap).toHaveLength(1);
+    run(a.items, 5000);
+    run(a.items, 15000);
+    run(b.items, 15000);
+    const sa = a.log.filter((e) => e.type === 'item.spawn')[1].payload;
+    const sb = b.log.filter((e) => e.type === 'item.spawn')[1].payload;
+    expect({ kind: sb.kind, x: sb.x, y: sb.y }).toEqual({ kind: sa.kind, x: sa.x, y: sa.y });
+  });
+
+  it('a full map at the beat skips the spawn and the timer wraps; the next beat spawns once a slot is free', () => {
+    const { items, log } = make(3);
+    run(items, 19900);
+    const ground = (items as unknown as { ground: Array<{ id: string; kind: 'heal'; pos: { x: number; y: number }; ageMs: number }> }).ground;
+    // Two items already on the map (not reachable by timing alone: lifetime 15 s < beat 20 s).
+    ground.push({ id: 'x0', kind: 'heal', pos: { x: 300, y: 300 }, ageMs: 0 }, { id: 'x1', kind: 'heal', pos: { x: 400, y: 300 }, ageMs: 0 });
+    run(items, 200);
+    expect(log.filter((e) => e.type === 'item.spawn')).toHaveLength(0);
+    run(items, 15000); // x0/x1 time out
+    expect(items.onMap).toHaveLength(0);
+    run(items, 5200); // past the 40 s beat
+    expect(log.filter((e) => e.type === 'item.spawn')).toHaveLength(1);
+  });
+});
+
 describe('ItemSystem pickup', () => {
   it('picking up on overlap with an empty slot emits item.pickup with wait_ms', () => {
     const { items, log } = make();

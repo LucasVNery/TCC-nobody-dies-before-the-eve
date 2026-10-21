@@ -6,6 +6,8 @@ import type { ProfileSink } from '../profile/profileSink';
 import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, MIN_SPAWN_DISTANCE } from '../combat/movementDefs';
 import { RunDirector, PLAYER_START, pickSpawn } from './runDirector';
 import { createPrng } from '../core/prng';
+import { ItemSystem } from './items';
+import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 
 const STEP = 16;
@@ -167,6 +169,28 @@ describe('RunDirector', () => {
     d.director.step(STEP);
     expect(order).toEqual(['expire:run_end', 'run.end']);
     expect(d.encounter.items.onMap).toHaveLength(0);
+  });
+
+  it('seeds items from (run seed ^ 0x1e7e55); a new run starts with an empty slot and map', () => {
+    const FAR = { x: 1500, y: 1100, width: 20, height: 20 };
+    const FAR_ENEMY = { x: 1500, y: 0 };
+    const d = makeDirector(7);
+    d.director.start();
+    const got: Array<[string, number, number]> = [];
+    d.encounter.bus.on('item.spawn', (e) => got.push([e.kind, e.x, e.y]));
+    for (let t = 0; t < 20100; t += STEP) d.encounter.items.step(STEP, FAR, FAR_ENEMY);
+    const ref = new ItemSystem(new EventBus<GameEvents>());
+    const want: Array<[string, number, number]> = [];
+    (ref as unknown as { bus: EventBus<GameEvents> }).bus.on('item.spawn', (e) => want.push([e.kind, e.x, e.y]));
+    ref.reset((7 ^ 0x1e7e55) >>> 0);
+    for (let t = 0; t < 20100; t += STEP) ref.step(STEP, FAR, FAR_ENEMY);
+    expect(got).toHaveLength(1);
+    expect(got).toEqual(want);
+    d.encounter.player.takeDamage(999);
+    d.director.step(STEP); // run 1 begins
+    expect(d.encounter.items.held).toBeNull();
+    expect(d.encounter.items.onMap).toHaveLength(0);
+    expect(d.encounter.items.powerActive).toBe(false);
   });
 
   it('a bomb that kills the Assaltante is handled by the director on the next step', () => {

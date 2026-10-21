@@ -1234,6 +1234,21 @@ describe('Encounter map items', () => {
     expect(encounter.assaltante.state).toBe('recovering');
   });
 
+  it('bomb on an enemy already recovering closes its open punish window as invalid/source_interrupted', () => {
+    const encounter = holding('bomb', { x: 600, y: 600 }, { x: 640, y: 600 });
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    encounter.bus.on('opp.close', (e) => closes.push(e));
+    let opened = false;
+    encounter.bus.on('opp.open', (e) => { if (e.type === 'punish') opened = true; });
+    for (let i = 0; i < 120 && !(opened && encounter.assaltante.state === 'recovering' && encounter.player.canAct); i++) encounter.step(STEP_MS);
+    expect(opened).toBe(true);
+    const before = closes.length;
+    encounter.useItem();
+    expect(closes.slice(before)).toEqual([
+      expect.objectContaining({ type: 'punish', outcome: 'invalid', reason: 'source_interrupted' }),
+    ]);
+  });
+
   it('heal caps at 100 HP and records a weaponless utility action without touching patience or weapons', () => {
     const encounter = holding('heal', { x: 600, y: 600 }, { x: 1000, y: 600 });
     encounter.player.takeDamage(40);
