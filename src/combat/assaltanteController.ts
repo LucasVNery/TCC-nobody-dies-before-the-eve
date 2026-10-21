@@ -88,6 +88,11 @@ export class AssaltanteController implements ThreatAssessor {
     return directionalSector(center, this._attackDirection, ATTACK_REACH + this.width / 2, ATTACK_HALF_ANGLE_RAD);
   }
 
+  /** True while a strike is in progress (swing phase of an attack). */
+  strikeLanding(): boolean {
+    return this.attackHitbox() !== null;
+  }
+
   msUntilThreatens(target: AABB, horizonMs: number): number | null {
     const snapshot: ChaseTelegraphSnapshot = {
       state: this.state,

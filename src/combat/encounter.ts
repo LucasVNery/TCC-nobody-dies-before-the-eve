@@ -7,6 +7,7 @@ import { AssaltanteController } from './assaltanteController';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
+import { PERFECT_DODGE_MS } from './actionDefs';
 import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
@@ -60,14 +61,6 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       this.profile.record('patience', isPatient ? 1 : 0, 1);
     });
 
-    this.bus.on('player.dodge', () => {
-      if (this.assaltante.state === 'attacking' && !this.defenseRecordedThisAttack) {
-        this.defenseRecordedThisAttack = true;
-        this.profile.recordDefense('dodge');
-        this.bus.emit('player.defense', { label: 'dodge' });
-      }
-    });
-
     this.bus.on('opp.open', (e) => {
       if (e.type === 'dodge') this.defenseRecordedThisAttack = false;
     });
@@ -113,11 +106,25 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     // block already resolved the window (re-pressing E mid-swing), and
     // absorbBlockHit()/enterStagger() would refire every tick (stamina would
     // vanish in ~3 ticks; stagger would never end while overlap holds).
+    // The dodge is credited at the STRIKE, not at the button press: the player
+    // must be invulnerable when the strike lands, regardless of geometric
+    // overlap (a dash may carry them out of the sector and still counts).
+    // Otherwise the parry/block/hit logic runs on overlap.
     const enemyAttack = this.assaltante.attackHitbox();
-    if (enemyAttack && sectorOverlapsBox(enemyAttack, this.player.hurtbox())) {
-      if (this.player.isInvulnerable) {
-        this.assaltante.onPlayerDodgeSuccess();
-      } else if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
+    if (this.assaltante.strikeLanding() && !this.defenseRecordedThisAttack && this.player.isInvulnerable) {
+      const age = this.player.dashAgeMs;
+      const perfect = age !== null && age <= PERFECT_DODGE_MS;
+      this.assaltante.onPlayerDodgeSuccess();
+      this.defenseRecordedThisAttack = true;
+      this.profile.recordDefense('dodge');
+      if (perfect) {
+        const refund = this.player.refundDodge();
+        this.bus.emit('player.defense', { label: 'dodge', perfect: true, refund });
+      } else {
+        this.bus.emit('player.defense', { label: 'dodge' });
+      }
+    } else if (enemyAttack && sectorOverlapsBox(enemyAttack, this.player.hurtbox())) {
+      if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
         this.assaltante.onPlayerParrySuccess();
         this.recordDefenseOnce('parry');
       } else if (!this.defenseRecordedThisAttack && this.player.isBlocking) {

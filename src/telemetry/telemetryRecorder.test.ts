@@ -136,7 +136,9 @@ describe('TelemetryRecorder', () => {
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
       stack.step(16); // Assaltante starts its attack
+      for (let i = 0; i < 20; i++) stack.step(16); // dodge is credited at the strike: press it ~60 ms before
       stack.encounter.player.tryDodge();
+      for (let i = 0; i < 6; i++) stack.step(16); // strike lands while the i-frames are up
       const events = stack.recorder.drain();
       const dodge = idx(events, (e) => e.type === 'player.dodge');
       const defense = idx(events, (e) => e.type === 'player.defense' && e.label === 'dodge');

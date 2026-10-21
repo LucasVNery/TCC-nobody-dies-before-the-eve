@@ -29,6 +29,86 @@ function attackWith(encounter: Encounter, actionId: string, totalMs: number) {
   runFor(encounter, totalMs);
 }
 
+// Dodge credited at the strike (TELEGRAPH_MS = 400 => the swing starts on tick 25).
+// `dashTicksBeforeStrike` ticks before the strike tick the dash is pressed, so
+// the dash age at the strike tick is ticks * 16 ms.
+const STRIKE_TICK = TELEGRAPH_MS / STEP_MS;
+function dashScenario(playerX: number, enemyX: number, dashTicksBeforeStrike: number, dashX: number) {
+  const encounter = new Encounter(
+    { x: playerX, y: 0, width: 20, height: 20 },
+    { x: enemyX, y: 0, width: 20, height: 20 },
+  );
+  const defenses: Array<{ label: string; perfect?: boolean; refund?: number }> = [];
+  const hurts: unknown[] = [];
+  const closes: Array<{ type: string; outcome: string }> = [];
+  encounter.bus.on('player.defense', (e) => defenses.push(e));
+  encounter.bus.on('player.hurt', (e) => hurts.push(e));
+  encounter.bus.on('opp.close', (e) => closes.push(e as { type: string; outcome: string }));
+  const record = vi.spyOn(encounter.profile, 'recordDefense');
+  for (let tick = 1; tick <= STRIKE_TICK; tick++) {
+    if (tick === STRIKE_TICK - dashTicksBeforeStrike + 1) {
+      encounter.setPlayerMoveInput(dashX, 0);
+      encounter.player.tryDodge();
+    }
+    encounter.step(STEP_MS);
+  }
+  return { encounter, defenses, hurts, closes, record };
+}
+
+describe('Encounter dodge timing (credited at the strike)', () => {
+  it('a dash pressed ~200 ms before the strike (i-frames over) does not protect: 20 damage, stagger, no dodge label', () => {
+    const { encounter, defenses, hurts } = dashScenario(0, 30, 13, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 2);
+    expect(hurts).toHaveLength(1);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - 20);
+    expect(encounter.player.state).toBe('staggered');
+    expect(defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
+  });
+
+  it('a dash pressed ~100 ms before the strike dodges: label, no damage, window taken, not perfect, stamina spent', () => {
+    const { encounter, defenses, hurts, closes } = dashScenario(0, 30, 6, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 2);
+    expect(defenses).toEqual([{ label: 'dodge' }]);
+    expect(hurts).toHaveLength(0);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
+    expect(encounter.player.stamina.value).toBeLessThanOrEqual(70 + 5); // 30 spent, only a little regen
+    expect(encounter.player.stamina.value).toBeGreaterThanOrEqual(70);
+  });
+
+  it('a dash pressed ~60 ms before the strike is a perfect dodge and refunds 30 stamina', () => {
+    const { encounter, defenses, hurts } = dashScenario(0, 30, 4, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 2);
+    expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
+    expect(hurts).toHaveLength(0);
+    expect(encounter.player.stamina.value).toBe(100); // 100 - 30 + 30
+  });
+
+  it('a dash that carries the player out of the sector still counts as a dodge (credited at the strike)', () => {
+    // player 100, enemy 130, dashing left: out of the fan by the end of the swing
+    const { encounter, defenses, hurts } = dashScenario(100, 130, 6, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 2);
+    expect(defenses.map((d) => d.label)).toEqual(['dodge']);
+    expect(hurts).toHaveLength(0);
+  });
+
+  it('a dash pressed too early that also leaves the area yields no defense at the strike; the window expires as retreat', () => {
+    const { encounter, defenses, hurts, closes } = dashScenario(100, 130, 16, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 2);
+    expect(hurts).toHaveLength(0);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('expired');
+    expect(defenses).toEqual([{ label: 'retreat' }]);
+  });
+
+  it('credits once per attack: later ticks of the swing neither repeat the dodge nor damage the player; profile records dodge once', () => {
+    const { encounter, defenses, hurts, record } = dashScenario(0, 30, 4, -1);
+    runFor(encounter, SWING_MS + STEP_MS * 4); // dash i-frames end mid-swing while still overlapping
+    expect(defenses).toHaveLength(1);
+    expect(hurts).toHaveLength(0);
+    expect(record.mock.calls.filter((c) => c[0] === 'dodge')).toHaveLength(1);
+  });
+});
+
 describe('Encounter', () => {
   it('a successful dodge resolves the dodge opportunity as taken, not expired', () => {
     const encounter = new Encounter(
