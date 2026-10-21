@@ -45,13 +45,20 @@ export interface StaminaMetrics {
 export interface ItemMetrics {
   spawned: number;
   picked: number;
+  /** Timeout expiries (and expiries without a reason, from old logs). */
   expired: number;
-  /** picked / (picked + expired). */
+  /** Expiries caused by the run ending: censored, not a player refusal. */
+  expiredRunEnd: number;
+  /** picked / (picked + expired); run-end expiries are excluded. */
   pickRate: number | null;
   meanWaitMs: number | null;
   uses: Record<ItemKindId, number>;
   /** item.use with effective:false. */
   wastedUses: number;
+  /** item.use heal with effective:false (healing at full HP). */
+  healsAtFullHp: number;
+  /** item.use bomb with effective:true. */
+  bombHits: number;
   meanHeldMs: number | null;
 }
 

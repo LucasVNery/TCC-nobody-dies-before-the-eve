@@ -107,11 +107,13 @@ const STAMINA_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => stri
 ];
 
 const ITEM_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [
-  { id: 'i1', name: 'itens oferecidos/pegos', cell: (w) => `${w.items.spawned}/${w.items.picked} (expirados ${w.items.expired})` },
+  { id: 'i1', name: 'itens oferecidos/pegos', cell: (w) => `${w.items.spawned}/${w.items.picked} (expirados ${w.items.expired}, fim de run ${w.items.expiredRunEnd})` },
   { id: 'i2', name: 'itens taxa de coleta', cell: (w) => `${fmtPercent(w.items.pickRate)} ${fmtSample(w.items.picked + w.items.expired)}` },
   { id: 'i3', name: 'itens espera média', cell: (w) => `${fmtMs(w.items.meanWaitMs)} ${fmtSample(w.items.picked)}` },
   { id: 'i4', name: 'usos por tipo', cell: (w) => USE_LABEL.map(([l, k]) => `${l}:${w.items.uses[k]}`).join(' ') },
   { id: 'i5', name: 'usos desperdiçados', cell: (w) => `${w.items.wastedUses} ${fmtSample(sum(w.items.uses))}` },
+  { id: 'i7', name: 'curas com vida cheia', cell: (w) => `${w.items.healsAtFullHp} ${fmtSample(w.items.uses.heal)}` },
+  { id: 'i8', name: 'bombas que acertaram', cell: (w) => `${w.items.bombHits} ${fmtSample(w.items.uses.bomb)}` },
   { id: 'i6', name: 'itens retenção média', cell: (w) => `${fmtMs(w.items.meanHeldMs)} ${fmtSample(sum(w.items.uses))}` },
 ];
 

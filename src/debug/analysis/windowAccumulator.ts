@@ -94,6 +94,9 @@ export class WindowAccumulator {
   private itemsSpawned = 0;
   private itemsPicked = 0;
   private itemsExpired = 0;
+  private itemsExpiredRunEnd = 0;
+  private healsAtFullHp = 0;
+  private bombHits = 0;
   private waitSum = 0;
   private itemUses = zeroUses();
   private wastedUses = 0;
@@ -169,13 +172,17 @@ export class WindowAccumulator {
         this.waitSum += ev.wait_ms as number;
         break;
       case 'item.expire':
-        this.itemsExpired += 1;
+        if (ev.reason === 'run_end') this.itemsExpiredRunEnd += 1;
+        else this.itemsExpired += 1;
         break;
       case 'item.use':
         this.itemUses[ev.kind as ItemKindId] += 1;
         this.useN += 1;
         this.heldSum += ev.held_ms as number;
-        if (ev.effective === false) this.wastedUses += 1;
+        if (ev.effective === false) {
+          this.wastedUses += 1;
+          if (ev.kind === 'heal') this.healsAtFullHp += 1;
+        } else if (ev.kind === 'bomb') this.bombHits += 1;
         break;
       case 'opp.close': {
         const o = this.opps[ev.opp_type as 'dodge' | 'punish'];
@@ -263,6 +270,9 @@ export class WindowAccumulator {
     this.itemsSpawned = 0;
     this.itemsPicked = 0;
     this.itemsExpired = 0;
+    this.itemsExpiredRunEnd = 0;
+    this.healsAtFullHp = 0;
+    this.bombHits = 0;
     this.waitSum = 0;
     this.itemUses = zeroUses();
     this.wastedUses = 0;
@@ -345,10 +355,13 @@ export class WindowAccumulator {
         spawned: this.itemsSpawned,
         picked: this.itemsPicked,
         expired: this.itemsExpired,
+        expiredRunEnd: this.itemsExpiredRunEnd,
         pickRate: div(this.itemsPicked, this.itemsPicked + this.itemsExpired),
         meanWaitMs: div(this.waitSum, this.itemsPicked),
         uses: { ...this.itemUses },
         wastedUses: this.wastedUses,
+        healsAtFullHp: this.healsAtFullHp,
+        bombHits: this.bombHits,
         meanHeldMs: div(this.heldSum, this.useN),
       },
     };
