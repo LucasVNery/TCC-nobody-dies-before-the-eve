@@ -55,6 +55,7 @@ CSV: ponto decimal e vazio para indefinido. Markdown: vírgula decimal (o tempo 
 - **Indef.** é a fração de runs do grupo em que a dimensão ficou indefinida; **N definidos** conta só os valores definidos.
 - Linhas "a priori (sem dados)" na seção 2 não são desempenho: são o prior.
 - **ICC** é um limite superior (políticas estacionárias) e o IC é condicional aos agentes (reamostra runs, não agentes). O sinalizador "< 0,50" é mostrado, não aplicado.
+- **Mínimo de ações (`MIN_ACTIONS_FOR_ENTROPY` = 8, `src/experiments/v0/windowValues.ts`)**: nas dimensões de entropia (repertório de armas, de ações e defensivo) uma janela com menos de 8 ações (contagem decaída do relógio traço) fica indefinida; só a análise da V0 aplica a regra, o perfil ao vivo do jogo não muda.
 - Runs vazias (abertas pelo diretor depois de uma morte que encerra a sessão, sem evidência) são descartadas de todas as tabelas e contadas só na seção 2.
 - As 13 hipóteses não têm correção para comparações múltiplas (V0 exploratório).
 - Seção 5: todas as verificações devem estar `ok`; se alguma falhar, os números das outras seções não valem.

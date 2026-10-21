@@ -14,6 +14,19 @@ export const REPORT_SKILLS: readonly SkillId[] = [
   'patience',
 ];
 
+/**
+ * Minimum trait-clock sample size (decayed action/defense count) for an entropy
+ * dimension to be defined in a V0 window. Analysis only: the game's
+ * ProfileAccumulator is unchanged.
+ */
+export const MIN_ACTIONS_FOR_ENTROPY = 8;
+
+const ENTROPY_SKILLS: ReadonlySet<SkillId> = new Set<SkillId>([
+  'weapon_repertoire',
+  'action_repertoire',
+  'defensive_repertoire',
+]);
+
 export interface WindowValue {
   runIdx: number;
   /** null for a run window. */
@@ -100,7 +113,10 @@ function windowValues(
         runIdx: key[0],
         roomIdx: key[1],
         skill,
-        domain: sampleSize === 0 ? null : acc.domain(skill, 'trait'),
+        domain:
+          sampleSize === 0 || (ENTROPY_SKILLS.has(skill) && sampleSize < MIN_ACTIONS_FOR_ENTROPY)
+            ? null
+            : acc.domain(skill, 'trait'),
         confidence: acc.confidence(skill, 'trait'),
         sampleSize,
       });

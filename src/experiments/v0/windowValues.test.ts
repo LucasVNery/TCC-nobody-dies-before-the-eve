@@ -6,7 +6,7 @@ import type { ActionType } from '../../combat/actionRegistry';
 import { SCHEMA_VERSION, type LoggedEvent } from '../../telemetry/schema';
 import { makeBotStack, runBot } from '../../telemetry/testing/scriptedBot';
 import { orderEvents } from '../../telemetry/replay';
-import { REPORT_SKILLS, runWindowValues, roomWindowValues, type WindowValue } from './windowValues';
+import { MIN_ACTIONS_FOR_ENTROPY, REPORT_SKILLS, runWindowValues, roomWindowValues, type WindowValue } from './windowValues';
 
 /**
  * Builds events in the real log shape (envelope from TelemetryRecorder.log):
@@ -91,13 +91,16 @@ function feed(acc: ProfileAccumulator, events: readonly LoggedEvent[]): void {
   }
 }
 
+const ENTROPY_SKILLS: readonly string[] = ['weapon_repertoire', 'action_repertoire', 'defensive_repertoire'];
+
 function expectMatches(values: readonly WindowValue[], acc: ProfileAccumulator, runIdx: number, roomIdx: number | null) {
   for (const skill of REPORT_SKILLS) {
     const v = pick(values, skill, runIdx, roomIdx);
     const n = acc.sampleSize(skill, 'trait');
     expect(v.sampleSize, skill).toBe(n);
     expect(v.confidence, skill).toBe(acc.confidence(skill, 'trait'));
-    expect(v.domain, skill).toBe(n === 0 ? null : acc.domain(skill, 'trait'));
+    const undefinedEntropy = ENTROPY_SKILLS.includes(skill) && n < MIN_ACTIONS_FOR_ENTROPY;
+    expect(v.domain, skill).toBe(n === 0 || undefinedEntropy ? null : acc.domain(skill, 'trait'));
   }
 }
 
@@ -111,16 +114,15 @@ describe('windowValues', () => {
   it('action repertoire of a room equals the entropy of its counts', () => {
     const b = logBuilder();
     b.startRun(0);
-    b.action('light', 'sword_shield');
-    b.action('light', 'sword_shield');
-    b.action('light', 'sword_shield');
+    for (let i = 0; i < 6; i++) b.action('light', 'sword_shield');
+    b.action('heavy');
     b.action('heavy');
     b.roomBoundary();
     const v = pick(roomWindowValues(b.events, 'p'), 'action_repertoire');
     expect(v.domain).toBeCloseTo(0.3494, 3);
     // The fold adds pending evidence undecayed (DecayedCount.decay: γ·count + pending),
-    // so one room's 4 actions count 4 — 4×0.87 = 3.48 would mean a double fold.
-    expect(v.sampleSize).toBe(4);
+    // so one room's 8 actions count 8 — 8×0.87 = 6.96 would mean a double fold.
+    expect(v.sampleSize).toBe(8);
   });
 
   it('ratio dimension folds pending evidence exactly once', () => {
@@ -250,7 +252,12 @@ describe('windowValues', () => {
     acc.applyRoomBoundary(); // the final fold
 
     expectMatches(runWindowValues(b.events, 'p'), acc, 3, null);
-    for (const skill of REPORT_SKILLS) expect(pick(runWindowValues(b.events, 'p'), skill, 3, null).domain).not.toBeNull();
+    // fewer than MIN_ACTIONS_FOR_ENTROPY actions: only the non-entropy dimensions are defined
+    for (const skill of REPORT_SKILLS) {
+      const d = pick(runWindowValues(b.events, 'p'), skill, 3, null).domain;
+      if (ENTROPY_SKILLS.includes(skill)) expect(d, skill).toBeNull();
+      else expect(d, skill).not.toBeNull();
+    }
   });
 
   it('orders sessions by session.start time, not by session id, across an abandoned run', () => {
@@ -348,6 +355,69 @@ describe('windowValues', () => {
     for (const key of roomKeys) {
       const [runIdx, roomIdx] = key.split('/').map(Number);
       expectWindow(rooms, runIdx, roomIdx);
+    }
+  });
+});
+
+describe('entropy dimensions need MIN_ACTIONS_FOR_ENTROPY actions', () => {
+  const ENTROPY = ['weapon_repertoire', 'action_repertoire', 'defensive_repertoire'];
+
+  function windowWith(n: number) {
+    const b = logBuilder();
+    b.startRun(0);
+    const kinds: ActionType[] = ['light', 'heavy'];
+    const labels: DefensiveLabel[] = ['dodge', 'block'];
+    const weapons = ['sword_shield', 'heavy_weapon'];
+    for (let i = 0; i < n; i++) {
+      b.action(kinds[i % 2], weapons[i % 2]);
+      b.defense(labels[i % 2]);
+    }
+    b.outcome('punish', 'taken');
+    b.record('distance', 0.4, 1);
+    b.record('patience', 2, 3);
+    b.roomBoundary();
+    return b.events;
+  }
+
+  it('is 8', () => {
+    expect(MIN_ACTIONS_FOR_ENTROPY).toBe(8);
+  });
+
+  it('7 actions leave the three entropy dimensions undefined but report their sample size', () => {
+    const values = roomWindowValues(windowWith(7), 'p');
+    for (const skill of ENTROPY) {
+      const v = pick(values, skill);
+      expect(v.domain, skill).toBeNull();
+      expect(v.sampleSize, skill).toBe(7);
+    }
+  });
+
+  it('8 actions give a numeric value', () => {
+    const values = roomWindowValues(windowWith(8), 'p');
+    for (const skill of ENTROPY) {
+      const v = pick(values, skill);
+      expect(v.domain, skill).not.toBeNull();
+      expect(v.sampleSize, skill).toBe(8);
+    }
+  });
+
+  it('punish, distance and patience are unaffected by the minimum', () => {
+    const values = roomWindowValues(windowWith(1), 'p');
+    for (const skill of ['punish', 'distance', 'patience']) {
+      expect(pick(values, skill).domain, skill).not.toBeNull();
+    }
+  });
+
+  it('the live ProfileAccumulator still reports the entropy domain below 8 actions', () => {
+    const acc = new ProfileAccumulator();
+    for (let i = 0; i < 3; i++) {
+      acc.recordAction(i % 2 ? 'heavy' : 'light', i % 2 ? 'heavy_weapon' : 'sword_shield');
+      acc.recordDefense(i % 2 ? 'block' : 'dodge');
+    }
+    acc.applyRoomBoundary();
+    for (const skill of ENTROPY) {
+      expect(acc.sampleSize(skill, 'trait'), skill).toBe(3);
+      expect(acc.domain(skill, 'trait'), skill).not.toBeNull();
     }
   });
 });
