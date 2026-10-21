@@ -612,11 +612,12 @@ describe('PlayerController — dodge denial while the dash is blocked', () => {
     bus.on('player.dodge', dodged);
     player.stamina.spend(player.stamina.value - 29, 'attack'); // leaves exactly 29
     expect(player.stamina.value).toBe(29);
+    player.step(DODGE.cooldownMs - 100); // 100 ms of cooldown left: inside the 120 ms buffer window
     player.tryDodge();
     expect(denied).toHaveBeenCalledTimes(1);
     expect(denied).toHaveBeenCalledWith({ action: 'dodge' });
-    player.stamina.refund(100); // back to full within the buffer window
-    player.step(DODGE.cooldownMs + 10);
+    player.stamina.refund(100); // stamina is back before the cooldown ends, while a buffered dash would still be live
+    player.step(110); // cooldown ends within this step
     expect(dodged).toHaveBeenCalledTimes(0);
     expect(player.state).toBe('idle');
   });
