@@ -1,0 +1,7 @@
+skill,n_agents,n_room_measures,icc,ci_lo,ci_hi,below_criterion,criterion
+weapon_repertoire,5,341,0.532,0.457,0.611,false,0.500
+action_repertoire,6,633,0.490,0.439,0.549,true,0.500
+punish,7,676,0.584,0.526,0.647,false,0.500
+defensive_repertoire,7,439,0.330,0.258,0.423,true,0.500
+distance,7,1276,0.896,0.880,0.913,false,0.500
+patience,7,1265,0.710,0.673,0.751,false,0.500

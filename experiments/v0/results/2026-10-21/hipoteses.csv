@@ -1,0 +1,14 @@
+id,skill,kind,higher,lower,style,delta,ci_lo,ci_hi,n_higher,n_lower,undefined_rate_higher,undefined_rate_lower,undefined_rate,n_runs,verdict
+H1,weapon_repertoire,greater,variado,agressivo,,0.287,-0.067,0.640,50,6,0.167,0.900,,,indefinida
+H1u,weapon_repertoire,undefinedRate,,,repetitivo,,,,,,,,1.000,60,confirmada
+H2,action_repertoire,greater,variado,bloqueador,,0.983,0.939,1.000,59,60,0.017,0.000,,,confirmada
+H2u,action_repertoire,undefinedRate,,,repetitivo,,,,,,,,1.000,60,confirmada
+H3,punish,greater,paciente,evasivo,,0.974,0.920,1.000,60,59,0.000,0.017,,,confirmada
+H4,punish,greater,bloqueador,evasivo,,0.966,0.910,0.997,60,59,0.000,0.017,,,confirmada
+H5,defensive_repertoire,greater,aleatorio,agressivo,,-0.088,-0.382,0.206,34,6,0.433,0.900,,,indefinida
+H6,defensive_repertoire,greater,aleatorio,evasivo,,0.933,0.844,0.999,34,53,0.433,0.117,,,confirmada
+H7,distance,greater,agressivo,evasivo,,1.000,1.000,1.000,60,60,0.000,0.000,,,confirmada
+H8,distance,greater,agressivo,paciente,,1.000,1.000,1.000,60,60,0.000,0.000,,,confirmada
+H9,patience,greater,paciente,agressivo,,0.999,0.994,1.000,60,60,0.000,0.000,,,confirmada
+H10,patience,greater,evasivo,agressivo,,1.000,1.000,1.000,60,60,0.000,0.000,,,confirmada
+H11,patience,greater,paciente,aleatorio,,0.988,0.968,0.999,60,60,0.000,0.000,,,confirmada
