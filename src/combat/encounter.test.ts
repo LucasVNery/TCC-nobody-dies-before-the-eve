@@ -1096,11 +1096,44 @@ describe('Encounter lunge', () => {
     expect(encounter.opportunities.activeOfType('punish')[0].remainingMs).toBeLessThanOrEqual(PARRY_BONUS_RECOVERY_MS);
   });
 
-  it('without contact the lunge window expires as retreat', () => {
-    const { encounter, defenses, hurts, closes } = lungeEncounter();
-    stepTo(encounter, 0, LUNGE.telegraphMs / STEP_MS + 2);
-    encounter.setPlayerMoveInput(0, -1); // walks out of the locked line
-    stepTo(encounter, 0, 90);
+  // Lock-in happens on tick 31 (500 ms telegraph); the body starts moving on tick 32 and reaches 60 u of the
+  // lock-in position (200, 600) on tick 51. The sideways moves below start after the lock-in.
+  function sidewaysMove(startTick: number, dash: boolean) {
+    const ctx = lungeEncounter();
+    let minDistance = Infinity;
+    for (let tick = 0; tick < 120; tick++) {
+      if (tick === startTick) {
+        ctx.encounter.setPlayerMoveInput(0, 1); // down, perpendicular to the +x charge
+        if (dash) ctx.encounter.player.tryDodge();
+      }
+      ctx.encounter.step(STEP_MS);
+      if (tick >= 32) {
+        const a = ctx.encounter.assaltante.position;
+        const p = ctx.encounter.player.position;
+        minDistance = Math.min(minDistance, Math.hypot(a.x - p.x, a.y - p.y));
+      }
+    }
+    return { ...ctx, minDistance };
+  }
+
+  it('a sideways dash invulnerable when the body passes the lock-in point is a dodge, even though the player left the path', () => {
+    const { defenses, hurts, closes, minDistance } = sidewaysMove(44, true); // dash age ~112 ms at tick 51
+    expect(minDistance).toBeGreaterThan(60);
+    expect(hurts).toHaveLength(0);
+    expect(defenses).toEqual([{ label: 'dodge' }]);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
+  });
+
+  it('the same sideways dash <= 80 ms before the lock-in contact is a perfect dodge', () => {
+    const { defenses, hurts, minDistance } = sidewaysMove(48, true); // dash age ~48 ms at tick 51
+    expect(minDistance).toBeGreaterThan(60);
+    expect(hurts).toHaveLength(0);
+    expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: STAMINA_COST.dodge }]);
+  });
+
+  it('the same sideways move without a dash (no i-frames) earns no credit and no damage: retreat', () => {
+    const { defenses, hurts, closes, minDistance } = sidewaysMove(33, false); // walks 175 u/s for 87 ticks
+    expect(minDistance).toBeGreaterThan(60);
     expect(hurts).toHaveLength(0);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('expired');
     expect(defenses).toEqual([{ label: 'retreat' }]);

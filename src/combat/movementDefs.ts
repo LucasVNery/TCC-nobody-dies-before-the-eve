@@ -31,7 +31,7 @@ export const MIN_SPAWN_DISTANCE = 300;
 /** Bow projectile (spec 2026-10-21 §4.4): speed px/s, max travel px, collision radius px. */
 export const PROJECTILE = { speed: 500, range: 260, radius: 8 } as const;
 
-/** Assaltante lunge (spec 2026-10-21 �4.5): distances and travel in px, speed px/s, times in ms. */
+/** Assaltante lunge (spec 2026-10-21 §4.5): distances and travel in px, speed px/s, times in ms. */
 export const LUNGE = {
   minDistance: 150,
   maxDistance: 260,

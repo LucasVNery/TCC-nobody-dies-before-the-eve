@@ -32,6 +32,8 @@ export class AssaltanteController implements ThreatAssessor {
   private lungeMoving = false;
   private lungeTravelled = 0;
   private lungeLandedThisTick = false;
+  /** Player position when the telegraph locked: a sideways dash timed at the strike still counts as a dodge. */
+  private lungeLockPlayerPosition: Vec2 = { x: 0, y: 0 };
   /** Lunge dodge window, kept so it can be closed if the lunge ends early (wall) while it is still open. */
   private lungeDodgeOppId: string | null = null;
   private recoveryDurationMs = RECOVERY_MS;
@@ -254,6 +256,7 @@ export class AssaltanteController implements ThreatAssessor {
       if (distanceToPlayer > 0) this._attackDirection = normalizeVelocity(dx, dy);
       if (this.phaseElapsedMs >= LUNGE.telegraphMs) {
         this.lungeMoving = true;
+        this.lungeLockPlayerPosition = { x: this.playerPosition.x, y: this.playerPosition.y };
         this.lungeTravelled = 0;
       }
       return;
@@ -271,11 +274,14 @@ export class AssaltanteController implements ThreatAssessor {
     this.lungeTravelled += moved;
     const px = this.playerPosition.x - this._position.x;
     const py = this.playerPosition.y - this._position.y;
-    this.lungeLandedThisTick = Math.hypot(px, py) <= LUNGE.contactDistance;
+    const lx = this.lungeLockPlayerPosition.x - this._position.x;
+    const ly = this.lungeLockPlayerPosition.y - this._position.y;
+    this.lungeLandedThisTick =
+      Math.hypot(px, py) <= LUNGE.contactDistance || Math.hypot(lx, ly) <= LUNGE.contactDistance;
 
     const hitWall = moved < intended - 1e-6;
     if (hitWall || this.lungeTravelled >= LUNGE.maxTravel - 1e-6) {
-      this.endLunge(RECOVERY_MS);
+      this.endLunge(LUNGE.recoveryMs);
     }
   }
 

@@ -530,7 +530,6 @@ describe('AssaltanteController lunge', () => {
 
   it('strikeLanding is true only while charging within 60 of the player', () => {
     const { enemy } = startLunge(200);
-    const near = { x: spawn.x + 100, y: spawn.y };
     const far = { x: spawn.x + 200, y: spawn.y };
     runUntil(enemy, far, () => enemy.lungePhase === 'charge');
     expect(enemy.strikeLanding()).toBe(false); // transition tick: not moving yet
@@ -540,7 +539,6 @@ describe('AssaltanteController lunge', () => {
     expect(enemy.strikeLanding()).toBe(true);
     enemy.step(16, { x: enemy.position.x + 80, y: spawn.y });
     expect(enemy.strikeLanding()).toBe(false);
-    void near;
   });
 
   it('a player dying during the lunge: respawn closes the open window invalid/player_dead and resets the cooldown', () => {
