@@ -23,19 +23,23 @@ export const REPORT_SKILLS: readonly SkillId[] = [
  */
 export const MIN_ACTIONS_FOR_ENTROPY = 8;
 
-/** Raw evidence event type that feeds each entropy dimension. */
-const ENTROPY_EVENT: ReadonlyMap<SkillId, string> = new Map<SkillId, string>([
-  ['weapon_repertoire', 'obs.action'],
-  ['action_repertoire', 'obs.action'],
-  ['defensive_repertoire', 'obs.defense'],
+/**
+ * Raw evidence events that feed each entropy dimension. The weapon dimension is
+ * fed only by actions that carry a weaponId (ProfileAccumulator.recordAction);
+ * weaponId-less actions (item use: 'utility') count for the action repertoire only.
+ */
+const ENTROPY_EVIDENCE: ReadonlyMap<SkillId, (e: LoggedEvent) => boolean> = new Map<SkillId, (e: LoggedEvent) => boolean>([
+  ['weapon_repertoire', (e) => e.type === 'obs.action' && e.weaponId !== undefined],
+  ['action_repertoire', (e) => e.type === 'obs.action'],
+  ['defensive_repertoire', (e) => e.type === 'obs.defense'],
 ]);
 
-function rawEventCount(windowEvents: readonly LoggedEvent[], type: string): number {
+function rawEventCount(windowEvents: readonly LoggedEvent[], counts: (e: LoggedEvent) => boolean): number {
   let n = 0;
   for (let i = windowEvents.length - 1; i >= 0; i--) {
     const e = windowEvents[i];
     if (e.type === 'obs.reset') break;
-    if (e.type === type) n++;
+    if (counts(e)) n++;
   }
   return n;
 }
@@ -127,7 +131,7 @@ function windowValues(
         roomIdx: key[1],
         skill,
         domain:
-          sampleSize === 0 || (ENTROPY_EVENT.has(skill) && rawEventCount(windowEvents, ENTROPY_EVENT.get(skill)!) < MIN_ACTIONS_FOR_ENTROPY)
+          sampleSize === 0 || (ENTROPY_EVIDENCE.has(skill) && rawEventCount(windowEvents, ENTROPY_EVIDENCE.get(skill)!) < MIN_ACTIONS_FOR_ENTROPY)
             ? null
             : acc.domain(skill, 'trait'),
         confidence: acc.confidence(skill, 'trait'),
