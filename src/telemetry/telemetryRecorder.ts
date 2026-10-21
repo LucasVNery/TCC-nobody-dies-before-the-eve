@@ -9,7 +9,7 @@ export const POS_SAMPLE_INTERVAL_MS = 250;
 /** Bus events logged with a combat `ctx` (spec §4.3). */
 const CONTEXT_EVENTS = [
   'player.action', 'player.dodge', 'player.cancel', 'player.defense', 'player.hit_unmitigated', 'player.hurt',
-  'player.death', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'opp.open', 'opp.close',
+  'player.death', 'player.stamina_denied', 'player.guard_break', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'opp.open', 'opp.close',
 ] as const;
 
 /**
@@ -171,11 +171,19 @@ export class TelemetryRecorder {
     if (!this.encounter) return;
     const p = this.encounter.player;
     const e = this.encounter.assaltante;
+    const spent = p.stamina.takeSpent();
     this.log('pos.sample', {
       p: [r1(p.position.x), r1(p.position.y)],
       e: [r1(e.position.x), r1(e.position.y)],
       p_state: p.state,
       e_state: e.state,
+      stam: r1(p.stamina.value),
+      spent: {
+        attack: r1(spent.attack),
+        sprint: r1(spent.sprint),
+        dodge: r1(spent.dodge),
+        block: r1(spent.block),
+      },
     });
   }
 }

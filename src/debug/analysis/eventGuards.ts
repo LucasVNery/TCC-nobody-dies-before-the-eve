@@ -16,7 +16,8 @@ export function isWellFormed(ev: LoggedEvent): boolean {
   if (!str(e.type) || !fin(e.t_ms) || !str(e.session_id)) return false;
   switch (e.type) {
     case 'pos.sample':
-      return vec2(e.p) && vec2(e.e);
+      // stam/spent are absent in logs from before 0.0.4: optional, but numeric when present.
+      return vec2(e.p) && vec2(e.e) && (e.stam === undefined || fin(e.stam));
     case 'player.action':
       return str(e.actionType) && str(e.weaponId);
     case 'player.cancel':

@@ -27,10 +27,17 @@ const HELP_LINES = [
   '  Clique dir  - ataque secundario (sem efeito no arco)',
   '  Q (segurar) - carregado (sem efeito no arco)',
   '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
+  '  Shift (segure) - correr (gasta estamina)',
   '  Espaço     - esquiva (use durante o telegraph do boss pra i-frames)',
   '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
   '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
 ];
+
+/** Plain-text bar, 10 cells for 0..100. */
+function staminaBar(value: number): string {
+  const filled = Math.max(0, Math.min(10, Math.ceil(value / 10)));
+  return `[${'#'.repeat(filled)}${'-'.repeat(10 - filled)}]`;
+}
 
 /** Minimal player HUD; the help list is hidden until toggled. */
 export class GameplayHud {
@@ -61,7 +68,7 @@ export class GameplayHud {
   update(m: GameplayHudData): void {
     this.statusText.setText([
       `HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`,
-      `estamina: ${Math.round(m.stamina)}/100`,
+      `estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/100${m.stamina <= 0 ? ' EXAUSTO' : ''}`,
       `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`,
     ]);
     this.weaponText.setText(`Arma: ${m.weaponLabel}`);

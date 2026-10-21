@@ -142,6 +142,7 @@ export class ArenaScene extends Phaser.Scene {
       tryDodge: () => player.tryDodge(),
       startBlock: () => player.startBlock(),
       stopBlock: () => player.stopBlock(),
+      setSprint: (on) => player.setSprint(on),
       tryEquippedAction: (type) => {
         const action = findWeaponAction(player.equippedWeaponId, type);
         if (!action) return false;

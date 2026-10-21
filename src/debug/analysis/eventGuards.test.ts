@@ -3,6 +3,13 @@ import { isWellFormed } from './eventGuards';
 import { mk } from './testing/events';
 
 describe('isWellFormed', () => {
+  it('pos.sample without stam/spent (old log) is well formed; a non-numeric stam is not', () => {
+    expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4] }))).toBe(true);
+    expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: 50, spent: { attack: 0 } }))).toBe(true);
+    expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: 'x' }))).toBe(false);
+    expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: NaN }))).toBe(false);
+  });
+
   it('accepts a well-formed pos.sample and rejects NaN, wrong arity and non-array positions', () => {
     expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4] }))).toBe(true);
     expect(isWellFormed(mk('pos.sample', 0, { p: [NaN, 2], e: [3, 4] }))).toBe(false);

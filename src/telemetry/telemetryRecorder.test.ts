@@ -53,6 +53,31 @@ describe('TelemetryRecorder', () => {
     expect(samples[0]).toMatchObject({ p: [expect.any(Number), expect.any(Number)], p_state: expect.any(String) });
   });
 
+  it('pos.sample carries stam and the spend since the previous sample, then zero', () => {
+    const stack = makeStack();
+    stack.director.start();
+    stack.recorder.drain();
+    stack.encounter.player.stamina.spend(12, 'attack');
+    stack.encounter.player.stamina.spend(30, 'dodge');
+    for (let i = 0; i < 50; i++) stack.step(10); // 500ms: two samples
+    const samples = ofType(stack.recorder.drain(), 'pos.sample');
+    expect(samples).toHaveLength(2);
+    expect(typeof samples[0].stam).toBe('number');
+    expect(samples[0].spent).toEqual({ attack: 12, sprint: 0, dodge: 30, block: 0 });
+    expect(samples[1].spent).toEqual({ attack: 0, sprint: 0, dodge: 0, block: 0 });
+  });
+
+  it('player.stamina_denied is logged with ctx.p_stam', () => {
+    const stack = makeStack();
+    stack.director.start();
+    stack.recorder.drain();
+    stack.encounter.player.stamina.spend(100, 'attack');
+    stack.encounter.player.tryAction('sword_shield.light');
+    const denied = ofType(stack.recorder.drain(), 'player.stamina_denied');
+    expect(denied).toHaveLength(1);
+    expect((denied[0].ctx as Record<string, unknown>).p_stam).toBe(0);
+  });
+
   it('attaches ctx to combat events, with time since the previous action', () => {
     const stack = makeStack();
     stack.director.start();
