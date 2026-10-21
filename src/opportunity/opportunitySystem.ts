@@ -48,6 +48,21 @@ export class OpportunitySystem {
     });
   }
 
+  /** Closes `opp_id` now through the normal expiry path (same semantics as running out of time); no-op if not open. */
+  expire(opp_id: string): void {
+    const idx = this.active.findIndex((o) => o.opp_id === opp_id);
+    if (idx === -1) return;
+    const opp = this.active[idx];
+    this.active.splice(idx, 1);
+    const result: ExpiryResult = opp.onExpire?.() ?? { outcome: 'expired' };
+    this.bus.emit('opp.close', {
+      opp_id: opp.opp_id,
+      type: opp.type,
+      outcome: result.outcome,
+      ...(result.reason ? { reason: result.reason } : {}),
+    });
+  }
+
   step(stepMs: number): void {
     const expiring: ActiveOpp[] = [];
     const stillActive: ActiveOpp[] = [];

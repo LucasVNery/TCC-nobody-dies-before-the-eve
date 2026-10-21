@@ -572,11 +572,14 @@ describe('AssaltanteController lunge', () => {
 
   it('msUntilThreatens: telegraph -> remaining ms within the horizon else null; moving -> 0', () => {
     const { enemy, player } = startLunge(200);
-    const target = { x: 0, y: 0, width: 20, height: 20 };
+    const far = { x: spawn.x + 400, y: spawn.y, width: 20, height: 20 }; // beyond maxTravel + contact (320)
+    expect(enemy.msUntilThreatens(far, 600)).toBeNull();
+    const target = { x: spawn.x + 200, y: spawn.y, width: 20, height: 20 };
     expect(enemy.msUntilThreatens(target, 600)).toBe(LUNGE.telegraphMs - 16);
     expect(enemy.msUntilThreatens(target, 484)).toBe(484);
     expect(enemy.msUntilThreatens(target, 483)).toBeNull();
     runUntil(enemy, player, () => enemy.lungePhase === 'charge');
     expect(enemy.msUntilThreatens(target, 1)).toBe(0);
+    expect(enemy.msUntilThreatens(far, 1)).toBeNull();
   });
 });

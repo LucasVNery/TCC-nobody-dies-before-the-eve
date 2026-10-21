@@ -8,6 +8,7 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
 import { PERFECT_DODGE_MS } from './actionDefs';
+import { STAMINA_COST } from './stamina';
 import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
@@ -37,6 +38,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   // Whether the first landing tick of the current attack was already processed
   // (reset with defenseRecordedThisAttack when a 'dodge' opp opens).
   private firstLandingProcessed = false;
+  // The dodge opp of the CURRENT attack: a close of an older dodge opp must not touch the flag or record a retreat.
+  private currentDodgeOppId: string | null = null;
   // At most one damage application per player action: the attack sector
   // overlaps the hurtbox on every tick of the active phase, so without this
   // one light attack would deal its damage ~6 times. Reset on every
@@ -71,6 +74,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
 
     this.bus.on('opp.open', (e) => {
       if (e.type === 'dodge') {
+        this.currentDodgeOppId = e.opp_id;
         this.defenseRecordedThisAttack = false;
         this.firstLandingProcessed = false;
       }
@@ -80,7 +84,12 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       if (e.type === 'punish' && e.outcome !== 'invalid') {
         this.profile.recordOutcome('punish', e.outcome);
       }
-      if (e.type === 'dodge' && e.outcome === 'expired' && !this.defenseRecordedThisAttack) {
+      if (
+        e.type === 'dodge' &&
+        e.outcome === 'expired' &&
+        e.opp_id === this.currentDodgeOppId &&
+        !this.defenseRecordedThisAttack
+      ) {
         this.defenseRecordedThisAttack = true;
         this.profile.recordDefense('retreat');
         this.bus.emit('player.defense', { label: 'retreat' });
@@ -162,8 +171,9 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       this.defenseRecordedThisAttack = true;
       this.profile.recordDefense('dodge');
       if (perfect) {
-        const refund = this.player.refundDodge();
-        this.bus.emit('player.defense', { label: 'dodge', perfect: true, refund });
+        // Logged before the refund so the context stamina is the pre-refund value.
+        this.bus.emit('player.defense', { label: 'dodge', perfect: true, refund: STAMINA_COST.dodge });
+        this.player.refundDodge();
       } else {
         this.bus.emit('player.defense', { label: 'dodge' });
       }

@@ -149,6 +149,9 @@ export class AssaltanteController implements ThreatAssessor {
 
   msUntilThreatens(target: AABB, horizonMs: number): number | null {
     if (this.state === 'lunging') {
+      const cx = this._position.x + this.width / 2 - (target.x + target.width / 2);
+      const cy = this._position.y + this.height / 2 - (target.y + target.height / 2);
+      if (Math.hypot(cx, cy) > LUNGE.maxTravel + LUNGE.contactDistance) return null;
       if (this.lungeMoving) return 0;
       const remaining = Math.max(0, LUNGE.telegraphMs - this.phaseElapsedMs);
       return remaining <= horizonMs ? remaining : null;
@@ -180,6 +183,14 @@ export class AssaltanteController implements ThreatAssessor {
     this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
     this.lungeLandedThisTick = false;
     this.lungeCooldownMs = Math.max(0, this.lungeCooldownMs - stepMs);
+
+    // The lunge ended (full travel or wall) with its dodge window still open: close it through the normal expiry
+    // path on the next step (after Encounter evaluated the final charge tick), so a retreat is inferred in time
+    // and the stale window cannot outlive the recovery.
+    if (this.state !== 'lunging' && this.lungeDodgeOppId) {
+      this.opp.expire(this.lungeDodgeOppId);
+      this.lungeDodgeOppId = null;
+    }
 
     if (this.state === 'idle' || this.state === 'chasing') {
       const bb: Blackboard = { distanceToPlayer, state: this.state, lungeReady: this.lungeCooldownMs <= 0 };

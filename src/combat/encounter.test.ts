@@ -1311,4 +1311,61 @@ describe('Encounter map items', () => {
     runFor(encounter, 700);
     expect(hurts.find((h) => h.actionId === 'bow.shot')?.dmg).toBe(15);
   });
+
+  it('a lunge stopped at the wall closes its dodge window at once; the following swing is not affected by it', () => {
+    // Enemy pinned against the right wall (x = 1580) with the player 200 u beyond it: the charge stops immediately.
+    const wallX = 1600 - 20;
+    const encounter = new Encounter({ x: wallX + 200, y: 600, width: 20, height: 20 }, { x: wallX, y: 600, width: 20, height: 20 });
+    for (let t = 0; t < LUNGE.cooldownMs; t += STEP_MS) encounter.assaltante.step(STEP_MS, { x: 100000, y: 600 });
+    const log: string[] = [];
+    const hurts: unknown[] = [];
+    const defenses: Array<{ label: string }> = [];
+    encounter.bus.on('opp.open', (e) => log.push(`open ${e.type} ${e.src} ${e.opp_id}`));
+    encounter.bus.on('opp.close', (e) => log.push(`close ${e.type} ${e.outcome} ${e.opp_id}`));
+    encounter.bus.on('player.hurt', (e) => hurts.push(e));
+    encounter.bus.on('player.defense', (e) => defenses.push(e));
+    let swingOpen = false;
+    encounter.bus.on('opp.open', (e) => {
+      if (e.src === 'assaltante.attack') swingOpen = true;
+    });
+    for (let tick = 0; tick < 400 && !swingOpen; tick++) {
+      // after the charge the player walks to the enemy and then stands inside its swing range
+      const gap = encounter.player.position.x - encounter.assaltante.position.x;
+      encounter.setPlayerMoveInput(tick > 45 && gap > 40 ? -1 : 0, 0);
+      encounter.step(STEP_MS);
+    }
+    expect(swingOpen).toBe(true);
+    runFor(encounter, 700);
+    const dodgeOpens = log.filter((l) => l.startsWith('open dodge'));
+    const dodgeCloses = log.filter((l) => l.startsWith('close dodge'));
+    expect(dodgeOpens).toHaveLength(2);
+    expect(dodgeCloses).toHaveLength(2);
+    expect(log.indexOf(dodgeCloses[0])).toBeLessThan(log.findIndex((l) => l.startsWith('open dodge assaltante.attack')));
+    expect(defenses).toEqual([{ label: 'retreat' }]); // only the lunge's, none stolen from the swing
+    expect(hurts).toHaveLength(1); // the swing hurts normally
+    const opens = log.filter((l) => l.startsWith('open')).length;
+    const closes = log.filter((l) => l.startsWith('close')).length;
+    expect(closes).toBeLessThanOrEqual(opens);
+  });
+
+  it('a perfect dodge is logged before the refund (the event sees the pre-refund stamina)', () => {
+    const { encounter, defenses } = dodgeLogCtx();
+    expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: STAMINA_COST.dodge, stamina: STAMINA_MAX - STAMINA_COST.dodge }]);
+    expect(encounter.player.stamina.value).toBe(STAMINA_MAX);
+  });
+
+  function dodgeLogCtx() {
+    const encounter = new Encounter({ x: 200, y: 600, width: 20, height: 20 }, { x: 0, y: 600, width: 20, height: 20 });
+    for (let t = 0; t < LUNGE.cooldownMs; t += STEP_MS) encounter.assaltante.step(STEP_MS, { x: -5000, y: 600 });
+    const defenses: Array<Record<string, unknown>> = [];
+    encounter.bus.on('player.defense', (e) => defenses.push({ ...e, stamina: encounter.player.stamina.value }));
+    for (let tick = 0; tick < 100; tick++) {
+      if (tick === 48) {
+        encounter.setPlayerMoveInput(-1, 0);
+        encounter.player.tryDodge();
+      }
+      encounter.step(STEP_MS);
+    }
+    return { encounter, defenses };
+  }
 });
