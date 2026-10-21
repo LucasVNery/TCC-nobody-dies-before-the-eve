@@ -93,13 +93,21 @@ function feed(acc: ProfileAccumulator, events: readonly LoggedEvent[]): void {
 
 const ENTROPY_SKILLS: readonly string[] = ['weapon_repertoire', 'action_repertoire', 'defensive_repertoire'];
 
-function expectMatches(values: readonly WindowValue[], acc: ProfileAccumulator, runIdx: number, roomIdx: number | null) {
+function expectMatches(
+  values: readonly WindowValue[],
+  acc: ProfileAccumulator,
+  runIdx: number,
+  roomIdx: number | null,
+  windowObs: readonly LoggedEvent[],
+) {
+  const rawCount = (skill: string): number =>
+    windowObs.filter((e) => e.type === (skill === 'defensive_repertoire' ? 'obs.defense' : 'obs.action')).length;
   for (const skill of REPORT_SKILLS) {
     const v = pick(values, skill, runIdx, roomIdx);
     const n = acc.sampleSize(skill, 'trait');
     expect(v.sampleSize, skill).toBe(n);
     expect(v.confidence, skill).toBe(acc.confidence(skill, 'trait'));
-    const undefinedEntropy = ENTROPY_SKILLS.includes(skill) && n < MIN_ACTIONS_FOR_ENTROPY;
+    const undefinedEntropy = ENTROPY_SKILLS.includes(skill) && rawCount(skill) < MIN_ACTIONS_FOR_ENTROPY;
     expect(v.domain, skill).toBe(n === 0 || undefinedEntropy ? null : acc.domain(skill, 'trait'));
   }
 }
@@ -251,7 +259,7 @@ describe('windowValues', () => {
     acc.applyEncounterBoundary();
     acc.applyRoomBoundary(); // the final fold
 
-    expectMatches(runWindowValues(b.events, 'p'), acc, 3, null);
+    expectMatches(runWindowValues(b.events, 'p'), acc, 3, null, b.events.filter((e) => e.type.startsWith('obs.') && e.run_idx === 3));
     // fewer than MIN_ACTIONS_FOR_ENTROPY actions: only the non-entropy dimensions are defined
     for (const skill of REPORT_SKILLS) {
       const d = pick(runWindowValues(b.events, 'p'), skill, 3, null).domain;
@@ -286,17 +294,20 @@ describe('windowValues', () => {
     const chronological = [...zz.events, ...aa.events].filter((e) => e.type.startsWith('obs.'));
 
     const run0 = new ProfileAccumulator();
-    feed(run0, chronological.filter((e) => e.run_idx === 0));
-    expectMatches(runWindowValues(log, 'p'), run0, 0, null);
+    const run0Obs = chronological.filter((e) => e.run_idx === 0);
+    feed(run0, run0Obs);
+    expectMatches(runWindowValues(log, 'p'), run0, 0, null, run0Obs);
 
     const room01 = new ProfileAccumulator();
-    feed(room01, chronological.filter((e) => e.run_idx === 0 && e.room_idx === 1));
-    expectMatches(roomWindowValues(log, 'p'), room01, 0, 1);
+    const room01Obs = chronological.filter((e) => e.run_idx === 0 && e.room_idx === 1);
+    feed(room01, room01Obs);
+    expectMatches(roomWindowValues(log, 'p'), room01, 0, 1, room01Obs);
 
     const run1 = new ProfileAccumulator();
-    feed(run1, chronological.filter((e) => e.run_idx === 1));
+    const run1Obs = chronological.filter((e) => e.run_idx === 1);
+    feed(run1, run1Obs);
     run1.applyRoomBoundary(); // open run: the one final fold
-    expectMatches(runWindowValues(log, 'p'), run1, 1, null);
+    expectMatches(runWindowValues(log, 'p'), run1, 1, null, run1Obs);
   });
 
   it('derives the windows of a real recorded log', () => {
@@ -349,7 +360,7 @@ describe('windowValues', () => {
       feed(acc, windowObs);
       const end = lastOf(windowObs);
       if (!(end.type === 'obs.boundary' && end.kind === 'room')) acc.applyRoomBoundary();
-      expectMatches(values, acc, runIdx, roomIdx);
+      expectMatches(values, acc, runIdx, roomIdx, windowObs);
     };
     for (const runIdx of runIdxs) expectWindow(runs, runIdx, null);
     for (const key of roomKeys) {
@@ -398,6 +409,37 @@ describe('entropy dimensions need MIN_ACTIONS_FOR_ENTROPY actions', () => {
       const v = pick(values, skill);
       expect(v.domain, skill).not.toBeNull();
       expect(v.sampleSize, skill).toBe(8);
+    }
+  });
+
+  it('gates on raw events: 9 actions over several rooms stay defined although the decayed count is below 8', () => {
+    const b = logBuilder();
+    b.startRun(0);
+    for (let room = 0; room < 9; room++) {
+      if (room > 0) b.enterRoom(room);
+      b.action(room % 2 ? 'heavy' : 'light', room % 2 ? 'heavy_weapon' : 'sword_shield');
+      b.defense(room % 2 ? 'block' : 'dodge');
+      b.roomBoundary();
+    }
+    const values = runWindowValues(b.events, 'p');
+    for (const skill of ENTROPY) {
+      const v = pick(values, skill, 0, null);
+      expect(v.sampleSize, skill).toBeLessThan(8);
+      expect(v.domain, skill).not.toBeNull();
+    }
+  });
+
+  it('8 raw actions across rooms define the dimension, 7 do not', () => {
+    for (const [n, defined] of [[7, false], [8, true]] as const) {
+      const b = logBuilder();
+      b.startRun(0);
+      for (let i = 0; i < n; i++) {
+        if (i > 0) b.enterRoom(i);
+        b.action(i % 2 ? 'heavy' : 'light', i % 2 ? 'heavy_weapon' : 'sword_shield');
+        b.roomBoundary();
+      }
+      const v = pick(runWindowValues(b.events, 'p'), 'action_repertoire', 0, null);
+      expect(v.domain === null, `n=${n}`).toBe(!defined);
     }
   });
 

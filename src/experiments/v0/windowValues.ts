@@ -15,17 +15,30 @@ export const REPORT_SKILLS: readonly SkillId[] = [
 ];
 
 /**
- * Minimum trait-clock sample size (decayed action/defense count) for an entropy
- * dimension to be defined in a V0 window. Analysis only: the game's
+ * Minimum number of RAW evidence events in the window (obs.action for the
+ * weapon/action repertoires, obs.defense for the defensive one; only events
+ * after the window's last obs.reset) for an entropy dimension to be defined in
+ * a V0 window. Not the trait-decayed count. Analysis only: the game's
  * ProfileAccumulator is unchanged.
  */
 export const MIN_ACTIONS_FOR_ENTROPY = 8;
 
-const ENTROPY_SKILLS: ReadonlySet<SkillId> = new Set<SkillId>([
-  'weapon_repertoire',
-  'action_repertoire',
-  'defensive_repertoire',
+/** Raw evidence event type that feeds each entropy dimension. */
+const ENTROPY_EVENT: ReadonlyMap<SkillId, string> = new Map<SkillId, string>([
+  ['weapon_repertoire', 'obs.action'],
+  ['action_repertoire', 'obs.action'],
+  ['defensive_repertoire', 'obs.defense'],
 ]);
+
+function rawEventCount(windowEvents: readonly LoggedEvent[], type: string): number {
+  let n = 0;
+  for (let i = windowEvents.length - 1; i >= 0; i--) {
+    const e = windowEvents[i];
+    if (e.type === 'obs.reset') break;
+    if (e.type === type) n++;
+  }
+  return n;
+}
 
 export interface WindowValue {
   runIdx: number;
@@ -114,7 +127,7 @@ function windowValues(
         roomIdx: key[1],
         skill,
         domain:
-          sampleSize === 0 || (ENTROPY_SKILLS.has(skill) && sampleSize < MIN_ACTIONS_FOR_ENTROPY)
+          sampleSize === 0 || (ENTROPY_EVENT.has(skill) && rawEventCount(windowEvents, ENTROPY_EVENT.get(skill)!) < MIN_ACTIONS_FOR_ENTROPY)
             ? null
             : acc.domain(skill, 'trait'),
         confidence: acc.confidence(skill, 'trait'),
