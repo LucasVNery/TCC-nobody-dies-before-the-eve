@@ -86,7 +86,7 @@ export const BOW_ACTIONS: ActionDef[] = [
     weaponId: 'bow',
     actionType: 'throw',
     timing: { startupMs: 80, activeMs: 60, recoveryMs: 200 },
-    reach: 220,
+    reach: 260,
   },
 ];
 

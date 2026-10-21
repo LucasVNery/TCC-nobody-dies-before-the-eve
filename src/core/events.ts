@@ -84,6 +84,8 @@ export type GameEvents = {
   'player.hurt': PlayerHurtPayload;
   'enemy.attack_start': EmptyPayload;
   'enemy.hurt': EnemyHurtPayload;
+  'projectile.hit': { id: number; dmg: number };
+  'projectile.expire': { id: number };
   'run.start': RunStartPayload;
   'run.end': RunEndPayload;
   'room.enter': RoomEnterPayload;

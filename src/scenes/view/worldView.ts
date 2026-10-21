@@ -5,7 +5,7 @@ import type { LoggedEvent } from '../../telemetry/schema';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { ASSET_KEYS } from '../../visual/assetRegistry';
 import { ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT } from '../../visual/placeholderTextures';
-import { GROUND_PROJECTION } from '../../visual/groundProjection';
+import { GROUND_PROJECTION, toScreen } from '../../visual/groundProjection';
 import { DirectionalSprite } from '../../visual/directionalSprite';
 import { FLOOR_TILESET, SKIRT_TILES } from '../../visual/floor/composeFloor';
 import { FloorTracker } from '../../visual/floor/floorFromEvents';
@@ -23,6 +23,7 @@ export class WorldView {
   private readonly floorTracker: FloorTracker;
   private readonly playerTrail = new PositionHistory();
   private readonly assaltanteTrail = new PositionHistory();
+  private readonly projectileGraphics: Phaser.GameObjects.Graphics;
   private stepped = false;
 
   constructor(scene: Phaser.Scene) {
@@ -35,6 +36,8 @@ export class WorldView {
     );
     this.floor = new FloorView<Phaser.GameObjects.Image, Phaser.Textures.DynamicTexture>(scene, ARENA_BOUNDS, GROUND_PROJECTION, FLOOR_TILE_IDS);
     this.floor.rebuild(this.floorTracker.initial());
+    this.projectileGraphics = scene.add.graphics();
+    this.projectileGraphics.setDepth(90000);
     this.playerSprite = new DirectionalSprite(
       scene,
       { idleTextureKey: ASSET_KEYS.playerIdle, walkTextureKey: ASSET_KEYS.playerWalk, walkFrameCount: WALK_FRAME_COUNT },
@@ -85,5 +88,14 @@ export class WorldView {
       encounter.assaltante.state === 'chasing',
     );
     this.assaltanteSprite.setTint(encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff);
+
+    // Placeholder arrows: one small circle per active projectile (logic positions).
+    const g = this.projectileGraphics;
+    g.clear();
+    g.fillStyle(0xffeb3b, 1);
+    for (const p of encounter.projectiles.active) {
+      const at = toScreen(p.pos, GROUND_PROJECTION);
+      g.fillCircle(at.x, at.y, 4);
+    }
   }
 }

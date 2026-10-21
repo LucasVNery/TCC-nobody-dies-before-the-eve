@@ -23,6 +23,7 @@ import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
 import { Stamina, STAMINA_COST } from './stamina';
 import { InputBuffer, type BufferedInput } from './inputBuffer';
+import type { ProjectileLaunch } from './projectile';
 
 export class PlayerController {
   state: PlayerState = 'idle';
@@ -44,6 +45,8 @@ export class PlayerController {
   readonly stamina = new Stamina();
   private sprintRequested = false;
   hp = PLAYER_MAX_HP;
+  private launched = false;
+  private pendingLaunch: ProjectileLaunch | null = null;
   private blockHeldMs = 0;
   private staggerRemainingMs = 0;
   private clockMs = 0;
@@ -145,6 +148,8 @@ export class PlayerController {
     this.currentAction = null;
     this.chargeHeldMs = 0;
     this.chargeTriggered = false;
+    this.launched = false;
+    this.pendingLaunch = null;
     this.equippedWeaponId = 'sword_shield';
     this.attackLockedMs = 0;
     this.dodgeCooldownRemainingMs = 0;
@@ -160,8 +165,16 @@ export class PlayerController {
     return { x: this._position.x, y: this._position.y, width: this.width, height: this.height };
   }
 
+  /** The projectile the current `throw` action releases, once, when its startup elapses; null otherwise. */
+  takeLaunch(): ProjectileLaunch | null {
+    const launch = this.pendingLaunch;
+    this.pendingLaunch = null;
+    return launch;
+  }
+
   attackHitbox(): AttackSector | null {
     if (this.state !== 'acting' || !this.currentAction) return null;
+    if (this.currentAction.actionType === 'throw') return null; // the shot is a projectile, not a sector
 
     const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
 
@@ -284,6 +297,8 @@ export class PlayerController {
     this.state = 'acting';
     this.phaseElapsedMs = 0;
     this.currentAction = action;
+    this.launched = false;
+    this.pendingLaunch = null;
     this.committedDirection = { x: this.aimDirection.x, y: this.aimDirection.y };
     this.chargeHeldMs = 0;
     this.chargeTriggered = action.actionType !== 'charged';
@@ -450,6 +465,18 @@ export class PlayerController {
     }
 
     this.phaseElapsedMs += stepMs;
+    if (action.actionType === 'throw' && !this.launched && this.phaseElapsedMs >= action.timing.startupMs) {
+      this.launched = true;
+      const dir = { x: this.committedDirection.x, y: this.committedDirection.y };
+      this.pendingLaunch = {
+        origin: {
+          x: this._position.x + this.width / 2 + dir.x * (this.width / 2),
+          y: this._position.y + this.height / 2 + dir.y * (this.width / 2),
+        },
+        dir,
+        actionId: action.id,
+      };
+    }
     if (this.phaseElapsedMs >= totalCommitmentMs(action)) {
       this.cancelAction();
     }

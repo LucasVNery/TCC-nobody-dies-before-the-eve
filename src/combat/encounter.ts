@@ -13,12 +13,14 @@ import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
 import { resolveAction, lockedMs } from './actionRegistry';
 import { isPatientAttack } from './patience';
+import { ProjectileSystem } from './projectile';
 
 export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly bus: EventBus<GameEvents>;
   readonly opportunities: OpportunitySystem;
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
+  readonly projectiles = new ProjectileSystem();
   /**
    * Write side of the profile. Defaults to a fresh `ProfileAccumulator` so
    * existing call sites (and tests that read `encounter.profile.domain(...)`)
@@ -90,6 +92,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Fresh Assaltante at `position`; see AssaltanteController.respawn for `reason`. */
   respawnEnemy(position: Vec2, reason: InvalidReason): void {
     this.assaltante.respawn(position, reason);
+    this.projectiles.clear();
     this.defenseRecordedThisAttack = false;
     this.firstLandingProcessed = false;
   }
@@ -97,12 +100,15 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Start-of-run player. */
   resetPlayer(position: Vec2): void {
     this.player.reset(position);
+    this.projectiles.clear();
     this.hitAppliedThisAction = false;
   }
 
   step(stepMs: number): void {
     this.assaltante.step(stepMs, this.player.position);
     this.player.step(stepMs);
+    const launch = this.player.takeLaunch();
+    if (launch) this.projectiles.spawn(launch);
 
     // Parry, block, the unmitigated hit and the dodge credit are all gated by
     // defenseRecordedThisAttack: the hitbox keeps overlapping every tick for
@@ -163,6 +169,25 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
         this.assaltante.takeDamage(dmg);
         this.bus.emit('enemy.hurt', { dmg, hp_after: this.assaltante.hp, actionId: action.id });
       }
+    }
+
+    // Projectiles: swept against the enemy's hurtbox after its own step. A hit
+    // lands once (the projectile is removed by the system), and the enemy dying
+    // on it leaves nothing in flight.
+    if (this.assaltante.isDead) {
+      this.projectiles.clear();
+    } else {
+      const { hits, expired } = this.projectiles.step(stepMs, this.assaltante.hurtbox());
+      for (const id of expired) this.bus.emit('projectile.expire', { id });
+      for (const id of hits) {
+        if (this.assaltante.isDead) break;
+        const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE.throw;
+        this.assaltante.onPlayerHitLanded();
+        this.assaltante.takeDamage(dmg);
+        this.bus.emit('projectile.hit', { id, dmg });
+        this.bus.emit('enemy.hurt', { dmg, hp_after: this.assaltante.hp, actionId: 'bow.shot' });
+      }
+      if (this.assaltante.isDead) this.projectiles.clear();
     }
 
     // Must run last: if a hit/dodge was resolved above this tick, the opportunity

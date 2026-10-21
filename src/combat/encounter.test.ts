@@ -887,3 +887,105 @@ describe('Encounter', () => {
     expect(hurts).toEqual([{ dmg: 10, hp_after: ASSALTANTE_MAX_HP - 10, actionId: 'sword_shield.light' }]);
   });
 });
+
+describe('Encounter bow projectile', () => {
+  const STEP = 1000 / 60;
+  type Rec = { type: string; payload: unknown };
+  function bowScenario(enemyX: number, enemyY = 0) {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: enemyX, y: enemyY, width: 20, height: 20 },
+    );
+    const events: Rec[] = [];
+    encounter.bus.on('enemy.hurt', (payload) => events.push({ type: 'enemy.hurt', payload }));
+    encounter.bus.on('projectile.hit', (payload) => events.push({ type: 'projectile.hit', payload }));
+    encounter.bus.on('projectile.expire', (payload) => events.push({ type: 'projectile.expire', payload }));
+    encounter.player.switchWeapon('bow');
+    for (let i = 0; i < 16; i++) encounter.step(STEP); // clear the weapon-switch lock
+    events.length = 0;
+    return { encounter, events };
+  }
+
+  it('a shot from 200 u deals 10 damage once (enemy.hurt bow.shot) and emits projectile.hit', () => {
+    const { encounter, events } = bowScenario(220);
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 60; i++) encounter.step(STEP);
+    const hurts = events.filter((e) => e.type === 'enemy.hurt');
+    expect(hurts).toHaveLength(1);
+    expect(hurts[0].payload).toMatchObject({ dmg: 10, actionId: 'bow.shot' });
+    expect(events.filter((e) => e.type === 'projectile.hit')).toHaveLength(1);
+    expect(encounter.assaltante.hp).toBe(ASSALTANTE_MAX_HP - 10);
+    expect(encounter.projectiles.active).toHaveLength(0);
+  });
+
+  it('the shot produces no sector hitbox', () => {
+    const { encounter } = bowScenario(1000);
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 10; i++) {
+      encounter.step(STEP);
+      expect(encounter.player.attackHitbox()).toBeNull();
+    }
+  });
+
+  it('a shot into the void emits projectile.expire and no damage', () => {
+    const { encounter, events } = bowScenario(1000, 800);
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 60; i++) encounter.step(STEP);
+    expect(events.filter((e) => e.type === 'projectile.expire')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'enemy.hurt')).toHaveLength(0);
+  });
+
+  it('the projectile spawns once, when the startup (80 ms) elapses, at player center + dir*width/2', () => {
+    const { encounter } = bowScenario(1000, 800);
+    encounter.player.tryAction('bow.shot');
+    encounter.step(40);
+    expect(encounter.projectiles.active).toHaveLength(0);
+    encounter.step(40); // phase = 80 ms: crosses the startup
+    expect(encounter.projectiles.active).toHaveLength(1);
+    const origin = encounter.projectiles.active[0].pos;
+    expect(origin.x).toBeCloseTo(20 + 500 * 0.04, 6); // spawned at center (10,10) + (1,0)*10 = 20, then swept this same 40 ms tick
+    expect(origin.y).toBeCloseTo(10, 6);
+    for (let i = 0; i < 5; i++) encounter.step(16);
+    expect(encounter.projectiles.active).toHaveLength(1);
+  });
+
+  it('a hit with the enemy recovering resolves the punish window as taken', () => {
+    const { encounter } = bowScenario(220);
+    const closes: Array<{ type: string; outcome: string }> = [];
+    encounter.bus.on('opp.close', (e) => closes.push(e as { type: string; outcome: string }));
+    // drive the enemy through an attack against a nearby fake position until it recovers
+    const near = { x: 200, y: 0 };
+    encounter.assaltante.step(16, near);
+    for (let i = 0; i < 300 && encounter.assaltante.state !== 'recovering'; i++) encounter.assaltante.step(16, near);
+    expect(encounter.assaltante.state).toBe('recovering');
+    closes.length = 0;
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 60 && closes.every((c) => c.type !== 'punish'); i++) encounter.step(STEP);
+    expect(closes.find((c) => c.type === 'punish')?.outcome).toBe('taken');
+  });
+
+  it('the enemy dying on the hit tick leaves no projectile active', () => {
+    const { encounter, events } = bowScenario(220);
+    encounter.assaltante.hp = 10;
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 60 && !encounter.assaltante.isDead; i++) encounter.step(STEP);
+    expect(encounter.assaltante.isDead).toBe(true);
+    expect(encounter.projectiles.active).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'projectile.hit')).toHaveLength(1);
+  });
+
+  it('respawnEnemy and resetPlayer clear projectiles in flight', () => {
+    const { encounter } = bowScenario(1000, 800);
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 8; i++) encounter.step(STEP);
+    expect(encounter.projectiles.active.length).toBeGreaterThan(0);
+    encounter.respawnEnemy({ x: 1000, y: 800 }, 'source_interrupted');
+    expect(encounter.projectiles.active).toHaveLength(0);
+
+    encounter.player.tryAction('bow.shot');
+    for (let i = 0; i < 12; i++) encounter.step(STEP);
+    expect(encounter.projectiles.active.length).toBeGreaterThan(0);
+    encounter.resetPlayer({ x: 0, y: 0 });
+    expect(encounter.projectiles.active).toHaveLength(0);
+  });
+});

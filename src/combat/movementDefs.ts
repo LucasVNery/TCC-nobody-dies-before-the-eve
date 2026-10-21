@@ -27,3 +27,6 @@ export const PLAYER_DAMAGE_BY_ACTION_TYPE: Record<ActionType, number> = {
 export const ROOM_ENCOUNTER_COUNT = 3;
 /** Minimum distance between the player and a freshly spawned Assaltante, in px. */
 export const MIN_SPAWN_DISTANCE = 300;
+
+/** Bow projectile (spec 2026-10-21 §4.4): speed px/s, max travel px, collision radius px. */
+export const PROJECTILE = { speed: 500, range: 260, radius: 8 } as const;

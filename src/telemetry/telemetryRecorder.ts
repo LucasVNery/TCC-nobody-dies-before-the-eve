@@ -9,7 +9,7 @@ export const POS_SAMPLE_INTERVAL_MS = 250;
 /** Bus events logged with a combat `ctx` (spec §4.3). */
 const CONTEXT_EVENTS = [
   'player.action', 'player.dodge', 'player.cancel', 'player.defense', 'player.hit_unmitigated', 'player.hurt',
-  'player.death', 'player.stamina_denied', 'player.guard_break', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'opp.open', 'opp.close',
+  'player.death', 'player.stamina_denied', 'player.guard_break', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'projectile.hit', 'projectile.expire', 'opp.open', 'opp.close',
 ] as const;
 
 /**
