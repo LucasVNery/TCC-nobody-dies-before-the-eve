@@ -6,7 +6,7 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
-import { ASSALTANTE_MAX_HP } from './movementDefs';
+import { ASSALTANTE_MAX_HP, ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, LUNGE } from './movementDefs';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
@@ -298,6 +298,7 @@ describe('AssaltanteController', () => {
     enemy.step(16, { x: 110, y: 0 }); // in range -> attacks
     expect(enemy.state).toBe('attacking');
     expect(started).toHaveBeenCalledTimes(1);
+    expect(started).toHaveBeenCalledWith({ kind: 'swing' });
   });
 
   it('takeDamage lowers hp, clamps at 0 and flips isDead', () => {
@@ -331,5 +332,253 @@ describe('AssaltanteController', () => {
     bus.on('opp.close', closes);
     enemy.respawn({ x: 0, y: 0 }, 'player_dead');
     expect(closes).not.toHaveBeenCalled();
+  });
+});
+
+describe('AssaltanteController lunge', () => {
+  const FAR_LEFT = { x: -5000, y: 600 };
+  const spawn = { x: 0, y: 600 };
+
+  // Enemy pinned against the left wall (y=600), so ageing the cooldown with a far-left player does not move it.
+  function fresh() {
+    const ctx = makeAssaltante();
+    ctx.enemy.respawn(spawn, 'source_interrupted');
+    return ctx;
+  }
+  function age(enemy: AssaltanteController, ms: number) {
+    for (let t = 0; t < ms; t += 16) enemy.step(16, FAR_LEFT);
+  }
+  function readyAt(d: number) {
+    const ctx = fresh();
+    age(ctx.enemy, LUNGE.cooldownMs);
+    return { ...ctx, player: { x: spawn.x + d, y: spawn.y } };
+  }
+  function startLunge(d = 200) {
+    const ctx = readyAt(d);
+    ctx.enemy.step(16, ctx.player);
+    expect(ctx.enemy.state).toBe('lunging');
+    return ctx;
+  }
+  function runUntil(enemy: AssaltanteController, player: { x: number; y: number }, pred: () => boolean, maxMs = 5000) {
+    let t = 0;
+    while (!pred() && t < maxMs) {
+      enemy.step(16, player);
+      t += 16;
+    }
+    return t;
+  }
+
+  it('chases at 150 u/s', () => {
+    expect(ASSALTANTE_CHASE_SPEED).toBe(150);
+    const { enemy } = makeAssaltante();
+    enemy.respawn({ x: 800, y: 600 }, 'source_interrupted');
+    const x0 = enemy.position.x;
+    for (let i = 0; i < 100; i++) enemy.step(10, { x: -2000, y: 600 }); // 1000 ms
+    expect(x0 - enemy.position.x).toBeCloseTo(150, 5);
+  });
+
+  it('does not lunge while the spawn cooldown is active, even in the band', () => {
+    const { enemy } = fresh();
+    enemy.step(16, { x: 200, y: 600 });
+    expect(enemy.state).toBe('chasing');
+    age(enemy, 5000);
+    enemy.step(16, { x: 200, y: 600 });
+    expect(enemy.state).toBe('chasing');
+  });
+
+  it('lunges only in [150, 260] once ready (120, 149, 261 do not)', () => {
+    for (const [d, expected] of [
+      [120, 'chasing'],
+      [149, 'chasing'],
+      [150, 'lunging'],
+      [260, 'lunging'],
+      [261, 'chasing'],
+    ] as const) {
+      const { enemy, player } = readyAt(d);
+      enemy.step(16, player);
+      expect(enemy.state, `d=${d}`).toBe(expected);
+    }
+  });
+
+  it('attack (<= 60) has priority over a ready lunge', () => {
+    const { enemy } = readyAt(0);
+    enemy.step(16, { x: spawn.x + 50, y: spawn.y });
+    expect(enemy.state).toBe('attacking');
+  });
+
+  it('the cooldown restarts at the lunge start: the next lunge begins exactly 6000 ms later', () => {
+    const { bus, enemy, player } = readyAt(200);
+    let tick = 0;
+    const starts: Array<{ tick: number; kind: string }> = [];
+    bus.on('enemy.attack_start', (e) => starts.push({ tick, kind: e.kind }));
+    enemy.step(16, player); // tick 0: first lunge starts
+    // the player flees at a constant 200 u so the enemy is in the band whenever it is free to act
+    for (tick = 1; tick <= 380; tick++) {
+      enemy.step(16, { x: enemy.position.x + 200, y: enemy.position.y });
+    }
+    expect(starts).toEqual([
+      { tick: 0, kind: 'lunge' },
+      { tick: LUNGE.cooldownMs / 16, kind: 'lunge' },
+    ]);
+  });
+
+  it('telegraphs 500 ms standing still without damage, then charges', () => {
+    const { enemy, player } = startLunge(200);
+    const x0 = enemy.position.x;
+    expect(enemy.attackHitbox()).toBeNull();
+    expect(enemy.strikeLanding()).toBe(false);
+    for (let t = 16; t < LUNGE.telegraphMs - 16; t += 16) {
+      enemy.step(16, player);
+      expect(enemy.position.x).toBe(x0);
+      expect(enemy.attackHitbox()).toBeNull();
+    }
+    expect(enemy.lungePhase).toBe('telegraph');
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    expect(enemy.lungePhase).toBe('charge');
+    expect(enemy.attackHitbox()).not.toBeNull();
+  });
+
+  it('aim follows the player during the telegraph and is locked at its end', () => {
+    const { enemy } = startLunge(200);
+    enemy.step(16, { x: spawn.x, y: spawn.y + 200 }); // now straight down
+    expect(enemy.attackDirection).toEqual({ x: 0, y: 1 });
+    runUntil(enemy, { x: spawn.x, y: spawn.y + 200 }, () => enemy.lungePhase === 'charge');
+    const locked = enemy.attackDirection;
+    for (let i = 0; i < 5; i++) enemy.step(16, { x: 1000, y: 0 }); // player moves away: aim must not change
+    expect(enemy.attackDirection).toEqual(locked);
+    expect(enemy.position.x).toBe(spawn.x);
+    expect(enemy.position.y).toBeGreaterThan(spawn.y);
+  });
+
+  it('travels at most 260 u at 450 u/s, then recovers with a 500 ms punish window', () => {
+    const { enemy, opp } = startLunge(200); // player to the right, far beyond contact once it passes
+    const player = { x: spawn.x + 200, y: spawn.y };
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    const x0 = enemy.position.x;
+    let ticks = 0;
+    while (enemy.state === 'lunging') {
+      enemy.step(16, player);
+      ticks++;
+    }
+    expect(enemy.position.x - x0).toBeCloseTo(LUNGE.maxTravel, 5);
+    expect(ticks).toBe(Math.ceil(LUNGE.maxTravel / ((LUNGE.speed * 16) / 1000)));
+    expect(enemy.state).toBe('recovering');
+    expect(opp.activeOfType('punish')[0].remainingMs).toBe(500);
+  });
+
+  it('stops at the arena wall without leaving it', () => {
+    const { enemy, opp } = makeAssaltante();
+    const right = ARENA_BOUNDS.x + ARENA_BOUNDS.width - 20;
+    enemy.respawn({ x: right - 80, y: 0 }, 'source_interrupted'); // 80 px from the right wall, on the top wall
+    for (let t = 0; t < LUNGE.cooldownMs; t += 16) enemy.step(16, { x: right - 80, y: -5000 }); // pinned at the top wall
+    expect(enemy.position).toEqual({ x: right - 80, y: 0 });
+    const player = { x: right - 80 + 200, y: 0 };
+    enemy.step(16, player);
+    expect(enemy.state).toBe('lunging');
+    while (enemy.state === 'lunging') {
+      enemy.step(16, player);
+      expect(enemy.position.x).toBeLessThanOrEqual(right);
+    }
+    expect(enemy.position.x).toBe(right);
+    expect(enemy.state).toBe('recovering');
+    expect(opp.activeOfType('punish')).toHaveLength(1);
+  });
+
+  it('emits enemy.attack_start with kind lunge and opens a dodge window of 500 + 260/450 s as assaltante.lunge', () => {
+    const { bus, enemy, player } = readyAt(200);
+    const started = vi.fn();
+    const opened = vi.fn();
+    bus.on('enemy.attack_start', started);
+    bus.on('opp.open', opened);
+    enemy.step(16, player);
+    expect(started).toHaveBeenCalledWith({ kind: 'lunge' });
+    expect(opened).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dodge', src: 'assaltante.lunge', window_ms: 500 + (260 / 450) * 1000 }),
+    );
+    expect(enemy.isCommitted).toBe(true);
+  });
+
+  it('parry during the lunge: taken, recovering with a 750 ms punish window', () => {
+    const { bus, enemy, opp, player } = startLunge(200);
+    const closes: Array<{ type: string; outcome: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    enemy.onPlayerParrySuccess();
+    expect(closes).toEqual([expect.objectContaining({ type: 'dodge', outcome: 'taken' })]);
+    expect(enemy.state).toBe('recovering');
+    expect(opp.activeOfType('punish')[0].remainingMs).toBe(PARRY_BONUS_RECOVERY_MS);
+  });
+
+  it('dodge during the lunge resolves the window taken once and the body keeps moving', () => {
+    const { bus, enemy, player } = startLunge(200);
+    const closes: Array<{ type: string; outcome: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    enemy.onPlayerDodgeSuccess();
+    enemy.onPlayerDodgeSuccess();
+    expect(closes).toEqual([expect.objectContaining({ type: 'dodge', outcome: 'taken' })]);
+    expect(enemy.state).toBe('lunging');
+  });
+
+  it('a wrong action during the lunge closes the window as missed', () => {
+    const { bus, enemy } = startLunge(200);
+    const closes: Array<{ outcome: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    enemy.onPlayerWrongAction('sword.light');
+    expect(closes).toEqual([expect.objectContaining({ outcome: 'missed' })]);
+  });
+
+  it('strikeLanding is true only while charging within 60 of the player', () => {
+    const { enemy } = startLunge(200);
+    const near = { x: spawn.x + 100, y: spawn.y };
+    const far = { x: spawn.x + 200, y: spawn.y };
+    runUntil(enemy, far, () => enemy.lungePhase === 'charge');
+    expect(enemy.strikeLanding()).toBe(false); // transition tick: not moving yet
+    enemy.step(16, far); // body at ~7 u, player 193 away
+    expect(enemy.strikeLanding()).toBe(false);
+    enemy.step(16, { x: enemy.position.x + 60, y: spawn.y });
+    expect(enemy.strikeLanding()).toBe(true);
+    enemy.step(16, { x: enemy.position.x + 80, y: spawn.y });
+    expect(enemy.strikeLanding()).toBe(false);
+    void near;
+  });
+
+  it('a player dying during the lunge: respawn closes the open window invalid/player_dead and resets the cooldown', () => {
+    const { bus, enemy, player } = startLunge(200);
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    enemy.respawn(spawn, 'player_dead');
+    expect(closes).toEqual([expect.objectContaining({ type: 'dodge', outcome: 'invalid', reason: 'player_dead' })]);
+    expect(enemy.state).toBe('idle');
+    enemy.step(16, player); // cooldown back to 6000: no lunge
+    expect(enemy.state).toBe('chasing');
+  });
+
+  it('stagger closes the open window as invalid/source_interrupted and recovers for the given time without a punish window', () => {
+    const { bus, enemy, opp, player } = startLunge(200);
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    bus.on('opp.close', (e) => closes.push(e));
+    enemy.stagger(1000);
+    expect(closes).toEqual([expect.objectContaining({ outcome: 'invalid', reason: 'source_interrupted' })]);
+    expect(enemy.state).toBe('recovering');
+    expect(opp.activeOfType('punish')).toHaveLength(0);
+    let ms = 0;
+    while (enemy.state === 'recovering') {
+      enemy.step(16, player);
+      ms += 16;
+    }
+    expect(ms).toBeGreaterThanOrEqual(1000);
+    expect(ms).toBeLessThan(1000 + 16);
+  });
+
+  it('msUntilThreatens: telegraph -> remaining ms within the horizon else null; moving -> 0', () => {
+    const { enemy, player } = startLunge(200);
+    const target = { x: 0, y: 0, width: 20, height: 20 };
+    expect(enemy.msUntilThreatens(target, 600)).toBe(LUNGE.telegraphMs - 16);
+    expect(enemy.msUntilThreatens(target, 484)).toBe(484);
+    expect(enemy.msUntilThreatens(target, 483)).toBeNull();
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    expect(enemy.msUntilThreatens(target, 1)).toBe(0);
   });
 });

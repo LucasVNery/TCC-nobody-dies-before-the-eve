@@ -82,7 +82,7 @@ export type GameEvents = {
   'player.stamina_denied': { action: string };
   'player.guard_break': EmptyPayload;
   'player.hurt': PlayerHurtPayload;
-  'enemy.attack_start': EmptyPayload;
+  'enemy.attack_start': { kind: 'swing' | 'lunge' };
   'enemy.hurt': EnemyHurtPayload;
   'projectile.hit': { id: number; dmg: number };
   'projectile.expire': { id: number };

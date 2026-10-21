@@ -5,7 +5,9 @@ import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';
 import type { ProfileSink } from '../profile/profileSink';
-import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP } from './movementDefs';
+import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE, ASSALTANTE_HIT_DAMAGE } from './movementDefs';
+import { STAMINA_COST, STAMINA_MAX } from './stamina';
+import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 
 const TELEGRAPH_MS = 400;
 const SWING_MS = 150;
@@ -987,5 +989,136 @@ describe('Encounter bow projectile', () => {
     expect(encounter.projectiles.active.length).toBeGreaterThan(0);
     encounter.resetPlayer({ x: 0, y: 0 });
     expect(encounter.projectiles.active).toHaveLength(0);
+  });
+});
+
+describe('Encounter lunge', () => {
+  // Enemy pinned at the left wall (0,600), player 200 u to its right: a ready lunge heads straight at the player.
+  function lungeEncounter() {
+    const encounter = new Encounter({ x: 200, y: 600, width: 20, height: 20 }, { x: 0, y: 600, width: 20, height: 20 });
+    for (let t = 0; t < LUNGE.cooldownMs; t += STEP_MS) encounter.assaltante.step(STEP_MS, { x: -5000, y: 600 });
+    const defenses: Array<{ label: string; perfect?: boolean; refund?: number }> = [];
+    const hurts: unknown[] = [];
+    const closes: Array<{ type: string; outcome: string; reason?: string; src?: string }> = [];
+    const opens: Array<{ type: string; src: string }> = [];
+    encounter.bus.on('player.defense', (e) => defenses.push(e));
+    encounter.bus.on('player.hurt', (e) => hurts.push(e));
+    encounter.bus.on('opp.close', (e) => closes.push(e));
+    encounter.bus.on('opp.open', (e) => opens.push(e));
+    return { encounter, defenses, hurts, closes, opens };
+  }
+  /** Steps until the first tick on which the lunge strike lands; returns that tick index (0 = lunge start). */
+  function landingTick(): number {
+    const { encounter } = lungeEncounter();
+    for (let tick = 0; tick < 200; tick++) {
+      encounter.step(STEP_MS);
+      if (encounter.assaltante.strikeLanding()) return tick;
+    }
+    throw new Error('never landed');
+  }
+  function stepTo(encounter: Encounter, from: number, to: number) {
+    for (let t = from; t < to; t++) encounter.step(STEP_MS);
+  }
+
+  it('a player standing in the path takes 20 damage and one stagger, once; the telegraph does no damage', () => {
+    const L = landingTick();
+    const { encounter, hurts, defenses } = lungeEncounter();
+    stepTo(encounter, 0, LUNGE.telegraphMs / STEP_MS);
+    expect(hurts).toHaveLength(0);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
+    stepTo(encounter, LUNGE.telegraphMs / STEP_MS, L + 3);
+    expect(hurts).toHaveLength(1);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - ASSALTANTE_HIT_DAMAGE);
+    expect(encounter.player.state).toBe('staggered');
+    stepTo(encounter, L + 3, L + 60); // the body keeps moving through the player: no second hit
+    expect(hurts).toHaveLength(1);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - ASSALTANTE_HIT_DAMAGE);
+    expect(defenses).toEqual([]);
+  });
+
+  // The player dashes toward the oncoming enemy (a sideways dash escapes the 60 u contact and is a retreat instead).
+  // Lunge movement starts on tick 32; dash press ticks are pinned to the 16 ms step.
+  function dashTowardEnemy(pressTick: number) {
+    const ctx = lungeEncounter();
+    for (let tick = 0; tick < 100; tick++) {
+      if (tick === pressTick) {
+        ctx.encounter.setPlayerMoveInput(-1, 0);
+        ctx.encounter.player.tryDodge();
+      }
+      ctx.encounter.step(STEP_MS);
+    }
+    return ctx;
+  }
+
+  it('i-frames active when the body arrives within 60 u: dodge, window taken, no damage', () => {
+    const { defenses, hurts, closes } = dashTowardEnemy(31);
+    expect(hurts).toHaveLength(0);
+    expect(defenses).toEqual([{ label: 'dodge' }]);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
+  });
+
+  it('a dash <= 80 ms old at the contact is a perfect dodge with the refund', () => {
+    const { defenses, hurts, closes } = dashTowardEnemy(48);
+    expect(hurts).toHaveLength(0);
+    expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: STAMINA_COST.dodge }]);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
+  });
+
+  it('a dash whose i-frames are over before the contact does not protect', () => {
+    const { defenses, hurts } = dashTowardEnemy(30);
+    expect(hurts).toHaveLength(1);
+    expect(defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
+  });
+
+  it('blocking absorbs the lunge for 15 stamina', () => {
+    expect(STAMINA_COST.blockHit).toBe(15);
+    const L = landingTick();
+    const { encounter, hurts, defenses } = lungeEncounter();
+    encounter.player.startBlock();
+    stepTo(encounter, 0, L + 40);
+    expect(hurts).toHaveLength(0);
+    expect(defenses.map((d) => d.label)).toEqual(['block']);
+    expect(encounter.player.stamina.value).toBeCloseTo(STAMINA_MAX - 15, 5);
+  });
+
+  it('a parry sends the lunge to recovering with a 750 ms punish window', () => {
+    const L = landingTick();
+    const { encounter, hurts, defenses, opens, closes } = lungeEncounter();
+    stepTo(encounter, 0, L - 3);
+    encounter.player.startBlock(); // guard younger than 150 ms at the contact
+    stepTo(encounter, L - 3, L + 1);
+    expect(hurts).toHaveLength(0);
+    expect(defenses.map((d) => d.label)).toEqual(['parry']);
+    expect(encounter.assaltante.state).toBe('recovering');
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
+    expect(opens.filter((o) => o.type === 'punish')).toHaveLength(1);
+    expect(encounter.opportunities.activeOfType('punish')[0].remainingMs).toBeGreaterThan(PARRY_BONUS_RECOVERY_MS - 4 * STEP_MS);
+    expect(encounter.opportunities.activeOfType('punish')[0].remainingMs).toBeLessThanOrEqual(PARRY_BONUS_RECOVERY_MS);
+  });
+
+  it('without contact the lunge window expires as retreat', () => {
+    const { encounter, defenses, hurts, closes } = lungeEncounter();
+    stepTo(encounter, 0, LUNGE.telegraphMs / STEP_MS + 2);
+    encounter.setPlayerMoveInput(0, -1); // walks out of the locked line
+    stepTo(encounter, 0, 90);
+    expect(hurts).toHaveLength(0);
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('expired');
+    expect(defenses).toEqual([{ label: 'retreat' }]);
+  });
+
+  it('a player dying during the lunge: respawn closes the window invalid/player_dead', () => {
+    const { encounter, closes } = lungeEncounter();
+    stepTo(encounter, 0, 10);
+    encounter.respawnEnemy({ x: 0, y: 600 }, 'player_dead');
+    expect(closes).toEqual([expect.objectContaining({ type: 'dodge', outcome: 'invalid', reason: 'player_dead' })]);
+    expect(encounter.assaltante.state).toBe('idle');
+  });
+
+  it('a wrong action during the lunge (isCommitted) closes the window as missed', () => {
+    const { encounter, closes } = lungeEncounter();
+    stepTo(encounter, 0, 5);
+    expect(encounter.assaltante.isCommitted).toBe(true);
+    encounter.player.tryAction('sword_shield.light');
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('missed');
   });
 });

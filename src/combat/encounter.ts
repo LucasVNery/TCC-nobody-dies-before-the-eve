@@ -52,7 +52,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     this.bus.on('player.action', (e) => {
       this.hitAppliedThisAction = false;
       this.profile.recordAction(e.actionType, e.weaponId);
-      if (this.assaltante.state === 'attacking') {
+      if (this.assaltante.isCommitted) {
         this.assaltante.onPlayerWrongAction(e.actionId);
       }
 

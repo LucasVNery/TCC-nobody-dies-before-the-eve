@@ -87,7 +87,11 @@ export class WorldView {
       encounter.assaltante.attackDirection,
       encounter.assaltante.state === 'chasing',
     );
-    this.assaltanteSprite.setTint(encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff);
+    // Placeholder tints: swing telegraph orange; lunge telegraph cyan, lunge charge red.
+    const lunge = encounter.assaltante.lungePhase;
+    const tint =
+      lunge === 'telegraph' ? 0x00bcd4 : lunge === 'charge' ? 0xf44336 : encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff;
+    this.assaltanteSprite.setTint(tint);
 
     // Placeholder arrows: one small circle per active projectile (logic positions).
     const g = this.projectileGraphics;

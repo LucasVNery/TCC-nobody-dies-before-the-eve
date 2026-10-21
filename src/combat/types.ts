@@ -12,4 +12,4 @@ export interface Vec2 {
 }
 
 export type PlayerState = 'idle' | 'acting' | 'dodging' | 'blocking' | 'staggered';
-export type EnemyState = 'idle' | 'chasing' | 'attacking' | 'recovering';
+export type EnemyState = 'idle' | 'chasing' | 'attacking' | 'lunging' | 'recovering';
