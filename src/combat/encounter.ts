@@ -30,6 +30,9 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   // attack window. Reset whenever the Assaltante opens a new 'dodge'
   // opportunity (i.e. starts a new attack).
   private defenseRecordedThisAttack = false;
+  // Whether the first landing tick of the current attack was already processed
+  // (reset with defenseRecordedThisAttack when a 'dodge' opp opens).
+  private firstLandingProcessed = false;
   // At most one damage application per player action: the attack sector
   // overlaps the hurtbox on every tick of the active phase, so without this
   // one light attack would deal its damage ~6 times. Reset on every
@@ -62,7 +65,10 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     });
 
     this.bus.on('opp.open', (e) => {
-      if (e.type === 'dodge') this.defenseRecordedThisAttack = false;
+      if (e.type === 'dodge') {
+        this.defenseRecordedThisAttack = false;
+        this.firstLandingProcessed = false;
+      }
     });
 
     this.bus.on('opp.close', (e) => {
@@ -85,6 +91,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   respawnEnemy(position: Vec2, reason: InvalidReason): void {
     this.assaltante.respawn(position, reason);
     this.defenseRecordedThisAttack = false;
+    this.firstLandingProcessed = false;
   }
 
   /** Start-of-run player. */
@@ -97,21 +104,28 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     this.assaltante.step(stepMs, this.player.position);
     this.player.step(stepMs);
 
-    // Dodge is self-terminating (i-frame timing means onPlayerDodgeSuccess()
-    // simply becomes a no-op once already resolved) — safe to leave ungated.
-    // Parry, block, and the unmitigated-hit case are NOT self-terminating on
-    // their own: the hitbox keeps overlapping every tick for the rest of the
-    // ~150ms swing, so all three are explicitly gated by
-    // defenseRecordedThisAttack — otherwise a parry could refire after a
-    // block already resolved the window (re-pressing E mid-swing), and
-    // absorbBlockHit()/enterStagger() would refire every tick (stamina would
-    // vanish in ~3 ticks; stagger would never end while overlap holds).
-    // The dodge is credited at the STRIKE, not at the button press: the player
-    // must be invulnerable when the strike lands, regardless of geometric
-    // overlap (a dash may carry them out of the sector and still counts).
+    // Parry, block, the unmitigated hit and the dodge credit are all gated by
+    // defenseRecordedThisAttack: the hitbox keeps overlapping every tick for
+    // the rest of the ~150ms swing, so without it a parry could refire after a
+    // block already resolved the window, absorbBlockHit()/enterStagger() would
+    // refire every tick and the dodge would be credited (and refunded) again.
+    // The dodge is credited at the STRIKE, not at the button press. On the
+    // first landing tick of an attack, being invulnerable is enough (a dash may
+    // carry the player out of the sector and still counts). On later landing
+    // ticks it only counts if the sector overlaps the player, so a dash pressed
+    // after the strike cannot rescue a player who was never in it.
     // Otherwise the parry/block/hit logic runs on overlap.
     const enemyAttack = this.assaltante.attackHitbox();
-    if (this.assaltante.strikeLanding() && !this.defenseRecordedThisAttack && this.player.isInvulnerable) {
+    const landing = this.assaltante.strikeLanding();
+    const firstLandingTick = landing && !this.firstLandingProcessed;
+    if (landing) this.firstLandingProcessed = true;
+    const overlaps = enemyAttack !== null && sectorOverlapsBox(enemyAttack, this.player.hurtbox());
+    if (
+      landing &&
+      !this.defenseRecordedThisAttack &&
+      this.player.isInvulnerable &&
+      (firstLandingTick || overlaps)
+    ) {
       const age = this.player.dashAgeMs;
       const perfect = age !== null && age <= PERFECT_DODGE_MS;
       this.assaltante.onPlayerDodgeSuccess();
@@ -123,7 +137,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       } else {
         this.bus.emit('player.defense', { label: 'dodge' });
       }
-    } else if (enemyAttack && sectorOverlapsBox(enemyAttack, this.player.hurtbox())) {
+    } else if (overlaps) {
       if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
         this.assaltante.onPlayerParrySuccess();
         this.recordDefenseOnce('parry');

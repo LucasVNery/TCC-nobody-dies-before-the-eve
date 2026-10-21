@@ -72,16 +72,16 @@ describe('Encounter dodge timing (credited at the strike)', () => {
     expect(hurts).toHaveLength(0);
     expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
-    expect(encounter.player.stamina.value).toBeLessThanOrEqual(70 + 5); // 30 spent, only a little regen
-    expect(encounter.player.stamina.value).toBeGreaterThanOrEqual(70);
+    expect(encounter.player.stamina.value).toBe(70); // 30 spent; regen is still waiting
   });
 
   it('a dash pressed ~60 ms before the strike is a perfect dodge and refunds 30 stamina', () => {
-    const { encounter, defenses, hurts } = dashScenario(0, 30, 4, -1);
+    const { encounter, defenses, hurts, closes } = dashScenario(0, 30, 4, -1);
     runFor(encounter, SWING_MS + STEP_MS * 2);
     expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
     expect(hurts).toHaveLength(0);
     expect(encounter.player.stamina.value).toBe(100); // 100 - 30 + 30
+    expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
   });
 
   it('a dash that carries the player out of the sector still counts as a dodge (credited at the strike)', () => {
@@ -98,6 +98,99 @@ describe('Encounter dodge timing (credited at the strike)', () => {
     expect(hurts).toHaveLength(0);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('expired');
     expect(defenses).toEqual([{ label: 'retreat' }]);
+  });
+
+  it('perfect boundary: dash age 80 ms (5 ticks) is perfect, 96 ms (6 ticks) is not', () => {
+    expect(dashScenario(0, 30, 5, -1).defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
+    expect(dashScenario(0, 30, 6, -1).defenses).toEqual([{ label: 'dodge' }]);
+  });
+
+  it('i-frame boundary: dash 9 ticks (144 ms) before the strike protects, 10 ticks (160 ms) does not', () => {
+    const covered = dashScenario(0, 30, 9, -1);
+    runFor(covered.encounter, SWING_MS);
+    expect(covered.defenses.map((d) => d.label)).toEqual(['dodge']);
+    expect(covered.hurts).toHaveLength(0);
+    const late = dashScenario(0, 30, 10, -1);
+    runFor(late.encounter, SWING_MS);
+    expect(late.defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
+    expect(late.hurts).toHaveLength(1);
+  });
+
+  it('the perfect refund is clamped at the stamina maximum', () => {
+    const encounter = new Encounter({ x: 0, y: 0, width: 20, height: 20 }, { x: 30, y: 0, width: 20, height: 20 });
+    const defenses: Array<{ label: string; perfect?: boolean; refund?: number }> = [];
+    encounter.bus.on('player.defense', (e) => defenses.push(e));
+    for (let tick = 1; tick <= STRIKE_TICK; tick++) {
+      if (tick === STRIKE_TICK - 4 + 1) {
+        encounter.setPlayerMoveInput(-1, 0);
+        encounter.player.tryDodge(); // spends 30
+        encounter.player.stamina.refund(20); // something else gave stamina back meanwhile
+      }
+      encounter.step(STEP_MS);
+    }
+    expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
+    expect(encounter.player.stamina.value).toBe(100); // 70 + 20 + 30 clamped
+  });
+
+  it('with no dash at all the window expires and retreat is inferred (out of the fan)', () => {
+    const encounter = new Encounter({ x: 100, y: 0, width: 20, height: 20 }, { x: 130, y: 0, width: 20, height: 20 });
+    const defenses: Array<{ label: string }> = [];
+    encounter.bus.on('player.defense', (e) => defenses.push(e));
+    encounter.step(STEP_MS);
+    encounter.setPlayerMoveInput(-1, 0);
+    runFor(encounter, TELEGRAPH_MS + SWING_MS + STEP_MS * 2);
+    expect(defenses).toEqual([{ label: 'retreat' }]);
+  });
+
+  describe('late dash after the strike started', () => {
+    // Player at (100,0), enemy at (130,0): the fan points -x. The player then
+    // walks down (+y) out of the fan before the strike.
+    function walkOutOfFan() {
+      const encounter = new Encounter({ x: 100, y: 0, width: 20, height: 20 }, { x: 130, y: 0, width: 20, height: 20 });
+      const defenses: Array<{ label: string; perfect?: boolean; refund?: number }> = [];
+      const hurts: unknown[] = [];
+      const closes: Array<{ type: string; outcome: string }> = [];
+      encounter.bus.on('player.defense', (e) => defenses.push(e));
+      encounter.bus.on('player.hurt', (e) => hurts.push(e));
+      encounter.bus.on('opp.close', (e) => closes.push(e as { type: string; outcome: string }));
+      encounter.setPlayerMoveInput(0, 1);
+      for (let tick = 1; tick <= STRIKE_TICK; tick++) encounter.step(STEP_MS);
+      encounter.setPlayerMoveInput(0, 0);
+      const inFan = () => {
+        const a = encounter.assaltante.attackHitbox();
+        return a !== null && sectorOverlapsBox(a, encounter.player.hurtbox());
+      };
+      return { encounter, defenses, hurts, closes, inFan };
+    }
+
+    it('a player outside the fan on the first swing tick gets no credit from a dash pressed on a later swing tick', () => {
+      const { encounter, defenses, hurts, closes, inFan } = walkOutOfFan();
+      expect(encounter.assaltante.strikeLanding()).toBe(true);
+      expect(inFan()).toBe(false);
+      encounter.setPlayerMoveInput(0, 1); // dash further away
+      encounter.player.tryDodge();
+      runFor(encounter, SWING_MS + STEP_MS * 4);
+      expect(defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
+      expect(defenses.some((d) => d.perfect || d.refund)).toBe(false);
+      expect(hurts).toHaveLength(0);
+      expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('expired');
+      expect(defenses).toEqual([{ label: 'retreat' }]);
+    });
+
+    it('a player who enters the fan on a later tick while invulnerable from a dash is credited', () => {
+      const { encounter, defenses, hurts, inFan } = walkOutOfFan();
+      expect(inFan()).toBe(false);
+      encounter.setPlayerMoveInput(0, -1); // dash back into the fan
+      encounter.player.tryDodge();
+      let entered = false;
+      for (let i = 0; i < 8 && !entered; i++) {
+        encounter.step(STEP_MS);
+        entered = inFan() || defenses.length > 0;
+      }
+      runFor(encounter, SWING_MS);
+      expect(defenses.map((d) => d.label)).toEqual(['dodge']);
+      expect(hurts).toHaveLength(0);
+    });
   });
 
   it('credits once per attack: later ticks of the swing neither repeat the dodge nor damage the player; profile records dodge once', () => {
