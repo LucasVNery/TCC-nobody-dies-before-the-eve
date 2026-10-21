@@ -31,7 +31,7 @@ function obsOf(tMs: number, w: World, body: { weapon: string; blocking: boolean 
     enemyPos: { x: PLAYER_POS.x + w.offset.x, y: PLAYER_POS.y + w.offset.y },
     playerPos: { x: PLAYER_POS.x, y: PLAYER_POS.y },
     playerHp: 100,
-    playerPoise: 100,
+    playerStamina: 100,
     isBlocking: body.blocking,
     equippedWeaponId: body.weapon,
     enemyDead: false,

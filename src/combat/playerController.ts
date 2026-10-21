@@ -5,17 +5,14 @@ import type { AABB, PlayerState, Vec2 } from './types';
 import {
   DODGE,
   SWITCH_RECOVERY_MS,
-  POISE_MAX,
-  POISE_DRAIN_PER_BLOCK,
-  POISE_REGEN_DELAY_MS,
-  POISE_REGEN_PER_SECOND,
   STAGGER_MS,
   PARRY_WINDOW_MS,
   INPUT_BUFFER_MS,
 } from './actionDefs';
 import { resolveAction, totalCommitmentMs, lockedMs, type ActionDef } from './actionRegistry';
 import {
-  PLAYER_MOVE_SPEED,
+  PLAYER_WALK_SPEED,
+  PLAYER_RUN_SPEED,
   BLOCK_MOVE_SPEED_FACTOR,
   DASH_DISTANCE,
   ARENA_BOUNDS,
@@ -24,6 +21,7 @@ import {
 } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, type AttackSector } from './sector';
+import { Stamina, STAMINA_COST } from './stamina';
 import { InputBuffer, type BufferedInput } from './inputBuffer';
 
 export class PlayerController {
@@ -43,11 +41,11 @@ export class PlayerController {
   private aimDirection: Vec2 = { x: 1, y: 0 };
   private committedDirection: Vec2 = { x: 1, y: 0 };
   private dashDirection: Vec2 = { x: 1, y: 0 };
-  poise = POISE_MAX;
+  readonly stamina = new Stamina();
+  private sprintRequested = false;
   hp = PLAYER_MAX_HP;
   private blockHeldMs = 0;
   private staggerRemainingMs = 0;
-  private poiseRegenDelayRemainingMs = 0;
   private clockMs = 0;
   private readonly inputBuffer = new InputBuffer(INPUT_BUFFER_MS);
 
@@ -70,6 +68,31 @@ export class PlayerController {
 
   get facing(): Vec2 {
     return { x: this.aimDirection.x, y: this.aimDirection.y };
+  }
+
+  /** Sprint requested, moving, free to move (idle) and with stamina left. */
+  get isSprinting(): boolean {
+    return (
+      this.sprintRequested &&
+      this.state === 'idle' &&
+      this.stamina.value > 0 &&
+      (this.moveInput.x !== 0 || this.moveInput.y !== 0)
+    );
+  }
+
+  /** Ms since the dash began; null outside `dodging`. */
+  get dashAgeMs(): number | null {
+    return this.state === 'dodging' ? this.phaseElapsedMs : null;
+  }
+
+  /** Perfect-dodge reward: gives the dodge cost back. Returns the amount. */
+  refundDodge(): number {
+    this.stamina.refund(STAMINA_COST.dodge);
+    return STAMINA_COST.dodge;
+  }
+
+  setSprint(on: boolean): void {
+    this.sprintRequested = on;
   }
 
   get isBlocking(): boolean {
@@ -108,14 +131,15 @@ export class PlayerController {
   }
 
   /**
-   * Start-of-run state: full hp and poise, idle, default weapon, no cooldowns,
+   * Start-of-run state: full hp and stamina, idle, default weapon, no cooldowns,
    * any in-progress (including charging) action discarded. Death itself does
    * not gate behavior — RunDirector calls this in the same tick the player dies.
    */
   reset(position: Vec2): void {
     this._position = { x: position.x, y: position.y };
     this.hp = PLAYER_MAX_HP;
-    this.poise = POISE_MAX;
+    this.stamina.reset();
+    this.sprintRequested = false;
     this.state = 'idle';
     this.phaseElapsedMs = 0;
     this.currentAction = null;
@@ -127,7 +151,6 @@ export class PlayerController {
     this.invulnerable = false;
     this.blockHeldMs = 0;
     this.staggerRemainingMs = 0;
-    this.poiseRegenDelayRemainingMs = 0;
     this.moveInput = { x: 0, y: 0 };
     this.clockMs = 0;
     this.inputBuffer.clear();
@@ -184,6 +207,10 @@ export class PlayerController {
     const action = resolveAction(actionId); // throws for unknown ids, before any state mutation
     if (action.weaponId !== this.equippedWeaponId) return;
     if (this.canStartAttack()) {
+      if (this.stamina.exhausted) {
+        this.bus.emit('player.stamina_denied', { action: action.id });
+        return;
+      }
       this.startAction(action);
     } else if (this.isBufferable() && action.actionType !== 'charged') {
       // the charged attack (Q) is never buffered: it needs a held press
@@ -196,12 +223,17 @@ export class PlayerController {
     if (this.currentAction.actionType !== 'charged' || this.chargeTriggered) return;
 
     if (this.chargeHeldMs >= this.currentAction.charge!.minHoldMs) {
-      this.chargeTriggered = true;
-      this.phaseElapsedMs = 0;
-      this.emitActionEvent(this.currentAction);
+      this.triggerCharge(this.currentAction);
     } else {
       this.cancelAction();
     }
+  }
+
+  private triggerCharge(action: ActionDef): void {
+    this.chargeTriggered = true;
+    this.phaseElapsedMs = 0;
+    this.stamina.spend(STAMINA_COST.charged, 'attack'); // the charged cost is paid on release
+    this.emitActionEvent(action);
   }
 
   private emitActionEvent(action: ActionDef): void {
@@ -215,6 +247,9 @@ export class PlayerController {
   tryDodge(): void {
     if (this.canDash()) {
       this.startDash();
+    } else if (this.canDashState()) {
+      // free to dash but short on stamina: denied, never buffered
+      this.bus.emit('player.stamina_denied', { action: 'dodge' });
     } else if (this.isBufferable() || this.dodgeCooldownRemainingMs > 0) {
       // a dash blocked by the cooldown is buffered even from blocking/charging; the cooldown clears on its own
       this.inputBuffer.push({ kind: 'dash' }, this.clockMs);
@@ -226,6 +261,10 @@ export class PlayerController {
   }
 
   private canDash(): boolean {
+    return this.canDashState() && this.stamina.value >= STAMINA_COST.dodge;
+  }
+
+  private canDashState(): boolean {
     if (this.dodgeCooldownRemainingMs > 0) return false;
     return this.isCharging || this.isInRecovery || this.state === 'blocking' || this.state === 'idle';
   }
@@ -247,6 +286,7 @@ export class PlayerController {
     this.chargeHeldMs = 0;
     this.chargeTriggered = action.actionType !== 'charged';
     if (action.actionType !== 'charged') {
+      this.stamina.spend(STAMINA_COST[action.actionType], 'attack');
       this.emitActionEvent(action);
     }
   }
@@ -264,11 +304,16 @@ export class PlayerController {
     this.phaseElapsedMs = 0;
     this.invulnerable = true;
     this.attackLockedMs = 0;
-    this.bus.emit('player.dodge', {});
+    this.stamina.spend(STAMINA_COST.dodge, 'dodge');
+    this.bus.emit('player.dodge', { cost: STAMINA_COST.dodge });
   }
 
   startBlock(): void {
     if (this.state !== 'idle') return;
+    if (this.stamina.exhausted) {
+      this.bus.emit('player.stamina_denied', { action: 'block' });
+      return;
+    }
     this.state = 'blocking';
     this.blockHeldMs = 0;
   }
@@ -280,9 +325,13 @@ export class PlayerController {
   }
 
   absorbBlockHit(): void {
-    this.poise = Math.max(0, this.poise - POISE_DRAIN_PER_BLOCK);
-    this.poiseRegenDelayRemainingMs = POISE_REGEN_DELAY_MS;
-    if (this.poise <= 0) this.enterStagger();
+    const canAbsorb = this.stamina.value >= STAMINA_COST.blockHit;
+    this.stamina.spend(STAMINA_COST.blockHit, 'block');
+    if (!canAbsorb) {
+      // not enough stamina to absorb the hit: guard break
+      this.bus.emit('player.guard_break', {});
+      this.enterStagger();
+    }
   }
 
   enterStagger(): void {
@@ -307,10 +356,15 @@ export class PlayerController {
 
   private canExecute(input: BufferedInput): boolean {
     if (input.kind === 'dash') return this.canDash();
-    return resolveAction(input.actionId).weaponId === this.equippedWeaponId && this.canStartAttack();
+    return (
+      resolveAction(input.actionId).weaponId === this.equippedWeaponId &&
+      this.canStartAttack() &&
+      !this.stamina.exhausted // buffered without stamina: waits out the buffer window, silently dropped
+    );
   }
 
   private advance(stepMs: number): void {
+    this.stamina.step(stepMs, this.state === 'idle' && !this.isSprinting);
     if (this.dodgeCooldownRemainingMs > 0) {
       this.dodgeCooldownRemainingMs = Math.max(0, this.dodgeCooldownRemainingMs - stepMs);
     }
@@ -321,24 +375,14 @@ export class PlayerController {
     if (this.state === 'idle') {
       const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
       if (direction.x !== 0 || direction.y !== 0) {
+        const sprinting = this.isSprinting;
         this._position = clampToArena(
-          applyMovement(this._position, direction, PLAYER_MOVE_SPEED, stepMs),
+          applyMovement(this._position, direction, sprinting ? PLAYER_RUN_SPEED : PLAYER_WALK_SPEED, stepMs),
           this.width,
           this.height,
           ARENA_BOUNDS,
         );
-      }
-      if (this.poise < POISE_MAX) {
-        // Handles a single large stepMs (as tests use, e.g. player.step(DODGE.durationMs)
-        // elsewhere) as correctly as many small 60Hz ticks: whatever portion of this
-        // step falls *after* the delay expires still regenerates poise, instead of the
-        // delay-countdown and the regen being mutually exclusive within one call.
-        const delayBefore = this.poiseRegenDelayRemainingMs;
-        this.poiseRegenDelayRemainingMs = Math.max(0, delayBefore - stepMs);
-        const regenMs = stepMs - delayBefore; // time left in this step after the delay ends
-        if (regenMs > 0) {
-          this.poise = Math.min(POISE_MAX, this.poise + (regenMs / 1000) * POISE_REGEN_PER_SECOND);
-        }
+        if (sprinting) this.stamina.spend((STAMINA_COST.sprintPerSecond * stepMs) / 1000, 'sprint');
       }
       return;
     }
@@ -353,7 +397,7 @@ export class PlayerController {
       const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
       if (direction.x !== 0 || direction.y !== 0) {
         this._position = clampToArena(
-          applyMovement(this._position, direction, PLAYER_MOVE_SPEED * BLOCK_MOVE_SPEED_FACTOR, stepMs),
+          applyMovement(this._position, direction, PLAYER_WALK_SPEED * BLOCK_MOVE_SPEED_FACTOR, stepMs),
           this.width,
           this.height,
           ARENA_BOUNDS,
@@ -398,9 +442,7 @@ export class PlayerController {
       const charge = action.charge!;
       this.chargeHeldMs = Math.min(this.chargeHeldMs + stepMs, charge.maxHoldMs);
       if (this.chargeHeldMs >= charge.maxHoldMs) {
-        this.chargeTriggered = true;
-        this.phaseElapsedMs = 0;
-        this.emitActionEvent(action);
+        this.triggerCharge(action);
       }
       return;
     }

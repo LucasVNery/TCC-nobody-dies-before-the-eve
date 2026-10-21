@@ -209,7 +209,7 @@ describe('TelemetryRecorder', () => {
 
 describe('game version', () => {
   it('declares the current game version', () => {
-    expect(GAME_VERSION).toBe('0.0.3+viewB');
+    expect(GAME_VERSION).toBe('0.0.4');
   });
 
   it('subscribe delivers every logged event in order and unsubscribe stops it', () => {

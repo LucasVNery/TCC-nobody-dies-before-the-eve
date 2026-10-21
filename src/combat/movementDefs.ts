@@ -1,9 +1,10 @@
 import type { AABB } from './types';
 import type { ActionType } from './actionRegistry';
 
-export const PLAYER_MOVE_SPEED = 220; // px/s
-export const BLOCK_MOVE_SPEED_FACTOR = 0.5; // fraction of PLAYER_MOVE_SPEED while blocking
-export const ASSALTANTE_CHASE_SPEED = 125; // px/s, slower than the player
+export const PLAYER_WALK_SPEED = 175; // px/s
+export const PLAYER_RUN_SPEED = 220; // px/s, sprint (costs stamina)
+export const BLOCK_MOVE_SPEED_FACTOR = 0.5; // fraction of PLAYER_WALK_SPEED while blocking
+export const ASSALTANTE_CHASE_SPEED = 150; // px/s, between the player's walk and run
 export const DASH_DISTANCE = 120; // px, total displacement over DODGE.durationMs
 export const ARENA_BOUNDS: AABB = { x: 0, y: 0, width: 1600, height: 1200 };
 export const ATTACK_REACH = 45;
@@ -12,7 +13,7 @@ export const ATTACK_HALF_ANGLE_RAD = Math.PI / 4; // 45° pra cada lado da mira 
 // Sub-project 5a (spec 2026-09-30 §3.1) — initial balance values, tune in playtest.
 export const PLAYER_MAX_HP = 100;
 export const ASSALTANTE_MAX_HP = 60;
-/** Damage of an unmitigated Assaltante hit. Block and parry deal no HP damage (block already drains poise). */
+/** Damage of an unmitigated Assaltante hit. Block and parry deal no HP damage (block already costs stamina). */
 export const ASSALTANTE_HIT_DAMAGE = 20;
 /** Damage dealt by one connecting player action, applied at most once per action. */
 export const PLAYER_DAMAGE_BY_ACTION_TYPE: Record<ActionType, number> = {

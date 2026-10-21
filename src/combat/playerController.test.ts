@@ -6,15 +6,13 @@ import { PlayerController } from './playerController';
 import {
   DODGE,
   SWITCH_RECOVERY_MS,
-  POISE_MAX,
-  POISE_DRAIN_PER_BLOCK,
-  POISE_REGEN_DELAY_MS,
   PARRY_WINDOW_MS,
   STAGGER_MS,
   INPUT_BUFFER_MS,
 } from './actionDefs';
 import { SWORD_SHIELD_ACTIONS, lockedMs, totalCommitmentMs } from './actionRegistry';
-import { PLAYER_MOVE_SPEED, ARENA_BOUNDS, PLAYER_MAX_HP, BLOCK_MOVE_SPEED_FACTOR } from './movementDefs';
+import { STAMINA_MAX, STAMINA_COST, STAMINA_REGEN } from './stamina';
+import { PLAYER_WALK_SPEED, PLAYER_RUN_SPEED, ARENA_BOUNDS, PLAYER_MAX_HP, BLOCK_MOVE_SPEED_FACTOR } from './movementDefs';
 import { sectorOverlapsBox } from './sector';
 
 const LIGHT = SWORD_SHIELD_ACTIONS.find((a) => a.actionType === 'light')!;
@@ -189,7 +187,7 @@ describe('PlayerController', () => {
     bus.on('player.action', actionHandler);
     bus.on('player.dodge', dodgeHandler);
     player.tryDodge();
-    expect(dodgeHandler).toHaveBeenCalledWith({});
+    expect(dodgeHandler).toHaveBeenCalledWith({ cost: 30 });
     expect(actionHandler).not.toHaveBeenCalled();
   });
 
@@ -197,7 +195,7 @@ describe('PlayerController', () => {
     const { player } = makePlayer();
     player.setMoveInput(1, 0);
     player.step(1000);
-    expect(player.position.x).toBeCloseTo(PLAYER_MOVE_SPEED);
+    expect(player.position.x).toBeCloseTo(PLAYER_WALK_SPEED);
     expect(player.position.y).toBeCloseTo(0);
   });
 
@@ -206,7 +204,7 @@ describe('PlayerController', () => {
     player.setMoveInput(1, 1);
     player.step(1000);
     const distance = Math.hypot(player.position.x, player.position.y);
-    expect(distance).toBeCloseTo(PLAYER_MOVE_SPEED);
+    expect(distance).toBeCloseTo(PLAYER_WALK_SPEED);
   });
 
   it('does not move when moveInput is zero', () => {
@@ -289,7 +287,7 @@ describe('PlayerController', () => {
     expect(player.isDead).toBe(true);
   });
 
-  it('reset() restores hp/poise/state/weapon and moves the player', () => {
+  it('reset() restores hp/stamina/state/weapon and moves the player', () => {
     const { player } = makePlayer();
     player.switchWeapon('bow');
     player.takeDamage(50);
@@ -297,7 +295,7 @@ describe('PlayerController', () => {
     player.absorbBlockHit();
     player.reset({ x: 300, y: 200 });
     expect(player.hp).toBe(PLAYER_MAX_HP);
-    expect(player.poise).toBe(POISE_MAX);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
     expect(player.state).toBe('idle');
     expect(player.equippedWeaponId).toBe('sword_shield');
     expect(player.position).toEqual({ x: 300, y: 200 });
@@ -380,10 +378,10 @@ describe('PlayerController — weapon switching', () => {
   });
 });
 
-describe('PlayerController — defensive kit (blocking/parry/stagger/poise)', () => {
-  it('starts with full poise', () => {
+describe('PlayerController — defensive kit (blocking/parry/stagger/stamina)', () => {
+  it('starts with full stamina', () => {
     const { player } = makePlayer();
-    expect(player.poise).toBe(POISE_MAX);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
   });
 
   it('startBlock() transitions to blocking, only from idle', () => {
@@ -417,22 +415,42 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/poise)', ()
     expect(player.isBlocking).toBe(true); // still blocking, just past the parry window
   });
 
-  it('absorbBlockHit() drains poise by POISE_DRAIN_PER_BLOCK', () => {
+  it('absorbBlockHit() spends blockHit stamina and does not stagger', () => {
     const { player } = makePlayer();
     player.startBlock();
     player.absorbBlockHit();
-    expect(player.poise).toBe(POISE_MAX - POISE_DRAIN_PER_BLOCK);
-    expect(player.state).toBe('blocking'); // poise not yet broken
+    expect(player.stamina.value).toBe(STAMINA_MAX - STAMINA_COST.blockHit);
+    expect(player.state).toBe('blocking');
   });
 
-  it('poise breaking (3 absorbed hits) enters staggered', () => {
+  it('absorbBlockHit() with less stamina than the cost empties it, emits player.guard_break and staggers', () => {
+    const { bus, player } = makePlayer();
+    const guardBreak = vi.fn();
+    bus.on('player.guard_break', guardBreak);
+    player.startBlock();
+    player.stamina.spend(90, 'attack'); // 10 left
+    player.absorbBlockHit();
+    expect(player.stamina.value).toBe(0);
+    expect(guardBreak).toHaveBeenCalledTimes(1);
+    expect(player.state).toBe('staggered');
+  });
+
+  it('holding the guard and a parry cost no stamina', () => {
     const { player } = makePlayer();
     player.startBlock();
-    player.absorbBlockHit();
-    player.absorbBlockHit();
-    player.absorbBlockHit();
-    expect(player.poise).toBe(0);
-    expect(player.state).toBe('staggered');
+    player.step(PARRY_WINDOW_MS + 500);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
+  });
+
+  it('startBlock() with zero stamina is denied and emits player.stamina_denied once', () => {
+    const { bus, player } = makePlayer();
+    const denied = vi.fn();
+    bus.on('player.stamina_denied', denied);
+    player.stamina.spend(200, 'attack');
+    player.startBlock();
+    expect(player.state).toBe('idle');
+    expect(denied).toHaveBeenCalledTimes(1);
+    expect(denied).toHaveBeenCalledWith({ action: 'block' });
   });
 
   it('enterStagger() blocks all input until STAGGER_MS elapses, then returns to idle', () => {
@@ -447,19 +465,187 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/poise)', ()
     expect(player.state).toBe('idle');
   });
 
-  it('poise regenerates after POISE_REGEN_DELAY_MS of standing idle, even across a single large step()', () => {
+  it('stamina regenerates after the wait while idle, even across a single large step()', () => {
     const { player } = makePlayer();
-    player.startBlock();
-    player.absorbBlockHit();
-    player.stopBlock(); // back to idle, poise = 60, regen delay armed at 1000ms
-    player.step(POISE_REGEN_DELAY_MS + 1000); // one big step: 1000ms of delay + 1000ms of regen
-    expect(player.poise).toBe(POISE_MAX); // 60 + (1000/1000)*50 = 110, clamped to 100
+    player.stamina.spend(65, 'attack'); // 35 left, wait armed at 600 ms
+    player.step(STAMINA_REGEN.delayMs + 1000); // 600 ms of wait + 1000 ms of regen
+    expect(player.stamina.value).toBeCloseTo(35 + 35, 5);
   });
 
-  it('poise never regenerates above POISE_MAX', () => {
+  it('stamina never regenerates above STAMINA_MAX', () => {
     const { player } = makePlayer();
-    player.step(POISE_REGEN_DELAY_MS + 5000);
-    expect(player.poise).toBe(POISE_MAX);
+    player.step(STAMINA_REGEN.delayMs + 5000);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
+  });
+
+  it('stamina does not regenerate while blocking', () => {
+    const { player } = makePlayer();
+    player.stamina.spend(50, 'attack');
+    player.startBlock();
+    player.step(5000);
+    expect(player.stamina.value).toBe(50);
+  });
+});
+
+describe('PlayerController — stamina costs', () => {
+  it('a light attack spends 12, a heavy 22, at the start', () => {
+    const a = makePlayer().player;
+    a.tryAction(LIGHT.id);
+    expect(a.stamina.value).toBe(STAMINA_MAX - 12);
+    const b = makePlayer().player;
+    b.tryAction(HEAVY.id);
+    expect(b.stamina.value).toBe(STAMINA_MAX - 22);
+  });
+
+  it('a bow shot spends 8 at the start', () => {
+    const { player } = makePlayer();
+    player.switchWeapon('bow');
+    player.step(SWITCH_RECOVERY_MS);
+    player.tryAction('bow.shot');
+    expect(player.stamina.value).toBe(STAMINA_MAX - 8);
+  });
+
+  it('a charged attack spends 28 on release, not while charging', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.minHoldMs + 50);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
+    player.releaseAction();
+    expect(player.stamina.value).toBe(STAMINA_MAX - 28);
+  });
+
+  it('a charged release with only 10 stamina still fires and leaves 0', () => {
+    const { bus, player } = makePlayer();
+    const actions = vi.fn();
+    bus.on('player.action', actions);
+    player.stamina.spend(90, 'attack');
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.minHoldMs + 50);
+    player.releaseAction();
+    expect(actions).toHaveBeenCalledWith(expect.objectContaining({ actionId: CHARGED.id }));
+    expect(player.stamina.value).toBe(0);
+  });
+
+  it('tryAction() with zero stamina does not start and emits player.stamina_denied once', () => {
+    const { bus, player } = makePlayer();
+    const denied = vi.fn();
+    bus.on('player.stamina_denied', denied);
+    player.stamina.spend(200, 'attack');
+    player.tryAction(LIGHT.id);
+    expect(player.state).toBe('idle');
+    expect(denied).toHaveBeenCalledTimes(1);
+    expect(denied).toHaveBeenCalledWith({ action: 'sword_shield.light' });
+  });
+
+  it('a buffered attack that becomes executable without stamina is dropped silently', () => {
+    const { bus, player } = makePlayer();
+    const denied = vi.fn();
+    bus.on('player.stamina_denied', denied);
+    player.switchWeapon('bow');
+    player.switchWeapon('sword_shield'); // each switch arms the 150 ms attack lock
+    player.tryAction(LIGHT.id); // locked -> buffered
+    player.stamina.spend(200, 'attack');
+    player.step(SWITCH_RECOVERY_MS + INPUT_BUFFER_MS + 50);
+    expect(player.state).toBe('idle');
+    expect(denied).not.toHaveBeenCalled();
+  });
+
+  it('tryDodge() with 29 stamina is denied, emits once and is not buffered', () => {
+    const { bus, player } = makePlayer();
+    const denied = vi.fn();
+    const dodged = vi.fn();
+    bus.on('player.stamina_denied', denied);
+    bus.on('player.dodge', dodged);
+    player.stamina.spend(71, 'attack'); // 29 left
+    player.tryDodge();
+    expect(player.state).toBe('idle');
+    expect(denied).toHaveBeenCalledTimes(1);
+    expect(denied).toHaveBeenCalledWith({ action: 'dodge' });
+    player.stamina.refund(10); // 39 now: a buffered dodge would fire on the next step
+    player.step(16);
+    expect(dodged).not.toHaveBeenCalled();
+    expect(player.state).toBe('idle');
+  });
+
+  it('tryDodge() with exactly 30 dodges, emits cost 30 and leaves 0 with the long wait', () => {
+    const { bus, player } = makePlayer();
+    const dodged = vi.fn();
+    bus.on('player.dodge', dodged);
+    player.stamina.spend(70, 'attack'); // 30 left
+    player.tryDodge();
+    expect(player.state).toBe('dodging');
+    expect(dodged).toHaveBeenCalledWith({ cost: 30 });
+    expect(player.stamina.value).toBe(0);
+    player.step(DODGE.durationMs);
+    player.step(STAMINA_REGEN.exhaustedDelayMs - DODGE.durationMs - 1);
+    expect(player.stamina.value).toBe(0);
+    player.step(STAMINA_REGEN.exhaustedDelayMs);
+    expect(player.stamina.value).toBeGreaterThan(0);
+  });
+
+  it('dashAgeMs is null outside dodging and counts the dash age; refundDodge gives 30 back', () => {
+    const { player } = makePlayer();
+    expect(player.dashAgeMs).toBeNull();
+    player.tryDodge();
+    player.step(50);
+    expect(player.dashAgeMs).toBe(50);
+    expect(player.refundDodge()).toBe(30);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
+    player.step(DODGE.durationMs);
+    expect(player.dashAgeMs).toBeNull();
+  });
+});
+
+describe('PlayerController — sprint', () => {
+  it('walks at 175 u/s and sprints at 220 u/s spending 10 per second', () => {
+    const a = makePlayer().player;
+    a.setMoveInput(1, 0);
+    a.step(1000);
+    expect(a.position.x).toBeCloseTo(175);
+    expect(a.isSprinting).toBe(false);
+
+    const b = makePlayer().player;
+    b.setSprint(true);
+    b.setMoveInput(1, 0);
+    expect(b.isSprinting).toBe(true);
+    b.step(1000);
+    expect(b.position.x).toBeCloseTo(PLAYER_RUN_SPEED);
+    expect(b.stamina.value).toBeCloseTo(STAMINA_MAX - STAMINA_COST.sprintPerSecond, 5);
+  });
+
+  it('does not regenerate stamina while sprinting', () => {
+    const { player } = makePlayer();
+    player.stamina.spend(50, 'attack');
+    player.setSprint(true);
+    player.setMoveInput(1, 0);
+    player.step(3000);
+    expect(player.stamina.value).toBeLessThan(50);
+  });
+
+  it('sprint without movement is not sprinting and does not spend', () => {
+    const { player } = makePlayer();
+    player.setSprint(true);
+    expect(player.isSprinting).toBe(false);
+    player.step(1000);
+    expect(player.stamina.value).toBe(STAMINA_MAX);
+  });
+
+  it('sprint with zero stamina walks at 175', () => {
+    const { player } = makePlayer();
+    player.stamina.spend(200, 'attack');
+    player.setSprint(true);
+    player.setMoveInput(1, 0);
+    expect(player.isSprinting).toBe(false);
+    player.step(1000);
+    expect(player.position.x).toBeCloseTo(PLAYER_WALK_SPEED);
+  });
+
+  it('blocking moves at half the walk speed (87.5 u/s)', () => {
+    const { player } = makePlayer();
+    player.startBlock();
+    player.setMoveInput(1, 0);
+    player.step(1000);
+    expect(player.position.x).toBeCloseTo(87.5);
   });
 });
 
@@ -523,7 +709,7 @@ describe('combat B: responsive combat', () => {
     player.setMoveInput(1, 0);
     player.step(100);
     expect(player.state).toBe('idle');
-    expect(player.position.x).toBeCloseTo((PLAYER_MOVE_SPEED * 100) / 1000);
+    expect(player.position.x).toBeCloseTo((PLAYER_WALK_SPEED * 100) / 1000);
     expect(log.map((e) => e.type)).toEqual(['player.action', 'player.cancel']);
     expect(log[1].payload).toEqual({ by: 'move', actionId: LIGHT.id });
   });
@@ -660,7 +846,7 @@ describe('combat B: responsive combat', () => {
     player.setMoveInput(1, 0);
     player.step(1000);
     expect(player.state).toBe('blocking');
-    expect(player.position.x).toBeCloseTo(PLAYER_MOVE_SPEED * BLOCK_MOVE_SPEED_FACTOR);
+    expect(player.position.x).toBeCloseTo(PLAYER_WALK_SPEED * BLOCK_MOVE_SPEED_FACTOR);
   });
 
   it('reset() clears a pending buffered input', () => {

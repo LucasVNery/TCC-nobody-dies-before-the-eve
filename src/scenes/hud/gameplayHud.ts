@@ -11,7 +11,7 @@ export interface GameplayHudData {
   maxHp: number;
   enemyHp: number;
   enemyMaxHp: number;
-  poise: number;
+  stamina: number;
   weaponLabel: string;
   run: number;
   room: number;
@@ -61,7 +61,7 @@ export class GameplayHud {
   update(m: GameplayHudData): void {
     this.statusText.setText([
       `HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`,
-      `postura: ${Math.round(m.poise)}/100`,
+      `estamina: ${Math.round(m.stamina)}/100`,
       `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`,
     ]);
     this.weaponText.setText(`Arma: ${m.weaponLabel}`);

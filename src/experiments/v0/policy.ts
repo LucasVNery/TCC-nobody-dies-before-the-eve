@@ -110,7 +110,8 @@ export class AgentPolicy {
   /** Own body is inside an action's non-cancelable part until then (own timer: lockedMs from the registry). */
   private lockedUntil = -Infinity;
   private lastHp: number | null = null;
-  private lastPoise: number | null = null;
+  private lastStamina: number | null = null;
+  private lastBlocking = false;
   private pending: { kind: Exclude<DefenseKind, 'none'>; at: number } | null = null;
   private wantBlock = false;
   private blockSince = 0;
@@ -234,19 +235,19 @@ export class AgentPolicy {
   }
 
   /**
-   * Own HP/poise bars are visible to a player: an HP drop (or poise broken)
+   * Own HP/stamina bars are visible to a player: an HP drop (or stamina emptied while blocking)
    * means the body was staggered, which also ends any charge; an HP rise means
    * a fresh run (full reset), so every own-body timer is cleared.
    */
   private readOwnBody(now: Observation, nowMs: number): void {
-    if (this.lastHp !== null && this.lastPoise !== null) {
+    if (this.lastHp !== null && this.lastStamina !== null) {
       if (now.playerHp > this.lastHp) {
         this.chargeReleaseAt = null;
         this.chargeAction = null;
         this.lockedUntil = -Infinity;
         this.wantBlock = false;
         this.pending = null;
-      } else if (now.playerHp < this.lastHp || (now.playerPoise <= 0 && this.lastPoise > 0)) {
+      } else if (now.playerHp < this.lastHp || (this.lastBlocking && now.playerStamina <= 0 && this.lastStamina > 0)) {
         this.chargeReleaseAt = null;
         this.chargeAction = null;
         // the hit lands after this tick's body step, so the stagger ends one step later than STAGGER_MS
@@ -254,7 +255,8 @@ export class AgentPolicy {
       }
     }
     this.lastHp = now.playerHp;
-    this.lastPoise = now.playerPoise;
+    this.lastStamina = now.playerStamina;
+    this.lastBlocking = now.isBlocking;
   }
 
   private releaseCharge(intent: AgentIntent, nowMs: number): void {

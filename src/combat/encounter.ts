@@ -111,7 +111,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     // ~150ms swing, so all three are explicitly gated by
     // defenseRecordedThisAttack — otherwise a parry could refire after a
     // block already resolved the window (re-pressing E mid-swing), and
-    // absorbBlockHit()/enterStagger() would refire every tick (poise would
+    // absorbBlockHit()/enterStagger() would refire every tick (stamina would
     // vanish in ~3 ticks; stagger would never end while overlap holds).
     const enemyAttack = this.assaltante.attackHitbox();
     if (enemyAttack && sectorOverlapsBox(enemyAttack, this.player.hurtbox())) {

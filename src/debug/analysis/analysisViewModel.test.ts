@@ -28,7 +28,7 @@ function input(over: Partial<AnalysisInput> = {}): AnalysisInput {
     profile: profile(0),
     live: {
       keysDown: [], move: { dx: 0, dy: 0 }, aimDeg: 0, weaponId: 'sword',
-      playerState: 'idle', enemyState: 'idle', playerHp: 100, enemyHp: 100, poise: 0,
+      playerState: 'idle', enemyState: 'idle', playerHp: 100, enemyHp: 100, stamina: 0,
     },
     tape: [],
     status,

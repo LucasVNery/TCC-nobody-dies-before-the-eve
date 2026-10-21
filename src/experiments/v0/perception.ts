@@ -9,7 +9,7 @@ export interface Observation {
   enemyPos: Vec2;
   playerPos: Vec2;
   playerHp: number;
-  playerPoise: number;
+  playerStamina: number;
   isBlocking: boolean;
   equippedWeaponId: string;
   enemyDead: boolean;
@@ -27,7 +27,7 @@ export function observe(encounter: Encounter<ProfileSink>, tMs: number): Observa
     enemyPos: { x: ep.x, y: ep.y },
     playerPos: { x: pp.x, y: pp.y },
     playerHp: player.hp,
-    playerPoise: player.poise,
+    playerStamina: player.stamina.value,
     isBlocking: player.isBlocking,
     equippedWeaponId: player.equippedWeaponId,
     enemyDead: assaltante.isDead,

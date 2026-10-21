@@ -26,7 +26,7 @@ export function buildCtx(encounter: Encounter<ProfileSink>, msSinceLastAction: n
     e_state: e.state,
     p_hp: p.hp,
     e_hp: e.hp,
-    p_poise: r1(p.poise),
+    p_stam: r1(p.stamina.value),
     weapon: p.equippedWeaponId,
     ms_since_last_action: msSinceLastAction === null ? null : r1(msSinceLastAction),
   };

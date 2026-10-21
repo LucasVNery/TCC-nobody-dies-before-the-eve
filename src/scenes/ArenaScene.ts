@@ -169,7 +169,7 @@ export class ArenaScene extends Phaser.Scene {
     this.cameraRig.update(delta);
     this.hud.update({
       hp: player.hp, maxHp: PLAYER_MAX_HP, enemyHp: assaltante.hp, enemyMaxHp: ASSALTANTE_MAX_HP,
-      poise: player.poise,
+      stamina: player.stamina.value,
       weaponLabel: WEAPON_LABELS[player.equippedWeaponId] ?? player.equippedWeaponId,
       run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,
     });
@@ -189,7 +189,7 @@ export class ArenaScene extends Phaser.Scene {
           enemyState: assaltante.state,
           playerHp: player.hp,
           enemyHp: assaltante.hp,
-          poise: player.poise,
+          stamina: player.stamina.value,
         },
         tape: this.tape.entries(),
         status: session.status(),

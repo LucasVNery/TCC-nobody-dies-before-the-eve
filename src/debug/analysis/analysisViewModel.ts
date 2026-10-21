@@ -16,7 +16,7 @@ export interface LiveState {
   enemyState: string;
   playerHp: number;
   enemyHp: number;
-  poise: number;
+  stamina: number;
 }
 
 export interface PerfStats { fps: number; stepMs: number }
@@ -153,7 +153,7 @@ function inputsSection(l: LiveState): ViewSection {
       r('estate', 'estado inimigo', l.enemyState),
       r('php', 'vida jogador', fmtNum(l.playerHp, 0)),
       r('ehp', 'vida inimigo', fmtNum(l.enemyHp, 0)),
-      r('poise', 'postura', fmtNum(l.poise, 0)),
+      r('stamina', 'estamina', fmtNum(l.stamina, 0)),
     ],
   };
 }

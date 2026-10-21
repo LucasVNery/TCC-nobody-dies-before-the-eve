@@ -11,7 +11,9 @@ export interface PlayerActionPayload {
   opp_id?: string;
 }
 
-export type PlayerDodgePayload = Record<string, never>;
+export interface PlayerDodgePayload {
+  cost: number;
+}
 
 export interface PlayerCancelPayload {
   /** What ended the recovery early. */
@@ -26,6 +28,8 @@ export type EmptyPayload = Record<string, never>;
 
 export interface PlayerDefensePayload {
   label: DefensiveLabel;
+  perfect?: boolean;
+  refund?: number;
 }
 
 export interface PlayerHurtPayload {
@@ -75,6 +79,8 @@ export type GameEvents = {
   'player.cancel': PlayerCancelPayload;
   'player.hit_unmitigated': PlayerHitUnmitigatedPayload;
   'player.defense': PlayerDefensePayload;
+  'player.stamina_denied': { action: string };
+  'player.guard_break': EmptyPayload;
   'player.hurt': PlayerHurtPayload;
   'enemy.attack_start': EmptyPayload;
   'enemy.hurt': EnemyHurtPayload;

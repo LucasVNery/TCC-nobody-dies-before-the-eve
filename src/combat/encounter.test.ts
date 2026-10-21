@@ -258,14 +258,17 @@ describe('Encounter', () => {
     );
 
     function doLight() {
+      encounter.player.stamina.refund(100); // this test is about the profile, not the stamina budget
       encounter.player.tryAction('sword_shield.light');
       runFor(encounter, 400); // > light's total duration (350ms)
     }
     function doHeavy() {
+      encounter.player.stamina.refund(100);
       encounter.player.tryAction('sword_shield.heavy');
       runFor(encounter, 700); // > heavy's total duration (640ms)
     }
     function doCharged() {
+      encounter.player.stamina.refund(100);
       encounter.player.tryAction('sword_shield.charged');
       runFor(encounter, 300); // still charging (< maxHoldMs 900), > minHoldMs 150
       encounter.player.releaseAction();
@@ -298,6 +301,7 @@ describe('Encounter', () => {
     );
 
     for (let i = 0; i < 5; i++) {
+      encounter.player.stamina.refund(100); // this test is about the profile, not the stamina budget
       encounter.player.tryAction('sword_shield.light');
       runFor(encounter, 400);
     }
@@ -368,7 +372,7 @@ describe('Encounter', () => {
     expect(snap.counts.defensive_repertoire).toEqual([1, 1]); // exactly 1 label recorded: parry
   });
 
-  it('holding block from well before impact (past PARRY_WINDOW_MS) absorbs the hit as a block, draining poise, not a parry', () => {
+  it('holding block from well before impact (past PARRY_WINDOW_MS) absorbs the hit as a block, costing stamina, not a parry', () => {
     const encounter = new Encounter(
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 30, y: 0, width: 20, height: 20 },
@@ -378,10 +382,10 @@ describe('Encounter', () => {
 
     // Block absorbs the hit but — unlike parry — never cuts the swing short;
     // the Assaltante still reaches 'recovering' on its own normal timing.
-    // Poise drops by exactly one hit's worth (40), not to 0 — the hitbox
+    // Stamina drops by exactly one hit's worth (15), not to 0 — the hitbox
     // keeps overlapping for the rest of the ~150ms swing, but the guard
     // must make absorbBlockHit() fire only once per attack window.
-    expect(encounter.player.poise).toBe(60);
+    expect(encounter.player.stamina.value).toBe(85);
     expect(encounter.assaltante.state).toBe('recovering');
   });
 
@@ -392,7 +396,7 @@ describe('Encounter', () => {
     );
     encounter.player.startBlock(); // held from t=0 -> resolves as an ordinary block, not a parry, when the swing connects at TELEGRAPH_MS
     runFor(encounter, TELEGRAPH_MS + STEP_MS);
-    expect(encounter.player.poise).toBeLessThan(100); // confirms the block already absorbed the hit this window
+    expect(encounter.player.stamina.value).toBeLessThan(100); // confirms the block already absorbed the hit this window
 
     encounter.player.stopBlock();
     encounter.player.startBlock(); // re-press -> blockHeldMs resets to 0, briefly back inside the parry window
@@ -545,15 +549,15 @@ describe('Encounter', () => {
     // Assaltante starts at distance 150, outside ATTACK_RANGE (60), so it
     // must CHASE before it can telegraph — this is the branch of
     // predictThreatMs that a pure telegraph-only test (like the two above)
-    // never exercises. With ASSALTANTE_CHASE_SPEED=125px/s:
-    //   closeMs = (150 - 60) / 125 * 1000 = 720ms
-    //   predictThreatMs = closeMs + TELEGRAPH_MS = 720 + 400 = 1120ms
+    // never exercises. With ASSALTANTE_CHASE_SPEED=150px/s:
+    //   closeMs = (150 - 60) / 150 * 1000 = 600ms
+    //   predictThreatMs = closeMs + TELEGRAPH_MS = 600 + 400 = 1000ms
     // The real 16ms-step loop re-checks distance (and only *then* moves)
-    // every tick. At 125px/s each tick covers exactly 2px, so 90px closes in
-    // exactly 45 ticks (720ms) and the observed first unmitigated hit lands
-    // on the 1120ms step boundary — zero discretization bias with these
-    // constants (it was +8ms at chase speed 90, where 1000ms is not a whole
-    // number of 16ms ticks). The predictor still never claims *more* safety
+    // every tick. At 150px/s each tick covers 2.4px, so 90px closes in
+    // 37.5 ticks (the prediction is continuous; the loop is within one tick of it)
+    // and the first unmitigated hit lands within a tick of the 1000ms mark. With these
+    // constants the discretization bias stays under one 16ms tick; the observed
+    // value is only asserted via the prediction. The predictor still never claims *more* safety
     // than the real loop delivers (spec §10).
     const DISTANCE = 150;
 
@@ -586,8 +590,8 @@ describe('Encounter', () => {
         { x: 0, y: 0, width: 20, height: 20 },
         { x: DISTANCE, y: 0, width: 20, height: 20 },
       );
-      // Comfortably above both the continuous prediction (1120ms) and the
-      // real loop's actual active-at time (1120ms), with margin well beyond
+      // Comfortably above both the continuous prediction (1000ms) and the
+      // real loop's actual active-at time (about 1000ms), with margin well beyond
       // the one-step discretization bias — not a knife's-edge horizon that
       // would make this test flaky.
       const horizonMs = 1500;
@@ -603,7 +607,7 @@ describe('Encounter', () => {
       // the branch that would catch it: a wrong reach could make the
       // predicted sector miss the target (flipping this to null) or the real
       // sweep miss/hit differently than predicted.
-      expect(prediction).toBe(1120);
+      expect(prediction).toBe(1000);
       expect(hitEvents.length).toBeGreaterThan(0);
       expect(prediction !== null).toBe(hitEvents.length > 0);
     });

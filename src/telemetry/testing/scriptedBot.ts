@@ -36,6 +36,9 @@ export function makeBotStack(opts: BotStackOptions = {}) {
 export function runBot(stack: TelemetryStack, ticks: number) {
   const { encounter } = stack;
   for (let i = 0; i < ticks; i++) {
+    // Fixture, not a skill model: keep the bot out of exhaustion so it still produces kills, deaths,
+    // rooms and every profile write type now that actions cost stamina.
+    encounter.player.stamina.refund(100);
     const p = encounter.player.position;
     const e = encounter.assaltante.position;
     const dx = e.x - p.x;
@@ -45,7 +48,7 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     encounter.setPlayerMoveInput(far ? dx : 0, far ? dy : 0);
     if (i % 400 === 0) encounter.player.switchWeapon('sword_shield');
     if (i % 400 === 200) encounter.player.switchWeapon('heavy_weapon');
-    if (i % 20 === 0) {
+    if (i % 36 === 0) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
       if (light) encounter.player.tryAction(light.id);
     }
