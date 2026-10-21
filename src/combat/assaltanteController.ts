@@ -12,7 +12,7 @@ import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { predictThreatMs, type ChaseTelegraphConfig, type ChaseTelegraphSnapshot } from './threatPrediction';
 import type { ThreatAssessor } from './patience';
 
-const TELEGRAPH_MS = 400; // = dodge window
+export const TELEGRAPH_MS = 400; // = dodge window
 const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
 const LUNGE_DODGE_WINDOW_MS = LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;

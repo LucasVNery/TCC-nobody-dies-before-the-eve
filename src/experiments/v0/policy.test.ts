@@ -537,12 +537,19 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
     const world = { enemyState: 'idle' as EnemyState, offset: { x: 30, y: 0 } };
     const step = (t: number, stamina: number, blocking: boolean) =>
       policy.decide({ now: obsOf(t, world, { weapon: 'sword_shield', blocking, stamina }), seen: obsOf(t - PERCEPTION_LAG_MS, world, { weapon: 'sword_shield', blocking, stamina }), nowMs: t });
-    let t = 1000;
-    step(t, 40, true); // guard up with stamina left
-    t += STEP;
-    step(t, 0, true); // the hit drained the bar to 0: guard break
-    const during: AgentIntent[] = [];
-    for (; t < 1000 + STAGGER_MS; t += STEP) during.push(step(t + STEP, 0, false));
-    expect(during.some((i) => i.startAction)).toBe(false);
+    const t0 = 1000;
+    step(t0, 40, true); // guard up with stamina left
+    const tBreak = t0 + STEP;
+    step(tBreak, 0, true); // the hit drained the bar to 0 with HP intact: guard break
+    // afterwards the bar shows a positive value, so only the stagger detection can hold the attack back
+    const locked: AgentIntent[] = [];
+    let t = tBreak + STEP;
+    for (; t < tBreak + STAGGER_MS; t += STEP) locked.push(step(t, STAMINA_COST.dodge, false));
+    expect(locked.length).toBeGreaterThan(10);
+    expect(locked.some((i) => i.startAction)).toBe(false);
+    // control: once the stagger (plus margin) has passed, the attack comes
+    const after: AgentIntent[] = [];
+    for (; t < tBreak + STAGGER_MS + 300; t += STEP) after.push(step(t, STAMINA_COST.dodge, false));
+    expect(after.some((i) => i.startAction)).toBe(true);
   });
 });

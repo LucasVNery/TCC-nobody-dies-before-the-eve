@@ -2,6 +2,8 @@
 import { ProfileAccumulator } from '../../profile/profileAccumulator';
 import { findWeaponAction } from '../../combat/actionRegistry';
 import { STAMINA_COST } from '../../combat/stamina';
+import { TELEGRAPH_MS } from '../../combat/assaltanteController';
+import { LUNGE } from '../../combat/movementDefs';
 import { createTelemetryStack, type TelemetryStack } from '../stack';
 
 export interface BotStackOptions {
@@ -26,6 +28,11 @@ export function makeBotStack(opts: BotStackOptions = {}) {
   });
   return { stack, runEnds };
 }
+
+/** Ticks into a swing telegraph at which the bot dodges: 5/6 of TELEGRAPH_MS = ~333 ms into the 400 ms telegraph, so the 150 ms i-frames cover the hit. */
+const SWING_DODGE_TICK = Math.round(((TELEGRAPH_MS * 5) / 6) / (1000 / 60));
+/** Ticks into a lunge at which the bot dodges: the end of its telegraph (the charge starts). */
+const LUNGE_DODGE_TICK = Math.round(LUNGE.telegraphMs / (1000 / 60));
 
 /**
  * Deterministic scripted player: chases the Assaltante, punishes its recoveries,
@@ -61,7 +68,7 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     const lunging = encounter.assaltante.state === 'lunging';
     const threat = lunging || encounter.assaltante.state === 'attacking';
     threatTicks = threat ? threatTicks + 1 : 0;
-    if (threatTicks === (lunging ? 30 : 20) && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
+    if (threatTicks === (lunging ? LUNGE_DODGE_TICK : SWING_DODGE_TICK) && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
     if (i % 12 === 0 && encounter.assaltante.state === 'recovering' && encounter.player.stamina.value > 0) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
       if (light) encounter.player.tryAction(light.id);
