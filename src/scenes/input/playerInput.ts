@@ -66,8 +66,6 @@ export class PlayerInput {
     k.dodge.on('down', () => this.intents()?.tryDodge());
     k.guard.on('down', () => this.intents()?.startBlock());
     k.guard.on('up', () => this.intents()?.stopBlock());
-    k.sprint.on('down', () => this.intents()?.setSprint(true));
-    k.sprint.on('up', () => this.intents()?.setSprint(false));
 
     this.onPointerDown = (pointer: Phaser.Input.Pointer) => {
       if (pointer.leftButtonDown()) {
@@ -93,6 +91,7 @@ export class PlayerInput {
     const iy = (k.down.isDown ? 1 : 0) - (k.up.isDown ? 1 : 0);
     this.move = mapMovement(ix, iy);
     intents.setMoveInput(this.move.dx, this.move.dy);
+    intents.setSprint(k.sprint.isDown);
   }
 
   snapshot(): InputSnapshot {

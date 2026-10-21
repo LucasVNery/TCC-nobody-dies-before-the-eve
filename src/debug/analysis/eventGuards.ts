@@ -10,6 +10,9 @@ const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinit
 const str = (v: unknown): v is string => typeof v === 'string';
 const vec2 = (v: unknown): boolean => Array.isArray(v) && v.length === 2 && fin(v[0]) && fin(v[1]);
 
+const validSpent = (v: unknown): boolean =>
+  v === undefined || (v !== null && typeof v === 'object' && Object.values(v).every(fin));
+
 export function isWellFormed(ev: LoggedEvent): boolean {
   if (ev === null || typeof ev !== 'object') return false;
   const e = ev as Record<string, unknown>;
@@ -17,7 +20,7 @@ export function isWellFormed(ev: LoggedEvent): boolean {
   switch (e.type) {
     case 'pos.sample':
       // stam/spent are absent in logs from before 0.0.4: optional, but numeric when present.
-      return vec2(e.p) && vec2(e.e) && (e.stam === undefined || fin(e.stam));
+      return vec2(e.p) && vec2(e.e) && (e.stam === undefined || fin(e.stam)) && validSpent(e.spent);
     case 'player.action':
       return str(e.actionType) && str(e.weaponId);
     case 'player.cancel':

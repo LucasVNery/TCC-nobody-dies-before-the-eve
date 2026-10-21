@@ -8,6 +8,10 @@ describe('isWellFormed', () => {
     expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: 50, spent: { attack: 0 } }))).toBe(true);
     expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: 'x' }))).toBe(false);
     expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], stam: NaN }))).toBe(false);
+    for (const spent of ['x', null, { attack: 'a' }]) {
+      expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], spent }))).toBe(false);
+    }
+    expect(isWellFormed(mk('pos.sample', 0, { p: [1, 2], e: [3, 4], spent: { attack: 0 } }))).toBe(true);
   });
 
   it('accepts a well-formed pos.sample and rejects NaN, wrong arity and non-array positions', () => {
