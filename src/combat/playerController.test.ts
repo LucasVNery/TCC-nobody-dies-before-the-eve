@@ -596,6 +596,47 @@ describe('PlayerController — stamina costs', () => {
   });
 });
 
+describe('PlayerController — dodge denial while the dash is blocked', () => {
+  function inCooldown() {
+    const made = makePlayer();
+    made.player.tryDodge();
+    made.player.step(DODGE.durationMs); // dash ends, cooldown armed
+    return made;
+  }
+
+  it('denies once and never buffers a dodge pressed in cooldown with 29 stamina', () => {
+    const { bus, player } = inCooldown();
+    const denied = vi.fn();
+    const dodged = vi.fn();
+    bus.on('player.stamina_denied', denied);
+    bus.on('player.dodge', dodged);
+    player.stamina.spend(player.stamina.value - 29, 'attack'); // leaves exactly 29
+    expect(player.stamina.value).toBe(29);
+    player.tryDodge();
+    expect(denied).toHaveBeenCalledTimes(1);
+    expect(denied).toHaveBeenCalledWith({ action: 'dodge' });
+    player.stamina.refund(100); // back to full within the buffer window
+    player.step(DODGE.cooldownMs + 10);
+    expect(dodged).toHaveBeenCalledTimes(0);
+    expect(player.state).toBe('idle');
+  });
+
+  it('still buffers a dodge pressed in cooldown with 30+ stamina and fires it when the cooldown ends', () => {
+    const { bus, player } = inCooldown();
+    const dodged = vi.fn();
+    const denied = vi.fn();
+    bus.on('player.dodge', dodged);
+    bus.on('player.stamina_denied', denied);
+    player.stamina.refund(100);
+    player.step(DODGE.cooldownMs - 100);
+    player.tryDodge(); // 100 ms of cooldown left, inside the 120 ms buffer window
+    expect(denied).not.toHaveBeenCalled();
+    player.step(110);
+    expect(dodged).toHaveBeenCalledTimes(1);
+    expect(player.state).toBe('dodging');
+  });
+});
+
 describe('PlayerController — sprint', () => {
   it('walks at 175 u/s and sprints at 220 u/s spending 10 per second', () => {
     const a = makePlayer().player;

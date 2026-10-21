@@ -245,11 +245,13 @@ export class PlayerController {
   }
 
   tryDodge(): void {
+    if (this.stamina.value < STAMINA_COST.dodge) {
+      // short on stamina: denied at press, never buffered (whatever the current state)
+      this.bus.emit('player.stamina_denied', { action: 'dodge' });
+      return;
+    }
     if (this.canDash()) {
       this.startDash();
-    } else if (this.canDashState()) {
-      // free to dash but short on stamina: denied, never buffered
-      this.bus.emit('player.stamina_denied', { action: 'dodge' });
     } else if (this.isBufferable() || this.dodgeCooldownRemainingMs > 0) {
       // a dash blocked by the cooldown is buffered even from blocking/charging; the cooldown clears on its own
       this.inputBuffer.push({ kind: 'dash' }, this.clockMs);
