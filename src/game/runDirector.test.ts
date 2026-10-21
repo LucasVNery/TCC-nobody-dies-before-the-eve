@@ -154,6 +154,31 @@ describe('RunDirector', () => {
     expect(d.calls).toEqual(['enc', 'room']);
   });
 
+  it('beginRun seeds the item system from the run seed; endRun expires ground items as run_end before run.end', () => {
+    const d = makeDirector(7);
+    d.director.start();
+    const order: string[] = [];
+    d.encounter.bus.on('item.expire', (e) => order.push(`expire:${e.reason}`));
+    d.encounter.bus.on('run.end', () => order.push('run.end'));
+    // 20 s in a far corner: the first item spawns (player and enemy are kept out of the way).
+    for (let t = 0; t < 20100; t += STEP) d.encounter.items.step(STEP, { x: 1500, y: 1100, width: 20, height: 20 }, { x: 1500, y: 0 });
+    expect(d.encounter.items.onMap).toHaveLength(1);
+    d.encounter.player.takeDamage(999);
+    d.director.step(STEP);
+    expect(order).toEqual(['expire:run_end', 'run.end']);
+    expect(d.encounter.items.onMap).toHaveLength(0);
+  });
+
+  it('a bomb that kills the Assaltante is handled by the director on the next step', () => {
+    const d = makeDirector(3);
+    d.director.start();
+    d.encounter.assaltante.takeDamage(999); // what the bomb does to a weakened enemy
+    d.encounter.assaltante.stagger(250);
+    d.director.step(STEP);
+    expect(types(d.events).filter((t) => t === 'enemy.death')).toHaveLength(1);
+    expect(d.encounter.assaltante.hp).toBe(ASSALTANTE_MAX_HP);
+  });
+
   it('spawn selection is deterministic for a given seed and respects the minimum distance', () => {
     const a = pickSpawn(createPrng(9), PLAYER_START);
     const b = pickSpawn(createPrng(9), PLAYER_START);

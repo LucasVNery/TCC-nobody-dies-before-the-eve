@@ -12,6 +12,9 @@ const CONTEXT_EVENTS = [
   'player.death', 'player.stamina_denied', 'player.guard_break', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'projectile.hit', 'projectile.expire', 'opp.open', 'opp.close',
 ] as const;
 
+/** Bus events logged as-is, without a combat `ctx` (map items carry their own fields). */
+const PLAIN_EVENTS = ['item.spawn', 'item.pickup', 'item.expire', 'item.use'] as const;
+
 /**
  * Every recorder subscription runs before the game's own handlers (Encounter
  * subscribes first, in its constructor), so an event is always logged before
@@ -73,6 +76,9 @@ export class TelemetryRecorder {
 
     for (const type of CONTEXT_EVENTS) {
       bus.on(type, (payload: unknown) => this.logWithCtx(type, payload), FIRST);
+    }
+    for (const type of PLAIN_EVENTS) {
+      bus.on(type, (payload: unknown) => this.log(type, { ...(payload as Record<string, unknown>) }), FIRST);
     }
     bus.on('run.start', (e) => {
       this.runIdx = e.run_idx;

@@ -67,6 +67,22 @@ describe('TelemetryRecorder', () => {
     expect(samples[1].spent).toEqual({ attack: 0, sprint: 0, dodge: 0, block: 0 });
   });
 
+  it('item events are logged as plain events, without ctx', () => {
+    const stack = makeStack();
+    stack.director.start();
+    stack.recorder.drain();
+    const bus = stack.encounter.bus;
+    bus.emit('item.spawn', { item_id: 'item-0', kind: 'bomb', x: 300, y: 400 });
+    bus.emit('item.pickup', { item_id: 'item-0', kind: 'bomb', wait_ms: 1200 });
+    bus.emit('item.use', { kind: 'bomb', hp: 100, dist_to_enemy: 90, held_ms: 800, effective: true });
+    bus.emit('item.expire', { item_id: 'item-1', kind: 'heal', reason: 'timeout' });
+    const events = stack.recorder.drain().filter((e) => e.type.startsWith('item.'));
+    expect(events.map((e) => e.type)).toEqual(['item.spawn', 'item.pickup', 'item.use', 'item.expire']);
+    for (const e of events) expect(e.ctx).toBeUndefined();
+    expect(events[1]).toMatchObject({ item_id: 'item-0', kind: 'bomb', wait_ms: 1200 });
+    expect(events[2]).toMatchObject({ hp: 100, dist_to_enemy: 90, held_ms: 800, effective: true });
+  });
+
   it('player.stamina_denied is logged with ctx.p_stam', () => {
     const stack = makeStack();
     stack.director.start();

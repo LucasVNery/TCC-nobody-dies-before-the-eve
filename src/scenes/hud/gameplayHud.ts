@@ -1,9 +1,16 @@
 import type Phaser from 'phaser';
+import type { ItemKind } from '../../game/items';
 
 export const WEAPON_LABELS: Record<string, string> = {
   sword_shield: 'Espada + Escudo',
   bow: 'Arco',
   heavy_weapon: 'Arma Pesada',
+};
+
+export const ITEM_LABELS: Record<ItemKind, string> = {
+  heal: 'Cura',
+  power: 'Poder',
+  bomb: 'Bomba',
 };
 
 export interface GameplayHudData {
@@ -13,6 +20,8 @@ export interface GameplayHudData {
   enemyMaxHp: number;
   stamina: number;
   weaponLabel: string;
+  heldItem: ItemKind | null;
+  powerActive: boolean;
   run: number;
   room: number;
   enc: number;
@@ -30,6 +39,7 @@ const HELP_LINES = [
   '  Shift (segure) - correr (gasta estamina)',
   '  Espaço     - esquiva (use durante o telegraph do boss pra i-frames)',
   '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
+  '  F           - usar item (cura / poder / bomba)',
   '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
 ];
 
@@ -71,7 +81,8 @@ export class GameplayHud {
       `estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/100${m.stamina <= 0 ? ' EXAUSTO' : ''}`,
       `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`,
     ]);
-    this.weaponText.setText(`Arma: ${m.weaponLabel}`);
+    const item = m.heldItem ? ITEM_LABELS[m.heldItem] : '-';
+    this.weaponText.setText(`Arma: ${m.weaponLabel} · Item: ${item}${m.powerActive ? ' · PODER' : ''}`);
   }
 
   toggleHelp(): void {

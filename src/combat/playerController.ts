@@ -271,6 +271,16 @@ export class PlayerController {
     }
   }
 
+  /** Same gate as starting an attack: idle (unlocked) or past the locked part of an action. */
+  get canAct(): boolean {
+    return this.canStartAttack();
+  }
+
+  /** Blocks starting attacks for at least `ms` (used by the item-use lock). */
+  lockAttack(ms: number): void {
+    this.attackLockedMs = Math.max(this.attackLockedMs, ms);
+  }
+
   private canStartAttack(): boolean {
     return this.isInRecovery || (this.state === 'idle' && this.attackLockedMs <= 0);
   }

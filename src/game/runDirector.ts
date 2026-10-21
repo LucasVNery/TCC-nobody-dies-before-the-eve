@@ -123,6 +123,7 @@ export class RunDirector {
     this.runElapsedMs = 0;
     this.roomsCleared = 0;
     this.encountersCleared = 0;
+    encounter.items.reset((seed ^ 0x1e7e55) >>> 0);
     encounter.resetPlayer(PLAYER_START);
     encounter.respawnEnemy(pickSpawn(this.prng, PLAYER_START), 'source_interrupted');
     this.bus.emit('run.start', { run_idx: this._runIdx, seed });
@@ -158,6 +159,7 @@ export class RunDirector {
     this.profile.applyEncounterBoundary();
     this.profile.applyRoomBoundary(); // the interrupted room counts, flagged partial
     this.emitSnapshot(true);
+    encounter.items.endRun(); // ground items expire as run_end before the run closes
     this.bus.emit('run.end', {
       run_idx: this._runIdx,
       cause: 'death',

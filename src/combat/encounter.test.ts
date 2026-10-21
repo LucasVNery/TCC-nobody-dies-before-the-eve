@@ -1155,3 +1155,145 @@ describe('Encounter lunge', () => {
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('missed');
   });
 });
+
+describe('Encounter map items', () => {
+  /** Puts `kind` in the slot by feeding the item system directly (the encounter itself is not stepped). */
+  function holding(kind: 'heal' | 'power' | 'bomb', player: { x: number; y: number }, enemy: { x: number; y: number }) {
+    for (let seed = 1; seed < 500; seed++) {
+      const encounter = new Encounter(
+        { x: player.x, y: player.y, width: 20, height: 20 },
+        { x: enemy.x, y: enemy.y, width: 20, height: 20 },
+      );
+      encounter.items.reset(seed);
+      const far = { x: 1500, y: 1100, width: 20, height: 20 };
+      for (let t = 0; t < 20100; t += STEP_MS) encounter.items.step(STEP_MS, far, { x: 1500, y: 0 });
+      const item = encounter.items.onMap[0];
+      if (item?.kind !== kind) continue;
+      encounter.items.step(STEP_MS, { x: item.pos.x, y: item.pos.y, width: 20, height: 20 }, { x: 1500, y: 0 });
+      expect(encounter.items.held).toBe(kind);
+      return encounter;
+    }
+    throw new Error('no seed found');
+  }
+
+  it('bomb at 100 u: 30 damage, enemy.hurt item.bomb, enemy recovering 250 ms with no punish window', () => {
+    const encounter = holding('bomb', { x: 600, y: 600 }, { x: 700, y: 600 });
+    const hurts: Array<{ dmg: number; hp_after: number; actionId: string }> = [];
+    const opens: Array<{ type: string }> = [];
+    const playerHurts: unknown[] = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
+    encounter.bus.on('opp.open', (e) => opens.push(e));
+    encounter.bus.on('player.hurt', (e) => playerHurts.push(e));
+    encounter.useItem();
+    expect(hurts).toEqual([{ dmg: 30, hp_after: ASSALTANTE_MAX_HP - 30, actionId: 'item.bomb' }]);
+    expect(encounter.assaltante.state).toBe('recovering');
+    runFor(encounter, 200);
+    expect(encounter.assaltante.state).toBe('recovering');
+    expect(opens.filter((o) => o.type === 'punish')).toHaveLength(0);
+    expect(playerHurts).toHaveLength(0);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
+  });
+
+  it('bomb at 130 u: no damage and no stagger', () => {
+    const encounter = holding('bomb', { x: 600, y: 600 }, { x: 730, y: 600 });
+    const hurts: unknown[] = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
+    encounter.useItem();
+    expect(hurts).toHaveLength(0);
+    expect(encounter.assaltante.hp).toBe(ASSALTANTE_MAX_HP);
+    expect(encounter.assaltante.state).not.toBe('recovering');
+  });
+
+  it('bomb interrupts a swing in progress: its window closes invalid/source_interrupted', () => {
+    const encounter = holding('bomb', { x: 600, y: 600 }, { x: 640, y: 600 });
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    encounter.bus.on('opp.close', (e) => closes.push(e));
+    for (let i = 0; i < 40 && encounter.assaltante.state !== 'attacking'; i++) encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('attacking');
+    encounter.useItem();
+    expect(closes.filter((c) => c.type === 'dodge')).toEqual([
+      expect.objectContaining({ outcome: 'invalid', reason: 'source_interrupted' }),
+    ]);
+    expect(encounter.assaltante.state).toBe('recovering');
+  });
+
+  it('bomb interrupts a lunge in progress: its window closes invalid/source_interrupted', () => {
+    const encounter = holding('bomb', { x: 200, y: 600 }, { x: 0, y: 600 });
+    for (let t = 0; t < LUNGE.cooldownMs; t += STEP_MS) encounter.assaltante.step(STEP_MS, { x: -5000, y: 600 });
+    const closes: Array<{ type: string; outcome: string; reason?: string }> = [];
+    encounter.bus.on('opp.close', (e) => closes.push(e));
+    // The lunge starts at 150+ u, out of bomb range: wait for the charge to bring the enemy within 120 u.
+    const gap = () => Math.hypot(encounter.assaltante.position.x - encounter.player.position.x, encounter.assaltante.position.y - encounter.player.position.y);
+    for (let i = 0; i < 100 && !(encounter.assaltante.state === 'lunging' && gap() <= 120); i++) encounter.step(STEP_MS);
+    expect(encounter.assaltante.state).toBe('lunging');
+    expect(gap()).toBeLessThanOrEqual(120);
+    encounter.useItem();
+    expect(closes.filter((c) => c.outcome === 'invalid')).toEqual([
+      expect.objectContaining({ reason: 'source_interrupted' }),
+    ]);
+    expect(encounter.assaltante.state).toBe('recovering');
+  });
+
+  it('heal caps at 100 HP and records a weaponless utility action without touching patience or weapons', () => {
+    const encounter = holding('heal', { x: 600, y: 600 }, { x: 1000, y: 600 });
+    encounter.player.takeDamage(40);
+    const calls: Array<[string, ...unknown[]]> = [];
+    const recordAction = vi.spyOn(encounter.profile, 'recordAction').mockImplementation((...a) => { calls.push(['action', ...a]); });
+    const record = vi.spyOn(encounter.profile, 'record').mockImplementation((...a) => { calls.push(['record', ...a]); });
+    encounter.useItem();
+    expect(encounter.player.hp).toBe(90);
+    expect(recordAction).toHaveBeenCalledWith('utility');
+    expect(record).not.toHaveBeenCalled();
+    expect(calls).toEqual([['action', 'utility']]);
+  });
+
+  it('using an empty slot is ignored: no event, no action recorded', () => {
+    const encounter = new Encounter({ x: 600, y: 600, width: 20, height: 20 }, { x: 1000, y: 600, width: 20, height: 20 });
+    const seen: string[] = [];
+    encounter.bus.on('item.use', () => seen.push('use'));
+    const recordAction = vi.spyOn(encounter.profile, 'recordAction');
+    encounter.useItem();
+    expect(seen).toHaveLength(0);
+    expect(recordAction).not.toHaveBeenCalled();
+  });
+
+  it('use is denied while the player is not free to start an attack (staggered keeps the item)', () => {
+    const encounter = holding('heal', { x: 600, y: 600 }, { x: 1000, y: 600 });
+    encounter.player.enterStagger();
+    encounter.useItem();
+    expect(encounter.items.held).toBe('heal');
+  });
+
+  it('item.use logs hp, dist_to_enemy and held_ms', () => {
+    const encounter = holding('heal', { x: 600, y: 600 }, { x: 730, y: 600 });
+    const uses: Array<Record<string, unknown>> = [];
+    encounter.bus.on('item.use', (e) => uses.push(e));
+    encounter.useItem();
+    expect(uses).toHaveLength(1);
+    expect(uses[0]).toMatchObject({ kind: 'heal', hp: 100, dist_to_enemy: 130, effective: false });
+  });
+
+  it('power makes a light attack deal 15 (and a shot 15)', () => {
+    const encounter = holding('power', { x: 0, y: 0 }, { x: 30, y: 0 });
+    const hurts: Array<{ dmg: number; actionId: string }> = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
+    encounter.useItem();
+    runFor(encounter, 120); // clears the 100 ms use lock
+    encounter.player.tryAction('sword_shield.light');
+    runFor(encounter, 300);
+    expect(hurts).toEqual([expect.objectContaining({ dmg: 15, actionId: 'sword_shield.light' })]);
+  });
+
+  it('a power shot deals 15', () => {
+    const encounter = holding('power', { x: 200, y: 600 }, { x: 400, y: 600 });
+    encounter.useItem();
+    runFor(encounter, 120);
+    encounter.player.setAimDirection({ x: 1, y: 0 });
+    useWeapon(encounter, 'bow');
+    const hurts: Array<{ dmg: number; actionId: string }> = [];
+    encounter.bus.on('enemy.hurt', (e) => hurts.push(e));
+    encounter.player.tryAction('bow.shot');
+    runFor(encounter, 700);
+    expect(hurts.find((h) => h.actionId === 'bow.shot')?.dmg).toBe(15);
+  });
+});

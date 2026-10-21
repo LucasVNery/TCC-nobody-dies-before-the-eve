@@ -41,6 +41,8 @@ describe('replay', () => {
     for (const t of ['obs.record', 'obs.outcome', 'obs.action', 'obs.defense', 'obs.boundary']) {
       expect(log.some((e) => e.type === t), t).toBe(true);
     }
+    // the bot picks up and uses map items, so the replay also covers the weaponless utility action
+    expect(log.some((e) => e.type === 'obs.action' && e.actionType === 'utility' && e.weaponId === undefined)).toBe(true);
 
     expectSameProfile(rebuildProfile(log), live);
   });

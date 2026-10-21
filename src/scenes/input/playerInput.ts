@@ -9,6 +9,7 @@ export interface PlayerIntents {
   switchWeapon(id: string): void;
   releaseAction(): void;
   tryDodge(): void;
+  useItem(): void;
   startBlock(): void;
   stopBlock(): void;
   setSprint(on: boolean): void;
@@ -28,7 +29,7 @@ const KC = Phaser.Input.Keyboard.KeyCodes;
 /** Reads keyboard and pointer and drives the player's intents; does nothing while `intents()` is null. */
 export class PlayerInput {
   private readonly keys: Record<
-    'weapon1' | 'weapon2' | 'weapon3' | 'charged' | 'dodge' | 'guard' | 'sprint' | 'up' | 'down' | 'left' | 'right',
+    'weapon1' | 'weapon2' | 'weapon3' | 'charged' | 'item' | 'dodge' | 'guard' | 'sprint' | 'up' | 'down' | 'left' | 'right',
     Phaser.Input.Keyboard.Key
   >;
   private readonly keyboard: Phaser.Input.Keyboard.KeyboardPlugin;
@@ -49,6 +50,7 @@ export class PlayerInput {
       weapon2: keyboard.addKey(KC.TWO),
       weapon3: keyboard.addKey(KC.THREE),
       charged: keyboard.addKey(KC.Q),
+      item: keyboard.addKey(KC.F),
       dodge: keyboard.addKey(KC.SPACE),
       guard: keyboard.addKey(KC.E),
       sprint: keyboard.addKey(KC.SHIFT),
@@ -63,6 +65,7 @@ export class PlayerInput {
     k.weapon3.on('down', () => this.intents()?.switchWeapon('heavy_weapon'));
     k.charged.on('down', () => this.tryAction('charged'));
     k.charged.on('up', () => this.intents()?.releaseAction());
+    k.item.on('down', () => this.intents()?.useItem());
     k.dodge.on('down', () => this.intents()?.tryDodge());
     k.guard.on('down', () => this.intents()?.startBlock());
     k.guard.on('up', () => this.intents()?.stopBlock());

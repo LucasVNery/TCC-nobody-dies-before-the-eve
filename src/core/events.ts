@@ -3,6 +3,7 @@ import type { OppOpenPayload, OppClosePayload } from '../opportunity/types';
 import type { ActionType } from '../combat/actionRegistry';
 import type { DefensiveLabel } from '../profile/profileAccumulator';
 import type { ProfileSnapshotPayload } from '../profile/types';
+import type { ItemKind } from '../game/items';
 
 export interface PlayerActionPayload {
   actionId: string;
@@ -86,6 +87,10 @@ export type GameEvents = {
   'enemy.hurt': EnemyHurtPayload;
   'projectile.hit': { id: number; dmg: number };
   'projectile.expire': { id: number };
+  'item.spawn': { item_id: string; kind: ItemKind; x: number; y: number };
+  'item.pickup': { item_id: string; kind: ItemKind; wait_ms: number };
+  'item.expire': { item_id: string; kind: ItemKind; reason: 'timeout' | 'run_end' };
+  'item.use': { kind: ItemKind; hp: number; dist_to_enemy: number; held_ms: number; effective: boolean };
   'run.start': RunStartPayload;
   'run.end': RunEndPayload;
   'room.enter': RoomEnterPayload;

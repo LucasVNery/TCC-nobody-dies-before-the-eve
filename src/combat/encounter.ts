@@ -8,12 +8,13 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
 import { PERFECT_DODGE_MS } from './actionDefs';
-import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE } from './movementDefs';
+import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
 import { resolveAction, lockedMs } from './actionRegistry';
 import { isPatientAttack } from './patience';
 import { ProjectileSystem } from './projectile';
+import { ItemSystem, ITEM } from '../game/items';
 
 export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly bus: EventBus<GameEvents>;
@@ -21,6 +22,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
   readonly projectiles = new ProjectileSystem();
+  readonly items: ItemSystem;
   /**
    * Write side of the profile. Defaults to a fresh `ProfileAccumulator` so
    * existing call sites (and tests that read `encounter.profile.domain(...)`)
@@ -45,6 +47,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   constructor(playerHurtbox: AABB, assaltanteHurtbox: AABB, profile?: P) {
     this.bus = new EventBus<GameEvents>();
     this.opportunities = new OpportunitySystem(this.bus);
+    this.items = new ItemSystem(this.bus);
     this.player = new PlayerController(this.bus, playerHurtbox);
     this.assaltante = new AssaltanteController(this.bus, this.opportunities, assaltanteHurtbox);
     this.profile = profile ?? (new ProfileAccumulator() as unknown as P);
@@ -102,6 +105,27 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     this.player.reset(position);
     this.projectiles.clear();
     this.hitAppliedThisAction = false;
+  }
+
+  /**
+   * Uses the held item. Ignored (no event) with an empty slot or when the
+   * player could not start an attack right now (same gate). Records a
+   * weaponless 'utility' action; weapon repertoire and patience are untouched.
+   */
+  useItem(): void {
+    if (!this.items.held || !this.player.canAct) return;
+    const enemyPos = this.assaltante.position;
+    const result = this.items.use({ playerHp: this.player.hp, enemyPos, playerPos: this.player.position });
+    if (!result) return;
+    this.profile.recordAction('utility');
+    this.player.lockAttack(ITEM.useLockMs);
+    if (result.kind === 'heal') {
+      this.player.hp = Math.min(PLAYER_MAX_HP, this.player.hp + (result.heal ?? 0));
+    } else if (result.kind === 'bomb' && result.bombHit) {
+      this.assaltante.takeDamage(ITEM.bombDamage);
+      this.assaltante.stagger(ITEM.bombStaggerMs);
+      this.bus.emit('enemy.hurt', { dmg: ITEM.bombDamage, hp_after: this.assaltante.hp, actionId: 'item.bomb' });
+    }
   }
 
   step(stepMs: number): void {
@@ -165,7 +189,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       const action = this.player.currentActionDef;
       if (action && !this.hitAppliedThisAction) {
         this.hitAppliedThisAction = true;
-        const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE[action.actionType];
+        const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE[action.actionType] * this.items.damageMultiplier;
         this.assaltante.takeDamage(dmg);
         this.bus.emit('enemy.hurt', { dmg, hp_after: this.assaltante.hp, actionId: action.id });
       }
@@ -181,7 +205,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       for (const id of expired) this.bus.emit('projectile.expire', { id });
       for (const id of hits) {
         if (this.assaltante.isDead) break;
-        const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE.throw;
+        const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE.throw * this.items.damageMultiplier;
         this.assaltante.onPlayerHitLanded();
         this.assaltante.takeDamage(dmg);
         this.bus.emit('projectile.hit', { id, dmg });
@@ -189,6 +213,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       }
       if (this.assaltante.isDead) this.projectiles.clear();
     }
+
+    this.items.step(stepMs, this.player.hurtbox(), this.assaltante.position);
 
     // Must run last: if a hit/dodge was resolved above this tick, the opportunity
     // needs to be removed before its own expiry check fires here — otherwise a

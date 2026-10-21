@@ -140,6 +140,7 @@ export class ArenaScene extends Phaser.Scene {
       switchWeapon: (id) => player.switchWeapon(id),
       releaseAction: () => player.releaseAction(),
       tryDodge: () => player.tryDodge(),
+      useItem: () => encounter.useItem(),
       startBlock: () => player.startBlock(),
       stopBlock: () => player.stopBlock(),
       setSprint: (on) => player.setSprint(on),
@@ -172,6 +173,8 @@ export class ArenaScene extends Phaser.Scene {
       hp: player.hp, maxHp: PLAYER_MAX_HP, enemyHp: assaltante.hp, enemyMaxHp: ASSALTANTE_MAX_HP,
       stamina: player.stamina.value,
       weaponLabel: WEAPON_LABELS[player.equippedWeaponId] ?? player.equippedWeaponId,
+      heldItem: encounter.items.held,
+      powerActive: encounter.items.powerActive,
       run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,
     });
     this.debugDraw.draw(encounter);

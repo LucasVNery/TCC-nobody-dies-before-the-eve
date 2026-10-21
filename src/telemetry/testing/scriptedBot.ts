@@ -45,7 +45,13 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     const dy = e.y - p.y;
     encounter.player.setAimDirection({ x: dx, y: dy });
     const far = Math.hypot(dx, dy) > 40;
-    encounter.setPlayerMoveInput(far ? dx : 0, far ? dy : 0);
+    // With a free slot the bot detours to the nearest item on the ground, so pickups and uses reach the log.
+    const target = encounter.items.held ? undefined : encounter.items.onMap[0];
+    if (target) {
+      encounter.setPlayerMoveInput(target.pos.x - p.x, target.pos.y - p.y);
+    } else {
+      encounter.setPlayerMoveInput(far ? dx : 0, far ? dy : 0);
+    }
     if (i % 400 === 0) encounter.player.switchWeapon('sword_shield');
     if (i % 400 === 200) encounter.player.switchWeapon('heavy_weapon');
     if (i % 36 === 0) {
@@ -55,6 +61,8 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     // Dodge cadence (i % 20) is deliberately loose: it leaves margin above the `runEnds >= 2` guard
     // while still covering obs.defense via dodge. i % 10 sat exactly on that threshold.
     if (encounter.assaltante.state === 'attacking' && i % 20 === 0) encounter.player.tryDodge();
+    // Use whatever it is holding now and then, so utility actions reach the log and the replay.
+    if (encounter.items.held && i % 45 === 0) encounter.useItem();
     stack.step(1000 / 60);
   }
 }

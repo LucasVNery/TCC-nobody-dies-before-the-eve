@@ -3,6 +3,7 @@ import type { Encounter } from '../../combat/encounter';
 import type { ProfileSink } from '../../profile/profileSink';
 import type { LoggedEvent } from '../../telemetry/schema';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
+import { ITEM, type ItemKind } from '../../game/items';
 import { ASSET_KEYS } from '../../visual/assetRegistry';
 import { ENTITY_VISUAL_WIDTH, ENTITY_VISUAL_HEIGHT } from '../../visual/placeholderTextures';
 import { GROUND_PROJECTION, toScreen } from '../../visual/groundProjection';
@@ -15,6 +16,9 @@ import { FloorView } from './floorView';
 
 const WALK_FRAME_COUNT = 6;
 
+/** Placeholder item colors by kind. */
+const ITEM_COLORS: Record<ItemKind, number> = { heal: 0x4caf50, power: 0x9c27b0, bomb: 0xf44336 };
+
 /** Procedural floor (rebuilt on room.enter) and the two character sprites, with i-frame / attack tints. */
 export class WorldView {
   readonly playerSprite: DirectionalSprite;
@@ -24,6 +28,7 @@ export class WorldView {
   private readonly playerTrail = new PositionHistory();
   private readonly assaltanteTrail = new PositionHistory();
   private readonly projectileGraphics: Phaser.GameObjects.Graphics;
+  private readonly itemGraphics: Phaser.GameObjects.Graphics;
   private stepped = false;
 
   constructor(scene: Phaser.Scene) {
@@ -38,6 +43,8 @@ export class WorldView {
     this.floor.rebuild(this.floorTracker.initial());
     this.projectileGraphics = scene.add.graphics();
     this.projectileGraphics.setDepth(90000);
+    this.itemGraphics = scene.add.graphics();
+    this.itemGraphics.setDepth(89000);
     this.playerSprite = new DirectionalSprite(
       scene,
       { idleTextureKey: ASSET_KEYS.playerIdle, walkTextureKey: ASSET_KEYS.playerWalk, walkFrameCount: WALK_FRAME_COUNT },
@@ -100,6 +107,15 @@ export class WorldView {
     for (const p of encounter.projectiles.active) {
       const at = toScreen(p.pos, GROUND_PROJECTION);
       g.fillCircle(at.x, at.y, 4);
+    }
+
+    // Placeholder items: one colored circle per item on the ground (logic positions, box center).
+    const ig = this.itemGraphics;
+    ig.clear();
+    for (const item of encounter.items.onMap) {
+      const at = toScreen({ x: item.pos.x + ITEM.size / 2, y: item.pos.y + ITEM.size / 2 }, GROUND_PROJECTION);
+      ig.fillStyle(ITEM_COLORS[item.kind], 1);
+      ig.fillCircle(at.x, at.y, 9);
     }
   }
 }
