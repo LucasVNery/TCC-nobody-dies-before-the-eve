@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { Encounter } from '../combat/encounter';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
-import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, MIN_SPAWN_DISTANCE } from '../combat/movementDefs';
+import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, MIN_SPAWN_DISTANCE, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
 import { RunDirector, PLAYER_START, pickSpawn } from './runDirector';
 import { createPrng } from '../core/prng';
 import { ItemSystem } from './items';
@@ -84,14 +84,18 @@ describe('RunDirector', () => {
     expect(Math.hypot(e.x - p.x, e.y - p.y)).toBeGreaterThanOrEqual(MIN_SPAWN_DISTANCE);
   });
 
-  it('three kills end the room: room boundary after the third encounter boundary, one non-partial snapshot', () => {
+  it('a room has 2 encounters', () => {
+    expect(ROOM_ENCOUNTER_COUNT).toBe(2);
+  });
+
+  it('two kills end the room: room boundary after the second encounter boundary, one non-partial snapshot', () => {
     const d = makeDirector();
     d.director.start();
     d.events.length = 0;
     killEnemy(d);
+    expect(d.director.roomIdx).toBe(0);
     killEnemy(d);
-    killEnemy(d);
-    expect(d.calls).toEqual(['enc', 'enc', 'enc', 'room']);
+    expect(d.calls).toEqual(['enc', 'enc', 'room']);
     const snaps = d.events.filter(([t]) => t === 'profile.snapshot');
     expect(snaps).toHaveLength(1);
     expect((snaps[0][1] as { partial: boolean }).partial).toBe(false);

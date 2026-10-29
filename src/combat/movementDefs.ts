@@ -24,7 +24,7 @@ export const PLAYER_DAMAGE_BY_ACTION_TYPE: Record<ActionType, number> = {
   utility: 0,
 };
 /** Encounters (Assaltante kills) per room. */
-export const ROOM_ENCOUNTER_COUNT = 3;
+export const ROOM_ENCOUNTER_COUNT = 2;
 /** Minimum distance between the player and a freshly spawned Assaltante, in px. */
 export const MIN_SPAWN_DISTANCE = 300;
 

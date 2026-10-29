@@ -4,7 +4,7 @@ import { MemoryEventStore, type EventStore } from '../../telemetry/eventStore';
 import { loadProfileState, type BootState } from '../../telemetry/bootstrap';
 import { ProfileAccumulator } from '../../profile/profileAccumulator';
 import { toNdjson, importInto } from '../../telemetry/ndjson';
-import { SCHEMA_VERSION, GAME_VERSION, type LoggedEvent } from '../../telemetry/schema';
+import { SCHEMA_VERSION, GAME_VERSION, sessionStartPayload, type LoggedEvent } from '../../telemetry/schema';
 import type { Platform } from './platform';
 
 export interface SessionStatus {
@@ -126,12 +126,7 @@ export class SessionController {
     // session.start, then the run the previous session left open (tab closed)
     // is closed under its own indices, then the first run of this session.
     this._stack.startSession(
-      {
-        wall_clock_iso: platform.nowIso(),
-        game_version: GAME_VERSION,
-        schema_v: SCHEMA_VERSION,
-        persistent: this.persistent,
-      },
+      sessionStartPayload(platform.nowIso(), this.persistent),
       boot.abandonedRun,
     );
 

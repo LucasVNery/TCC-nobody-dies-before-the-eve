@@ -4,7 +4,9 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { Clock } from '../profile/types';
 import { makeBotStack, runBot } from './testing/scriptedBot';
 import { orderEvents, rebuildProfile, rebuildProfileWithStats, nextRunIdx } from './replay';
-import type { LoggedEvent } from './schema';
+import { sessionStartPayload, type LoggedEvent } from './schema';
+import { findAbandonedRun } from './abandonedRun';
+import { metricsFromLog } from '../debug/analysis/metricsAggregator';
 
 const SKILLS = ['punish', 'distance', 'patience', 'weapon_repertoire', 'action_repertoire', 'defensive_repertoire'];
 const CLOCKS: Clock[] = ['trait', 'state'];
@@ -45,6 +47,24 @@ describe('replay', () => {
     expect(log.some((e) => e.type === 'obs.action' && e.actionType === 'utility' && e.weaponId === undefined)).toBe(true);
 
     expectSameProfile(rebuildProfile(log), live);
+  });
+
+  it('logs from before 0.0.5 (session.start without config_version/windows_ms) still replay, aggregate and close abandoned runs', () => {
+    const live = new ProfileAccumulator();
+    const { stack } = makeStack(live); // its session.start is the old shape: no config_version, no windows_ms
+    runBot(stack, 6000);
+    stack.recording.flushPending();
+    const log = stack.recorder.drain();
+    const start = log.find((e) => e.type === 'session.start')!;
+    expect(start.config_version).toBeUndefined();
+    expect(start.windows_ms).toBeUndefined();
+    expectSameProfile(rebuildProfile(log), live);
+    expect(() => metricsFromLog(log)).not.toThrow();
+    expect(findAbandonedRun(log, log[0].player_id)).not.toBeUndefined();
+    // the same log with the 0.0.5 fields added replays to the same profile
+    const withFields = log.map((e) => (e.type === 'session.start' ? { ...e, ...sessionStartPayload('2026-09-30T00:00:00.000Z', true) } : e));
+    expectSameProfile(rebuildProfile(withFields), live);
+    expect(metricsFromLog(withFields)).toEqual(metricsFromLog(log));
   });
 
   it('JSON round-trip of the log still rebuilds the identical profile', () => {

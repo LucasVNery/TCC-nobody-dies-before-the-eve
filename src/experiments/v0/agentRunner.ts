@@ -4,7 +4,7 @@ import { createPrng } from '../../core/prng';
 import type { ProfileAccumulator } from '../../profile/profileAccumulator';
 import { findAbandonedRun } from '../../telemetry/abandonedRun';
 import { nextRunIdx, rebuildProfileWithStats } from '../../telemetry/replay';
-import { GAME_VERSION, SCHEMA_VERSION, type LoggedEvent } from '../../telemetry/schema';
+import { sessionStartPayload, type LoggedEvent } from '../../telemetry/schema';
 import { createTelemetryStack } from '../../telemetry/stack';
 import { DEFAULT_HUMANIZER, Humanizer, type HumanizerConfig } from './humanizer';
 import { PerceptionBuffer, observe } from './perception';
@@ -174,7 +174,7 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
       },
     });
     stack.startSession(
-      { wall_clock_iso: sessionWallClock(n), game_version: GAME_VERSION, schema_v: SCHEMA_VERSION, persistent: true },
+      sessionStartPayload(sessionWallClock(n), true),
       abandoned,
     );
     runEnded = false; // the abandoned closing above also fires onRunEnd

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
-import { GAME_VERSION, type LoggedEvent } from './schema';
+import { GAME_VERSION, CONFIG_VERSION, windowsMs, sessionStartPayload, type LoggedEvent } from './schema';
 import { PLAYER_START } from '../game/runDirector';
 import { TelemetryRecorder } from './telemetryRecorder';
 
@@ -252,7 +252,23 @@ describe('TelemetryRecorder', () => {
 
 describe('game version', () => {
   it('declares the current game version', () => {
-    expect(GAME_VERSION).toBe('0.0.4');
+    expect(GAME_VERSION).toBe('0.0.5');
+    expect(CONFIG_VERSION).toBe('0.0.5-c1');
+  });
+
+  it('windowsMs carries the eight window values (swing telegraph from ELITE_TELEGRAPH_MS)', () => {
+    expect(windowsMs()).toEqual({
+      iframes: 200, perfect: 110, parry: 150, buffer: 170,
+      telegraph_swing: 450, telegraph_combo: 320, telegraph_lunge: 500, telegraph_slam: 700,
+    });
+  });
+
+  it('the shared session.start payload has config_version and windows_ms', () => {
+    const p = sessionStartPayload('2026-10-29T00:00:00.000Z', true);
+    expect(p.config_version).toBe('0.0.5-c1');
+    expect(p.game_version).toBe('0.0.5');
+    expect(p.windows_ms).toEqual(windowsMs());
+    expect(p.persistent).toBe(true);
   });
 
   it('subscribe delivers every logged event in order and unsubscribe stops it', () => {

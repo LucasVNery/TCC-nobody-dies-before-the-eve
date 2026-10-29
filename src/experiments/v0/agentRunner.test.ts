@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { rebuildProfileWithStats, orderEvents } from '../../telemetry/replay';
 import { WEAPON_IDS } from '../../combat/actionRegistry';
 import type { LoggedEvent } from '../../telemetry/schema';
-import { GAME_VERSION, SCHEMA_VERSION } from '../../telemetry/schema';
+import { GAME_VERSION, SCHEMA_VERSION, CONFIG_VERSION, windowsMs } from '../../telemetry/schema';
 import { DEFAULT_HUMANIZER } from './humanizer';
 import { STYLE_IDS } from './styles';
 import { REPORT_SKILLS } from './windowValues';
@@ -149,6 +149,8 @@ describe('agent runner', () => {
     expect(starts.map((e) => e.session_id)).toEqual(starts.map((_, n) => `bloqueador-s${n}`));
     for (const s of starts) {
       expect(s.game_version).toBe(GAME_VERSION);
+      expect(s.config_version).toBe(CONFIG_VERSION);
+      expect(s.windows_ms).toEqual(windowsMs());
       expect(s.schema_v).toBe(SCHEMA_VERSION);
     }
   });

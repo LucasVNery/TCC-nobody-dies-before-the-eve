@@ -4,7 +4,7 @@ import { SessionController } from './sessionController';
 import type { Platform } from './platform';
 import { MemoryEventStore, type EventStore } from '../../telemetry/eventStore';
 import { toNdjson } from '../../telemetry/ndjson';
-import type { LoggedEvent } from '../../telemetry/schema';
+import { windowsMs, type LoggedEvent } from '../../telemetry/schema';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -70,6 +70,8 @@ describe('SessionController', () => {
     const events = await store.readAll();
     expect(events[0].type).toBe('session.start');
     expect(events[0].persistent).toBe(false);
+    expect(events[0].config_version).toBe('0.0.5-c1');
+    expect(events[0].windows_ms).toEqual(windowsMs());
     expect(events.some((e) => e.type === 'run.start' && e.run_idx === 0)).toBe(true);
     expect(await store.getMeta('player_id')).toBe(c.status().playerId);
     expect(c.status().store).toBe('memory');
