@@ -8,6 +8,8 @@ import {
   STAGGER_MS,
   PARRY_WINDOW_MS,
   INPUT_BUFFER_MS,
+  DASH_CANCEL_EARLY_MS,
+  LOCKED_MOVE_FACTOR,
 } from './actionDefs';
 import { resolveAction, totalCommitmentMs, lockedMs, type ActionDef } from './actionRegistry';
 import {
@@ -113,6 +115,18 @@ export class PlayerController {
       this.currentAction !== null &&
       this.chargeTriggered &&
       this.phaseElapsedMs >= lockedMs(this.currentAction)
+    );
+  }
+
+  /** Dash may cancel the action: in recovery, or in the last DASH_CANCEL_EARLY_MS of the locked part (non-charged). */
+  get isDashCancelable(): boolean {
+    if (this.isInRecovery) return true;
+    const action = this.currentAction;
+    return (
+      this.state === 'acting' &&
+      action !== null &&
+      action.actionType !== 'charged' &&
+      this.phaseElapsedMs >= lockedMs(action) - DASH_CANCEL_EARLY_MS
     );
   }
 
@@ -291,7 +305,7 @@ export class PlayerController {
 
   private canDashState(): boolean {
     if (this.dodgeCooldownRemainingMs > 0) return false;
-    return this.isCharging || this.isInRecovery || this.state === 'blocking' || this.state === 'idle';
+    return this.isCharging || this.isDashCancelable || this.state === 'blocking' || this.state === 'idle';
   }
 
   /** Inputs that cannot run now but will become runnable on their own (locked, stagger, dash, cooldowns). */
@@ -320,7 +334,7 @@ export class PlayerController {
 
   private startDash(): void {
     this.inputBuffer.clear();
-    if (this.isInRecovery) {
+    if (this.isDashCancelable) {
       this.bus.emit('player.cancel', { by: 'dash', actionId: this.currentAction!.id });
     }
     if (this.state === 'acting') this.cancelAction(); // recovery, or a charge in progress (silent)
@@ -363,6 +377,7 @@ export class PlayerController {
 
   enterStagger(): void {
     this.state = 'staggered';
+    this.inputBuffer.clear();
     this.staggerRemainingMs = STAGGER_MS;
     this.blockHeldMs = 0;
   }
@@ -474,6 +489,17 @@ export class PlayerController {
       return;
     }
 
+    if (action.actionType !== 'charged' && this.phaseElapsedMs < lockedMs(action)) {
+      const direction = normalizeVelocity(this.moveInput.x, this.moveInput.y);
+      if (direction.x !== 0 || direction.y !== 0) {
+        this._position = clampToArena(
+          applyMovement(this._position, direction, PLAYER_WALK_SPEED * LOCKED_MOVE_FACTOR, stepMs),
+          this.width,
+          this.height,
+          ARENA_BOUNDS,
+        );
+      }
+    }
     this.phaseElapsedMs += stepMs;
     if (action.actionType === 'throw' && !this.launched && this.phaseElapsedMs >= action.timing.startupMs) {
       this.launched = true;

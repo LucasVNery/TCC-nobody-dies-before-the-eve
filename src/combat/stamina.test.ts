@@ -6,12 +6,13 @@ describe('Stamina', () => {
     const s = new Stamina();
     expect(s.value).toBe(STAMINA_MAX);
     expect(s.exhausted).toBe(false);
+    expect(STAMINA_MAX).toBe(150);
   });
 
   it('spend subtracts', () => {
     const s = new Stamina();
     s.spend(12, 'attack');
-    expect(s.value).toBe(88);
+    expect(s.value).toBe(138);
   });
 
   it('spend clamps at 0 and marks exhausted', () => {
@@ -25,14 +26,14 @@ describe('Stamina', () => {
     const s = new Stamina();
     s.spend(50, 'attack');
     s.step(599, true);
-    expect(s.value).toBe(50);
+    expect(s.value).toBe(100);
     s.step(2, true);
-    expect(s.value).toBeCloseTo(50 + 0.035, 5);
+    expect(s.value).toBeCloseTo(100 + 0.05, 5);
   });
 
   it('waits 1200 ms after hitting zero', () => {
     const s = new Stamina();
-    s.spend(100, 'dodge');
+    s.spend(150, 'dodge');
     s.step(1199, true);
     expect(s.value).toBe(0);
     s.step(1201, true);
@@ -43,16 +44,16 @@ describe('Stamina', () => {
     const s = new Stamina();
     s.spend(50, 'attack');
     s.step(5000, false);
-    expect(s.value).toBe(50);
+    expect(s.value).toBe(100);
     s.step(599, true); // wait still intact
-    expect(s.value).toBe(50);
+    expect(s.value).toBe(100);
   });
 
   it('a single large step regenerates only the part after the wait', () => {
     const s = new Stamina();
-    s.spend(50, 'attack');
+    s.spend(100, 'attack');
     s.step(2000, true);
-    expect(s.value).toBeCloseTo(50 + 49, 5);
+    expect(s.value).toBeCloseTo(50 + 70, 5);
     s.spend(50, 'attack');
     s.step(10000, true);
     expect(s.value).toBe(STAMINA_MAX);
@@ -80,18 +81,26 @@ describe('Stamina', () => {
 
   it('takeSpent counts only what was actually taken', () => {
     const s = new Stamina();
-    s.spend(60, 'attack');
-    s.spend(60, 'block');
-    expect(s.takeSpent()).toEqual({ attack: 60, sprint: 0, dodge: 0, block: 40 });
+    s.spend(90, 'attack');
+    s.spend(90, 'block');
+    expect(s.takeSpent()).toEqual({ attack: 90, sprint: 0, dodge: 0, block: 60 });
+  });
+
+  it('regenerates 50 per second', () => {
+    const s = new Stamina();
+    s.spend(100, 'attack');
+    s.step(600, true);
+    s.step(1000, true);
+    expect(s.value).toBeCloseTo(100, 5);
   });
 
   it('reset restores full', () => {
     const s = new Stamina();
-    s.spend(100, 'attack');
+    s.spend(150, 'attack');
     s.reset();
     expect(s.value).toBe(STAMINA_MAX);
     s.spend(10, 'attack');
     s.step(1, true);
-    expect(s.value).toBe(90); // no leftover wait weirdness: wait restarted by the new spend
+    expect(s.value).toBe(140); // no leftover wait weirdness: wait restarted by the new spend
   });
 });

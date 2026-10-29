@@ -58,8 +58,8 @@ function dashScenario(playerX: number, enemyX: number, dashTicksBeforeStrike: nu
 }
 
 describe('Encounter dodge timing (credited at the strike)', () => {
-  it('a dash pressed ~200 ms before the strike (i-frames over) does not protect: 20 damage, stagger, no dodge label', () => {
-    const { encounter, defenses, hurts } = dashScenario(0, 30, 13, -1);
+  it('a dash pressed ~240 ms before the strike (i-frames over) does not protect: 20 damage, stagger, no dodge label', () => {
+    const { encounter, defenses, hurts } = dashScenario(0, 30, 15, -1);
     runFor(encounter, SWING_MS + STEP_MS * 2);
     expect(hurts).toHaveLength(1);
     expect(encounter.player.hp).toBe(PLAYER_MAX_HP - 20);
@@ -67,14 +67,14 @@ describe('Encounter dodge timing (credited at the strike)', () => {
     expect(defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
   });
 
-  it('a dash pressed ~100 ms before the strike dodges: label, no damage, window taken, not perfect, stamina spent', () => {
-    const { encounter, defenses, hurts, closes } = dashScenario(0, 30, 6, -1);
+  it('a dash pressed ~130 ms before the strike dodges: label, no damage, window taken, not perfect, stamina spent', () => {
+    const { encounter, defenses, hurts, closes } = dashScenario(0, 30, 8, -1);
     runFor(encounter, SWING_MS + STEP_MS * 2);
     expect(defenses).toEqual([{ label: 'dodge' }]);
     expect(hurts).toHaveLength(0);
     expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
-    expect(encounter.player.stamina.value).toBe(70); // 30 spent; regen is still waiting
+    expect(encounter.player.stamina.value).toBe(120); // 30 spent; regen is still waiting
   });
 
   it('a dash pressed ~60 ms before the strike is a perfect dodge and refunds 30 stamina', () => {
@@ -82,7 +82,7 @@ describe('Encounter dodge timing (credited at the strike)', () => {
     runFor(encounter, SWING_MS + STEP_MS * 2);
     expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
     expect(hurts).toHaveLength(0);
-    expect(encounter.player.stamina.value).toBe(100); // 100 - 30 + 30
+    expect(encounter.player.stamina.value).toBe(150); // 150 - 30 + 30
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
   });
 
@@ -102,17 +102,17 @@ describe('Encounter dodge timing (credited at the strike)', () => {
     expect(defenses).toEqual([{ label: 'retreat' }]);
   });
 
-  it('perfect boundary: dash age 80 ms (5 ticks) is perfect, 96 ms (6 ticks) is not', () => {
-    expect(dashScenario(0, 30, 5, -1).defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
-    expect(dashScenario(0, 30, 6, -1).defenses).toEqual([{ label: 'dodge' }]);
+  it('perfect boundary: dash age 96 ms (6 ticks) is perfect, 112 ms (7 ticks) is not', () => {
+    expect(dashScenario(0, 30, 6, -1).defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
+    expect(dashScenario(0, 30, 7, -1).defenses).toEqual([{ label: 'dodge' }]);
   });
 
-  it('i-frame boundary: dash 9 ticks (144 ms) before the strike protects, 10 ticks (160 ms) does not', () => {
-    const covered = dashScenario(0, 30, 9, -1);
+  it('i-frame boundary: dash 12 ticks (192 ms) before the strike protects, 14 ticks (224 ms) does not', () => {
+    const covered = dashScenario(0, 30, 12, -1);
     runFor(covered.encounter, SWING_MS);
     expect(covered.defenses.map((d) => d.label)).toEqual(['dodge']);
     expect(covered.hurts).toHaveLength(0);
-    const late = dashScenario(0, 30, 10, -1);
+    const late = dashScenario(0, 30, 14, -1);
     runFor(late.encounter, SWING_MS);
     expect(late.defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
     expect(late.hurts).toHaveLength(1);
@@ -131,7 +131,7 @@ describe('Encounter dodge timing (credited at the strike)', () => {
       encounter.step(STEP_MS);
     }
     expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: 30 }]);
-    expect(encounter.player.stamina.value).toBe(100); // 70 + 20 + 30 clamped
+    expect(encounter.player.stamina.value).toBe(150); // 120 + 20 + 30 clamped
   });
 
   it('with no dash at all the window expires and retreat is inferred (out of the fan)', () => {
@@ -560,7 +560,7 @@ describe('Encounter', () => {
     // Stamina drops by exactly one hit's worth (15), not to 0 — the hitbox
     // keeps overlapping for the rest of the ~150ms swing, but the guard
     // must make absorbBlockHit() fire only once per attack window.
-    expect(encounter.player.stamina.value).toBe(85);
+    expect(encounter.player.stamina.value).toBe(135);
     expect(encounter.assaltante.state).toBe('recovering');
   });
 
@@ -571,7 +571,7 @@ describe('Encounter', () => {
     );
     encounter.player.startBlock(); // held from t=0 -> resolves as an ordinary block, not a parry, when the swing connects at TELEGRAPH_MS
     runFor(encounter, TELEGRAPH_MS + STEP_MS);
-    expect(encounter.player.stamina.value).toBeLessThan(100); // confirms the block already absorbed the hit this window
+    expect(encounter.player.stamina.value).toBeLessThan(150); // confirms the block already absorbed the hit this window
 
     encounter.player.stopBlock();
     encounter.player.startBlock(); // re-press -> blockHeldMs resets to 0, briefly back inside the parry window
@@ -1037,7 +1037,7 @@ describe('Encounter lunge', () => {
   });
 
   // The player dashes toward the oncoming enemy (a sideways dash escapes the 60 u contact and is a retreat instead).
-  // Lunge movement starts on tick 32; dash press ticks are pinned to the 16 ms step.
+  // Lunge movement starts on tick 32; dash press ticks are pinned to the 16 ms step (dash 220 ms: tick 33 dodges, 32 does not).
   function dashTowardEnemy(pressTick: number) {
     const ctx = lungeEncounter();
     for (let tick = 0; tick < 100; tick++) {
@@ -1051,14 +1051,14 @@ describe('Encounter lunge', () => {
   }
 
   it('i-frames active when the body arrives within 60 u: dodge, window taken, no damage', () => {
-    const { defenses, hurts, closes } = dashTowardEnemy(31);
+    const { defenses, hurts, closes } = dashTowardEnemy(33);
     expect(hurts).toHaveLength(0);
     expect(defenses).toEqual([{ label: 'dodge' }]);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
   });
 
-  it('a dash <= 80 ms old at the contact is a perfect dodge with the refund', () => {
-    const { defenses, hurts, closes } = dashTowardEnemy(48);
+  it('a dash <= 110 ms old at the contact is a perfect dodge with the refund', () => {
+    const { defenses, hurts, closes } = dashTowardEnemy(42);
     expect(hurts).toHaveLength(0);
     expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: STAMINA_COST.dodge }]);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
@@ -1360,7 +1360,7 @@ describe('Encounter map items', () => {
     const defenses: Array<Record<string, unknown>> = [];
     encounter.bus.on('player.defense', (e) => defenses.push({ ...e, stamina: encounter.player.stamina.value }));
     for (let tick = 0; tick < 100; tick++) {
-      if (tick === 48) {
+      if (tick === 42) {
         encounter.setPlayerMoveInput(-1, 0);
         encounter.player.tryDodge();
       }

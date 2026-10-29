@@ -1,7 +1,7 @@
 // src/combat/stamina.ts
 export type SpendKind = 'attack' | 'sprint' | 'dodge' | 'block';
 
-export const STAMINA_MAX = 100;
+export const STAMINA_MAX = 150;
 export const STAMINA_COST = {
   light: 12,
   heavy: 22,
@@ -12,7 +12,7 @@ export const STAMINA_COST = {
   blockHit: 15,
   sprintPerSecond: 10,
 } as const;
-export const STAMINA_REGEN = { perSecond: 35, delayMs: 600, exhaustedDelayMs: 1200 } as const;
+export const STAMINA_REGEN = { perSecond: 50, delayMs: 600, exhaustedDelayMs: 1200 } as const;
 
 function emptySpent(): Record<SpendKind, number> {
   return { attack: 0, sprint: 0, dodge: 0, block: 0 };

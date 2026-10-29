@@ -87,7 +87,7 @@ describe('TelemetryRecorder', () => {
     const stack = makeStack();
     stack.director.start();
     stack.recorder.drain();
-    stack.encounter.player.stamina.spend(100, 'attack');
+    stack.encounter.player.stamina.spend(150, 'attack');
     stack.encounter.player.tryAction('sword_shield.light');
     const denied = ofType(stack.recorder.drain(), 'player.stamina_denied');
     expect(denied).toHaveLength(1);

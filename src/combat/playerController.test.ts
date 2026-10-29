@@ -9,6 +9,9 @@ import {
   PARRY_WINDOW_MS,
   STAGGER_MS,
   INPUT_BUFFER_MS,
+  DASH_CANCEL_EARLY_MS,
+  LOCKED_MOVE_FACTOR,
+  PERFECT_DODGE_MS,
 } from './actionDefs';
 import { SWORD_SHIELD_ACTIONS, lockedMs, totalCommitmentMs } from './actionRegistry';
 import { STAMINA_MAX, STAMINA_COST, STAMINA_REGEN } from './stamina';
@@ -220,12 +223,37 @@ describe('PlayerController', () => {
     expect(player.position.x).toBe(ARENA_BOUNDS.x);
   });
 
-  it('ignores moveInput during the locked phase', () => {
+  it('moves at LOCKED_MOVE_FACTOR of walk speed during the locked phase of a light attack', () => {
     const { player } = makePlayer();
     player.tryAction(LIGHT.id);
     player.setMoveInput(1, 0);
     player.step(lockedMs(LIGHT) - 1);
+    expect(player.position.x).toBeCloseTo((PLAYER_WALK_SPEED * LOCKED_MOVE_FACTOR * (lockedMs(LIGHT) - 1)) / 1000, 5);
+    expect(player.position.y).toBe(0);
+    expect(PLAYER_WALK_SPEED * LOCKED_MOVE_FACTOR).toBeCloseTo(70, 5);
+  });
+
+  it('does not move while charging or in the locked part of a charged attack', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    player.setMoveInput(1, 0);
+    player.step(CHARGED.charge!.minHoldMs + 50);
     expect(player.position).toEqual({ x: 0, y: 0 });
+    player.releaseAction();
+    player.step(lockedMs(CHARGED) - 1);
+    expect(player.position).toEqual({ x: 0, y: 0 });
+  });
+
+  it('moving in the locked part keeps the committed attack direction', () => {
+    const { player } = makePlayer();
+    player.setAimDirection({ x: 0, y: 1 });
+    player.tryAction(LIGHT.id);
+    player.setMoveInput(1, 0);
+    player.step(LIGHT.timing.startupMs + 1);
+    expect(player.position.x).toBeGreaterThan(0);
+    const box = player.attackHitbox();
+    expect(box).not.toBeNull();
+    expect(box!.direction).toEqual({ x: 0, y: 1 });
   });
 
   it('dash defaults to facing right if the player never moved', () => {
@@ -428,7 +456,7 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/stamina)', 
     const guardBreak = vi.fn();
     bus.on('player.guard_break', guardBreak);
     player.startBlock();
-    player.stamina.spend(90, 'attack'); // 10 left
+    player.stamina.spend(140, 'attack'); // 10 left
     player.absorbBlockHit();
     expect(player.stamina.value).toBe(0);
     expect(guardBreak).toHaveBeenCalledTimes(1);
@@ -467,9 +495,9 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/stamina)', 
 
   it('stamina regenerates after the wait while idle, even across a single large step()', () => {
     const { player } = makePlayer();
-    player.stamina.spend(65, 'attack'); // 35 left, wait armed at 600 ms
+    player.stamina.spend(65, 'attack'); // 85 left, wait armed at 600 ms
     player.step(STAMINA_REGEN.delayMs + 1000); // 600 ms of wait + 1000 ms of regen
-    expect(player.stamina.value).toBeCloseTo(35 + 35, 5);
+    expect(player.stamina.value).toBeCloseTo(85 + 50, 5);
   });
 
   it('stamina never regenerates above STAMINA_MAX', () => {
@@ -483,7 +511,7 @@ describe('PlayerController — defensive kit (blocking/parry/stagger/stamina)', 
     player.stamina.spend(50, 'attack');
     player.startBlock();
     player.step(5000);
-    expect(player.stamina.value).toBe(50);
+    expect(player.stamina.value).toBe(100);
   });
 });
 
@@ -518,7 +546,7 @@ describe('PlayerController — stamina costs', () => {
     const { bus, player } = makePlayer();
     const actions = vi.fn();
     bus.on('player.action', actions);
-    player.stamina.spend(90, 'attack');
+    player.stamina.spend(140, 'attack');
     player.tryAction(CHARGED.id);
     player.step(CHARGED.charge!.minHoldMs + 50);
     player.releaseAction();
@@ -556,7 +584,7 @@ describe('PlayerController — stamina costs', () => {
     const dodged = vi.fn();
     bus.on('player.stamina_denied', denied);
     bus.on('player.dodge', dodged);
-    player.stamina.spend(71, 'attack'); // 29 left
+    player.stamina.spend(121, 'attack'); // 29 left
     player.tryDodge();
     expect(player.state).toBe('idle');
     expect(denied).toHaveBeenCalledTimes(1);
@@ -571,7 +599,7 @@ describe('PlayerController — stamina costs', () => {
     const { bus, player } = makePlayer();
     const dodged = vi.fn();
     bus.on('player.dodge', dodged);
-    player.stamina.spend(70, 'attack'); // 30 left
+    player.stamina.spend(120, 'attack'); // 30 left
     player.tryDodge();
     expect(player.state).toBe('dodging');
     expect(dodged).toHaveBeenCalledWith({ cost: 30 });
@@ -661,7 +689,7 @@ describe('PlayerController — sprint', () => {
     player.setSprint(true);
     player.setMoveInput(1, 0);
     player.step(3000);
-    expect(player.stamina.value).toBeLessThan(50);
+    expect(player.stamina.value).toBeLessThan(100);
   });
 
   it('sprint without movement is not sprinting and does not spend', () => {
@@ -720,12 +748,13 @@ describe('combat B: responsive combat', () => {
     const { player } = makePlayer();
     player.tryAction(LIGHT.id);
     player.setMoveInput(1, 0);
-    player.step(LIGHT_LOCKED - 1);
+    player.step(LIGHT_LOCKED - DASH_CANCEL_EARLY_MS - 1);
     expect(player.isInRecovery).toBe(false);
-    expect(player.position).toEqual({ x: 0, y: 0 });
-    player.tryDodge(); // buffered, does not fire while locked
+    expect(player.position.x).toBeGreaterThan(0); // slow movement, not a free walk
+    expect(player.position.x).toBeLessThan((PLAYER_WALK_SPEED * LIGHT_LOCKED) / 1000);
+    player.tryDodge(); // buffered, does not fire while locked (not yet dash-cancelable)
     expect(player.state).toBe('acting');
-    player.step(1); // recovery starts: the buffered dash fires right away
+    player.step(1); // enters the dash-cancel window: the buffered dash fires right away
     expect(player.state).toBe('dodging');
 
     const other = makePlayer().player;
@@ -761,10 +790,11 @@ describe('combat B: responsive combat', () => {
     player.setMoveInput(1, 0);
     player.tryAction(LIGHT.id);
     player.step(LIGHT_LOCKED);
-    expect(player.position).toEqual({ x: 0, y: 0 });
+    expect(player.position.x).toBeCloseTo((PLAYER_WALK_SPEED * LOCKED_MOVE_FACTOR * LIGHT_LOCKED) / 1000, 5);
+    const lockedX = player.position.x;
     player.step(16);
     expect(player.state).toBe('idle');
-    expect(player.position.x).toBeGreaterThan(0);
+    expect(player.position.x - lockedX).toBeCloseTo((PLAYER_WALK_SPEED * 16) / 1000, 5); // full walk speed from recovery on
   });
 
   it('dash cancels the recovery: player.cancel{dash} comes before player.dodge', () => {
@@ -925,14 +955,16 @@ describe('combat B: responsive combat', () => {
     expect(player.state).toBe('dodging');
   });
 
-  it('a dash buffered from blocking is dropped if the cooldown outlasts INPUT_BUFFER_MS', () => {
+  it('a dash buffered from blocking fires when the cooldown ends inside INPUT_BUFFER_MS (cooldown 160 < buffer 170)', () => {
     const { player } = makePlayer();
     player.tryDodge();
     player.step(DODGE.durationMs);
     player.startBlock();
-    player.tryDodge(); // full cooldown left, > INPUT_BUFFER_MS
-    player.step(DODGE.cooldownMs);
+    player.tryDodge(); // full cooldown left, < INPUT_BUFFER_MS
+    player.step(DODGE.cooldownMs - 1);
     expect(player.state).toBe('blocking');
+    player.step(1);
+    expect(player.state).toBe('dodging');
   });
 
   it('the dash cooldown applies while charging: dash waits, then cancels the charge when the cooldown ends', () => {
@@ -970,5 +1002,89 @@ describe('combat B: responsive combat', () => {
     player.step(10); // fires HEAVY directly from the buffer, clearing it
     player.step(HEAVY.timing.startupMs); // no stale input must remain
     expect(player.currentActionDef?.id).toBe(HEAVY.id);
+  });
+});
+
+describe('combat v2: forgiving player flow', () => {
+  it('uses the new constants', () => {
+    expect(STAMINA_MAX).toBe(150);
+    expect(STAMINA_REGEN.perSecond).toBe(50);
+    expect(DODGE).toEqual({ durationMs: 220, iframesMs: 200, cooldownMs: 160 });
+    expect(PERFECT_DODGE_MS).toBe(110);
+    expect(INPUT_BUFFER_MS).toBe(170);
+    expect(DASH_CANCEL_EARLY_MS).toBe(60);
+    expect(LOCKED_MOVE_FACTOR).toBe(0.4);
+  });
+
+  it('attack costs and dodge cost are unchanged', () => {
+    expect(STAMINA_COST.light).toBe(12);
+    expect(STAMINA_COST.heavy).toBe(22);
+    expect(STAMINA_COST.charged).toBe(28);
+    expect(STAMINA_COST.throw).toBe(8);
+    expect(STAMINA_COST.dodge).toBe(30);
+  });
+
+  it('player starts and resets at 150 stamina', () => {
+    const { player } = makePlayer();
+    expect(player.stamina.value).toBe(150);
+    player.stamina.spend(40, 'attack');
+    player.reset({ x: 0, y: 0 });
+    expect(player.stamina.value).toBe(150);
+  });
+
+  it('an attack pressed 160 ms before it can execute fires; 180 ms before does not', () => {
+    for (const [early, fires] of [[160, true], [180, false]] as const) {
+      const { player } = makePlayer();
+      player.lockAttack(early);
+      player.tryAction(LIGHT.id); // buffered
+      for (let t = 0; t < early; t++) player.step(1);
+      expect(player.state === 'acting').toBe(fires);
+    }
+  });
+
+  it('enterStagger() clears the input buffer', () => {
+    const { player } = makePlayer();
+    player.lockAttack(100);
+    player.tryAction(LIGHT.id); // buffered
+    player.enterStagger();
+    player.step(STAGGER_MS + 20);
+    expect(player.state).toBe('idle');
+  });
+
+  it('a dash in the last 60 ms of the locked part cancels a light attack (by dash) without a second attack cost or a ghost hitbox', () => {
+    const { bus, player } = makePlayer();
+    const cancels = vi.fn();
+    bus.on('player.cancel', cancels);
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED - DASH_CANCEL_EARLY_MS);
+    expect(player.isDashCancelable).toBe(true);
+    const before = player.stamina.value;
+    player.tryDodge();
+    expect(player.state).toBe('dodging');
+    expect(cancels).toHaveBeenCalledWith({ by: 'dash', actionId: LIGHT.id });
+    expect(player.stamina.value).toBe(before - STAMINA_COST.dodge);
+    expect(player.attackHitbox()).toBeNull();
+    player.step(DODGE.durationMs);
+    expect(player.attackHitbox()).toBeNull();
+  });
+
+  it('a dash 70 ms before the end of the locked part is not allowed yet, only buffered', () => {
+    const { player } = makePlayer();
+    player.tryAction(LIGHT.id);
+    player.step(LIGHT_LOCKED - DASH_CANCEL_EARLY_MS - 10);
+    expect(player.isDashCancelable).toBe(false);
+    player.tryDodge();
+    expect(player.state).toBe('acting');
+    player.step(10);
+    expect(player.state).toBe('dodging');
+  });
+
+  it('a charged attack is not dash-cancelable in its locked part', () => {
+    const { player } = makePlayer();
+    player.tryAction(CHARGED.id);
+    player.step(CHARGED.charge!.minHoldMs + 50);
+    player.releaseAction();
+    player.step(lockedMs(CHARGED) - DASH_CANCEL_EARLY_MS + 1);
+    expect(player.isDashCancelable).toBe(false);
   });
 });
