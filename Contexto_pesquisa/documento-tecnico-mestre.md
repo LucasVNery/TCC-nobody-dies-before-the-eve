@@ -120,6 +120,8 @@ O projeto passou por três enquadramentos, e **o material do Drive e o texto atu
 
 **Marco dentro do enquadramento 3, 21/10/2026: versão `0.0.4` (branch `mecanicas-v004`, ainda não integrada ao `master`).** Estamina (substitui a postura), corrida, esquiva com timing e *perfect dodge*, arco com projétil, *lunge* do Assaltante, itens no mapa com a ação `utility`, métricas de estamina e de itens, regra das 8 ações na análise e agentes da V0 adaptados. Spec: `docs/superpowers/specs/2026-10-21-mecanicas-v004-design.md`. **Os dados e os resultados da V0 de 21/10 (versão `0.0.3`) não são comparáveis com a `0.0.4`** e ficam como piloto arquivado (ver 5.7). Playtest do autor pendente.
 
+**Marco dentro do enquadramento 3, 29/10/2026: versão `0.0.5` (branch `combate-v2`, ainda não integrada ao `master`).** Combate v2: estamina de 150 com regeneração de 50/s, janelas mais folgadas (esquiva de 220 ms com 200 ms de i-frames, *perfect dodge* ≤ 110 ms, buffer de 170 ms), movimento a 40% na parte travada dos ataques e cancelamento da parte final da fase ativa pelo dash, o **monstro de elite** no lugar do Assaltante comum (vida 160, quatro padrões escolhidos por peso, pausa obrigatória), 2 encontros por sala, *hit-stop* na simulação, feedback visual de produção (arcos, telegraphs, flash, tremor, números) com hitboxes só em `F3`, métrica de ataques do inimigo no painel e `config_version` no log. Spec: `docs/superpowers/specs/2026-10-29-combate-v2-design.md` (com a seção de divergências e rulings). **Os dados da `0.0.3` e da `0.0.4` não são comparáveis com a `0.0.5`** (ver 5.7). **Nada disso passou por playtest do autor**, e os efeitos visuais não foram verificados jogando.
+
 A troca de Unity por Phaser não tem registro de decisão próprio no repositório; a justificativa está no texto da tese (§3.2: plataforma web, coleta remota, testes em TypeScript).
 
 ---
@@ -154,7 +156,7 @@ Cada mecânica traz a regra, os parâmetros, onde está no código e o que falta
 
 | Mecânica | Regra e parâmetros | Fonte | Status | Pendência |
 |---|---|---|---|---|
-| Movimento | Oito direções, **instantâneo** (sem aceleração nem inércia). **Caminhada 175** unidades/s (`PLAYER_WALK_SPEED`); **corrida 220** (`PLAYER_RUN_SPEED`) com Shift, gastando estamina (ver 2.3a). Só em `idle`; bloqueando, a 50% da caminhada (**87,5**). *(Na 0.0.3 havia uma só velocidade, 220; antes 160)* | `combat/playerController.ts`, `movementDefs.ts` | 🟡 | Sensação |
+| Movimento | Oito direções, **instantâneo** (sem aceleração nem inércia). **Caminhada 175** unidades/s (`PLAYER_WALK_SPEED`); **corrida 220** (`PLAYER_RUN_SPEED`) com Shift, gastando estamina (ver 2.3a). Em `idle`; bloqueando, a 50% da caminhada (**87,5**); na parte travada (preparação + golpe) de ataque leve, pesado e do arco, a **40%** da caminhada (70 u/s; a direção do golpe não muda). O carregado segue imóvel e a recuperação já era cancelável por movimento. *(Na 0.0.3 havia uma só velocidade, 220; antes 160)* | `combat/playerController.ts`, `movementDefs.ts` | 🟡 | Sensação |
 | Mira | Direção do mouse, normalizada; o ataque trava a direção no início da ação | `playerController.ts` | ✅ | |
 | Arena | 1600 × 1200 unidades (25 × 19 tiles de 64); o jogador é limitado às bordas | `movementDefs.ts`, `movement.ts` | ✅ | |
 | Sem eixo Z | Todo o combate é planar; a profundidade (y do mundo) só define a ordem de desenho | decisão de arquitetura | ✅ | Bloqueia a dim 7 |
@@ -187,7 +189,7 @@ Tempos em ms; alcance em unidades de mundo. Nas ações carregadas, a preparaç�
 
 ### 2.3a Estamina (0.0.4)
 
-Uma barra única (0 a **100**) paga ataques, esquiva, corrida e bloqueio. Substitui a barra de postura da 0.0.3 (o `p_poise` do log virou `p_stam`). Todos os valores são constantes em `combat/stamina.ts` (`STAMINA_COST`, `STAMINA_REGEN`), a ajustar no playtest.
+Uma barra única (0 a **150** desde a 0.0.5; era 100) paga ataques, esquiva, corrida e bloqueio. Substitui a barra de postura da 0.0.3 (o `p_poise` do log virou `p_stam`). Todos os valores são constantes em `combat/stamina.ts` (`STAMINA_COST`, `STAMINA_REGEN`), a ajustar no playtest.
 
 | Gasto | Custo | Quando é cobrado |
 |---|---|---|
@@ -202,7 +204,7 @@ Uma barra única (0 a **100**) paga ataques, esquiva, corrida e bloqueio. Substi
 
 | Regra | Valor |
 |---|---|
-| Regeneração | **35**/s, após **600 ms** sem gastar; só com o jogador em `idle` e **sem correr** |
+| Regeneração | **50**/s *(era 35)*, após **600 ms** sem gastar; só com o jogador em `idle` e **sem correr** |
 | Exaustão (barra em 0) | A espera da regeneração sobe para **1200 ms**. Em 0 não se inicia ataque nem guarda (evento `player.stamina_denied`); a esquiva é negada com menos de 30 |
 | Gasto parcial | Um ataque pode começar com menos que o custo (desde que a barra não esteja em 0); o gasto é limitado ao que resta |
 | *Guard break* | Bloquear com menos de 15 gasta o que resta, emite `player.guard_break` e deixa o jogador em *stagger* (250 ms). Não tira vida |
@@ -212,14 +214,14 @@ Uma barra única (0 a **100**) paga ataques, esquiva, corrida e bloqueio. Substi
 
 Mudança central do combate B, desenhada para reproduzir a sensação de combate ágil de *Hades*:
 
-- **Preso** (`lockedMs` = preparação + golpe): o jogador não anda, não dá dash e não ataca. O que apertar vai para o buffer.
+- **Preso** (`lockedMs` = preparação + golpe): o jogador **anda a 40%** (desde a 0.0.5; antes não andava), não ataca e **não dá dash livre**, exceto nos **últimos 60 ms** da fase ativa (`DASH_CANCEL_EARLY_MS`), em que o dash já cancela o golpe (`player.cancel {by:'dash'}`, sem cobrar duas vezes nem deixar hitbox fantasma). O carregado continua imóvel e o dash não o cancela na parte travada. O que apertar vai para o buffer.
 - **Recuperação:** **qualquer** entrada a cancela. Andar volta a `idle` e já move no mesmo tick; o dash sai direto; um novo ataque começa na hora, o que encadeia combos. Sem entrada, a recuperação termina sozinha após `totalCommitmentMs`.
 - **Carga (Q):** enquanto se segura o Q, o dash cancela o carregamento sem emitir ação (o jogador ainda não se comprometeu).
 
 | Mecânica | Regra | Fonte | Status |
 |---|---|---|---|
 | Recuperação cancelável | Cancelamento por mover, dash ou atacar emite `player.cancel {by, actionId}` **antes** do evento da ação seguinte | `playerController.ts` | 🟡 |
-| Buffer de entrada | **120 ms**, **um** slot (guarda a última entrada). Vale para ataque e dash apertados quando ainda não podem executar; **não** vale para o carregado, o bloqueio, a guarda nem a troca de arma | `combat/inputBuffer.ts` | 🟡 |
+| Buffer de entrada | **170 ms** *(era 120)*, **um** slot (guarda a última entrada), **limpo ao levar golpe ou entrar em stagger**. Vale para ataque e dash apertados quando ainda não podem executar; **não** vale para o carregado, o bloqueio, a guarda nem a troca de arma | `combat/inputBuffer.ts` | 🟡 |
 | Exposição da dim 6 | Passa a ser `lockedMs`, a parte não cancelável (antes era o comprometimento total) | `actionRegistry.ts`, `encounter.ts` | 🟡 |
 | Lacuna de dados | Um `player.cancel{attack}` pode **não** ser seguido de `player.action` (carga iniciada na recuperação e abortada cedo). O preditor não pode assumir o contrário | `playerController.ts` | ✅ documentada |
 
@@ -227,30 +229,56 @@ Mudança central do combate B, desenhada para reproduzir a sensação de combate
 
 | Mecânica | Regra e parâmetros | Fonte | Status |
 |---|---|---|---|
-| **Esquiva (dash)** | Duração **180 ms**, i-frames **150 ms**, recarga **200 ms**, deslocamento **120** *(antes 250 / 200 / 300 ms e 80)*; **custa 30 de estamina**. Direção: a do movimento pedido; sem movimento, a da mira. Sai de `idle`, da recuperação, do bloqueio, do carregamento e durante a troca de arma; **não** sai preso nem em stagger (vai ao buffer). Sem 30 de estamina é negada e não entra no buffer. A esquiva continua **binária** (invulnerável ou não) | `playerController.ts`, `actionDefs.ts` | 🟡 |
+| **Esquiva (dash)** | Duração **220 ms**, i-frames **200 ms**, recarga **160 ms**, deslocamento **120** *(0.0.4: 180 / 150 / 200 ms; antes 250 / 200 / 300 ms e 80)*; **custa 30 de estamina**. Direção: a do movimento pedido; sem movimento, a da mira. Sai de `idle`, da recuperação, do bloqueio, do carregamento e durante a troca de arma; **não** sai preso nem em stagger (vai ao buffer). Sem 30 de estamina é negada e não entra no buffer. A esquiva continua **binária** (invulnerável ou não). **Regra de integridade (0.0.5):** um jogador invulnerável **nunca** é atingido; se o golpe aterrissa ou sobrepõe durante os i-frames, é crédito de `dodge` (corrige um defeito prévio do *lunge*, em que a posição de aterrissagem antes do passo e a sobreposição depois do passo divergiam) | `playerController.ts`, `actionDefs.ts` | 🟡 |
 | **Esquiva com timing** (0.0.4) | O crédito da esquiva sai **no momento do golpe**, não no aperto: o rótulo `dodge` só vale se o jogador estiver invulnerável quando o golpe do inimigo aterrissa. Esquiva apertada cedo demais (os i-frames já acabaram) não protege: o golpe conecta, causa dano e *stagger*, e não há rótulo. Regra de crédito: no **primeiro tick** de aterrissagem a invulnerabilidade basta (o dash pode ter tirado o jogador do leque); nos ticks seguintes do mesmo golpe exige também sobreposição com o leque, para que um dash apertado depois do golpe não salve quem nunca estava nele | `combat/encounter.ts` | 🟡 |
-| **Perfect dodge** (0.0.4) | Esquiva cuja idade no impacto é **≤ 80 ms** (`PERFECT_DODGE_MS`): **devolve os 30 de estamina** e marca `player.defense {label:'dodge', perfect:true, refund:30}`. Conta como `dodge` normal para o perfil (o rótulo não muda). Fecha a lacuna antes registrada em 2.8 | `encounter.ts`, `actionDefs.ts` | 🟡 |
+| **Perfect dodge** (0.0.4) | Esquiva cuja idade no impacto é **≤ 110 ms** *(0.0.4: 80)* (`PERFECT_DODGE_MS`): **devolve os 30 de estamina** e marca `player.defense {label:'dodge', perfect:true, refund:30}`. Conta como `dodge` normal para o perfil (o rótulo não muda). Fecha a lacuna antes registrada em 2.8 | `encounter.ts`, `actionDefs.ts` | 🟡 |
 | **Bloqueio** | Guarda levantada; cada golpe bloqueado custa **15 de estamina** (a barra de postura deixou de existir). Com menos de 15 ocorre o *guard break* (ver 2.3a). O jogador anda a **50%** da caminhada (87,5) bloqueando. Não tira vida | `playerController.ts` | ✅ (50% é 🟡) |
 | **Parry** | Guarda levantada há menos de **150 ms** quando o golpe conecta: o inimigo pula o resto do golpe e a janela de punição vai de 500 para **750 ms** | `playerController.ts`, `assaltanteController.ts` | ✅ |
 | **Recuo** | Não há ação: é **inferido** quando a janela de esquiva expira sem contato e sem defesa | `encounter.ts` | ✅ (limitação: inferido, não observado) |
 | **Stagger** | Golpe não mitigado, ou *guard break* (estamina insuficiente para bloquear): **250 ms** parado *(antes 350)* | `actionDefs.ts` | 🟡 |
-| **Golpe não mitigado** | Tira **20** de vida e causa stagger | `encounter.ts` | ✅ |
+| **Golpe não mitigado** | Tira **20** de vida (**30** na pancada da elite) e causa stagger | `encounter.ts` | ✅ |
 | **No máximo um rótulo defensivo por ataque** | Evita que a colisão, que persiste por vários passos, conte o mesmo golpe várias vezes | `encounter.ts` | ✅ |
 
-## 2.6 Inimigo: o Assaltante
+## 2.6 Inimigo: o Assaltante (monstro de elite, 0.0.5)
 
-Único arquétipo implementado; **IA fixa**, baseada em regras de prioridade (a primeira pré-condição verdadeira vence).
+Único arquétipo implementado; **IA fixa**. Desde a 0.0.5 o Assaltante é o **monstro de elite**: mais vida, quatro padrões escolhidos por peso e uma pausa obrigatória entre padrões. Há **um** inimigo por encontro e **2 encontros por sala** (`ROOM_ENCOUNTER_COUNT`; eram 3). A elite **não adapta**: só o futuro boss usa o perfil.
 
 | Elemento | Regra e parâmetros | Fonte | Status |
 |---|---|---|---|
-| Regras (por prioridade) | `assaltante.attack` se a distância ≤ **60**; `assaltante.lunge` se a distância estiver entre **150** e **260** e a recarga do *lunge* tiver terminado; senão `assaltante.chase` | `ai/rules/assaltanteRules.ts` | ✅ |
+| Regras (seleção ponderada, 0.0.5) | Entre as regras de ataque **elegíveis** sorteia-se por peso (PRNG semeado por run): `assaltante.attack` (golpe, peso **4**), `assaltante.combo` (**2**) e `assaltante.slam` (**1,5**) só com distância ≤ **60**; `assaltante.lunge` (**2**) entre **150** e **260** com a recarga terminada; entre 61 e 149, ou sem padrão pronto, `assaltante.chase`. Pronto = **2 s** depois do nascimento/renascimento (primeiro ataque) e **≥ 700 ms** desde o fim do padrão anterior (pausa) | `ai/rules/assaltanteRules.ts` | ✅ |
 | Máquina de estados | `idle`, `chasing`, `attacking`, `lunging`, `recovering` | `combat/assaltanteController.ts` | ✅ |
 | Perseguição | **150** unidades/s *(antes 125; originalmente 90)*, **mais lenta** que a caminhada (175) e que a corrida (220) do jogador, que pode se afastar dela, em linha reta; o sprite olha para a direção de perseguição | `movementDefs.ts` | 🟡 |
-| Ataque | Telegrafia **400 ms** (abre a janela de esquiva), golpe **150 ms** em leque de 90° com alcance 45 + meia largura, recuperação **500 ms** (abre a janela de punição) | `assaltanteController.ts` | ✅ |
-| Vida e dano | 60 de vida; golpe causa 20 | `movementDefs.ts` | ✅ |
-| ***Lunge*** (0.0.4) | Investida em linha reta. **Telegrafia de 500 ms** parado, mirando o jogador (a mira é atualizada e **trava no fim** da telegrafia); depois **carga a 450 u/s por até 260 u** (para na borda da arena). Acerta se chegar a **60** do jogador (`contactDistance`; conta também a posição do jogador na trava, para que uma esquiva lateral bem temporizada seja `dodge` e não `retreat`): mesmo dano (20) e *stagger*; esquiva com i-frames, bloqueio (15 de estamina) e parry funcionam como no golpe comum. Depois, `recovering` com janela de punição de **500 ms** (750 ms após parry). **Recarga de 6000 ms**, contada a partir do **início** do *lunge* anterior e que **começa no nascimento e no renascimento** do inimigo (nunca há *lunge* imediato). Janela de esquiva: 500 ms + tempo de carga (≈ 1078 ms). `enemy.attack_start` ganha `kind: 'swing'` ou `'lunge'` | `combat/assaltanteController.ts`, `ai/rules/assaltanteRules.ts`, `movementDefs.ts` (`LUNGE`) | 🟡 |
+| Ataque (golpe) | Telegrafia **450 ms** *(era 400)* (abre a janela de esquiva), golpe **150 ms** em leque de 90° com alcance 45 + meia largura, recuperação **500 ms** (abre a janela de punição) | `assaltanteController.ts` | ✅ |
+| Vida e dano | **160** de vida *(era 60)*; golpe causa 20 (pancada 30) | `movementDefs.ts` | ✅ |
+| ***Lunge*** (0.0.4) | Investida em linha reta. **Telegrafia de 500 ms** parado, mirando o jogador (a mira é atualizada e **trava no fim** da telegrafia); depois **carga a 450 u/s por até 260 u** (para na borda da arena). Acerta se chegar a **60** do jogador (`contactDistance`; conta também a posição do jogador na trava, para que uma esquiva lateral bem temporizada seja `dodge` e não `retreat`): mesmo dano (20) e *stagger*; esquiva com i-frames, bloqueio (15 de estamina) e parry funcionam como no golpe comum. Depois, `recovering` com janela de punição de **500 ms** (750 ms após parry). **Recarga de 6000 ms**, contada a partir do **início** do *lunge* anterior e que **começa no nascimento e no renascimento** do inimigo (nunca há *lunge* imediato; o piso é `max(2000, 6000)`). Janela de esquiva: 500 ms + tempo de carga (≈ 1078 ms). `enemy.attack_start` ganha `kind: 'swing'` ou `'lunge'` | `combat/assaltanteController.ts`, `ai/rules/assaltanteRules.ts`, `movementDefs.ts` (`LUNGE`) | 🟡 |
 | Previsão de ameaça | Implementa `ThreatAssessor`: simula a própria máquina de estados para dizer em quanto tempo atingiria um alvo (alimenta a dim 6) | `combat/threatPrediction.ts` | ✅ |
-| Variedade | **Um** arquétipo, agora com **dois** estímulos (golpe corpo a corpo e *lunge*): o perfil deixa de ser medido diante de um só padrão, mas o arquétipo segue único e fixo | — | 🔵 sub-projeto D (inimigo) |
+| Variedade | **Um** arquétipo, agora com **quatro** padrões (golpe, combo, *lunge* e pancada): o perfil deixa de ser medido diante de um só padrão, mas o arquétipo segue único e fixo | — | 🔵 sub-projeto D (inimigo) |
+
+### 2.6a Padrões da elite (0.0.5)
+
+Constantes em `combat/eliteDefs.ts` (`ELITE`, `ELITE_TELEGRAPH_MS`, `ELITE_PATTERN_WEIGHTS`). Todas as telegrafias são ≥ 320 ms e a primeira de cada padrão é ≥ 450 ms, acima do tempo de reação humano.
+
+| Padrão | Sequência | Dano | Janelas de esquiva | Fonte | Status |
+|---|---|---|---|---|---|
+| **Golpe** (`swing`) | Telegrafia 450 ms, ativo 150 ms, recuperação 500 ms | 20 | 1 (`src: assaltante.attack`) | `assaltanteController.ts` | 🟡 |
+| **Combo** (`combo`) | Telegrafia 450 + golpe 150, depois telegrafia **320** + golpe 150, punição 500 ms. O 2º golpe é anunciado | 20 + 20 | **2**, uma por golpe (`src: assaltante.combo`); cada uma é creditada por conta própria | idem | 🟡 |
+| ***Lunge*** (`lunge`) | Como na 0.0.4 (telegrafia 500 ms, carga a 450 u/s por até 260 u) | 20 | 1 | idem | 🟡 |
+| **Pancada** (`slam`) | Telegrafia **700 ms**, ativo 150 ms, círculo completo de raio **110** (+ meia largura do corpo), recuperação/punição 600 ms; **só em alcance corpo a corpo** (`slamMaxDistance` 60) | **30** | 1 (`src: assaltante.slam`); atinge também atrás da elite | idem | 🟡 |
+
+*Stagger* da elite: só o ataque **carregado** que conecta (400 ms, `chargedStaggerMs`, uma vez por ação), o *parry* e a bomba. Leve, pesado e flecha **não** a interrompem. A pausa de 700 ms recomeça do **fim** da recuperação (incluída a janela de punição), do *stagger* e do *parry*. Cada padrão emite `enemy.attack_start {kind}`; o combo emite um por golpe, com `hit: 1` e `hit: 2`.
+
+### 2.6b *Hit-stop*, feedback visual e depuração (0.0.5)
+
+| Mecânica | Regra | Fonte | Status |
+|---|---|---|---|
+| ***Hit-stop*** | Congela a **simulação inteira** (jogador, inimigo e o relógio do log) por passos fixos de 16,67 ms: leve **2**, pesado **4**, carregado **5**, golpe sofrido **4**, *parry* **5**, *perfect dodge* **5**. Pedidos ignorados durante o congelamento e nos **6 passos (100 ms)** seguintes (recarga). Pedidos simultâneos no mesmo passo valem o **maior**. O congelamento do golpe que mata **sobrevive ao renascimento** do inimigo; reiniciar o jogador ou a sessão o zera. Flecha e bomba que matam não pedem congelamento | `combat/hitstop.ts`, `encounter.ts`, `telemetry/stack.ts` | 🟡 |
+| Arcos de golpe | Desenhados a partir da hitbox lógica (`attackHitbox`), com fade de 150 ms | `visual/FeedbackView` | 🟡 (não verificado jogando) |
+| Telegraphs | Cone do golpe, corredor do *lunge* (largura e ponta com a **distância de contato real**, 60), círculo da pancada e do combo (os dois golpes); o preenchimento acompanha o progresso (`telegraphFill`). Modelo de visão em `AssaltanteController.telegraph` (testado) | `assaltanteController.ts`, `feedbackDefs.ts` | 🟡 (desenho não verificado jogando) |
+| Impacto | Flash branco de 100 ms; tremor de câmera de 4 px (leve) ou 9 px (pesado) com decaimento de 250 ms; números de dano flutuantes (700 ms). Flash e tremor correm em tempo real, não em tempo de simulação | `feedbackDefs.ts`, `CameraRig` | 🟡 |
+| Estados do jogador | Anel de *perfect dodge*, anel de uso de item, aura de poder, barra de estamina vermelha quando exausto e piscando quando a entrada é negada | `FeedbackView`, HUD | 🟡 |
+| **`F3`** | Mostra e esconde as hitboxes e setores de depuração (**ocultos por padrão**) | `scenes/input/hotkeys.ts`, `DebugDraw` | 🟡 |
+
+O feedback roda isolado do registro: uma falha de desenho não interrompe o agregador, a fita nem o mundo.
 
 ## 2.7 Estrutura de jogo: encontro, sala e run
 
@@ -259,7 +287,7 @@ Introduzida no 5a. É o que permite ao perfil acumular em tempo real e ao sistem
 | Unidade | Regra | Perfil | Fonte | Status |
 |---|---|---|---|---|
 | **Encontro** | Termina quando o Assaltante chega a 0 de vida; outro nasce longe do jogador | `applyEncounterBoundary()` | `game/runDirector.ts` | ✅ |
-| **Sala** | **3** encontros (`ROOM_ENCOUNTER_COUNT`); fecha com `profile.snapshot` de saída | `applyRoomBoundary()` | `runDirector.ts` | ✅ |
+| **Sala** | **2** encontros *(eram 3)* (`ROOM_ENCOUNTER_COUNT`); fecha com `profile.snapshot` de saída | `applyRoomBoundary()` | `runDirector.ts` | ✅ |
 | **Run** | Termina quando o jogador chega a 0 de vida; a sala interrompida **conta**, marcada `partial`; vida e posição voltam ao início e a nova run recebe seed própria | **Não** reseta o perfil | `runDirector.ts` | ✅ |
 | **Run abandonada** | Se a página for fechada no meio de uma run, a run é fechada na próxima abertura, com `cause: 'abandoned'` | idem | `telemetry/abandonedRun.ts` | ✅ |
 | **Nascimento do inimigo** | Uma entre 8 posições candidatas (cantos e meios das bordas, com margem de 100) a pelo menos **300** do jogador, escolhida com PRNG semeado | — | `runDirector.ts` | ✅ |
@@ -284,7 +312,8 @@ Hoje não há mapa, portas, rotas nem progressão entre salas: a "sala" é uma c
 
 | Item | Situação | Observação |
 |---|---|---|
-| **Perfect dodge** | 🟡 | Implementado na 0.0.4 (janela ≤ 80 ms, devolve 30 de estamina; ver 2.5). Falta validar a sensação no playtest |
+| **Perfect dodge** | 🟡 | Implementado na 0.0.4; janela ≤ 110 ms desde a 0.0.5 (devolve 30 de estamina; ver 2.5). Falta validar a sensação no playtest |
+| **Elite adaptativa** | ⛔ | A elite da 0.0.5 não adapta; só o futuro boss usa o perfil |
 | **Boss** | ⬜ | Único consumidor do perfil e do modelo. Ver 4.6 |
 | **Ação utilitária** | 🟡 | Implementada como o uso de item (F); ver 2.3 e 2.7a |
 | **Dimensão de itens** | 🔵 | Aproveitamento de itens como sétima dimensão no lugar da de uso de espaço; decisão do autor em aberto |
@@ -376,7 +405,7 @@ Para o **chefe**, a decisão espera o design do boss. Existem animações para o
 | Personagem | Animações | Status |
 |---|---|---|
 | Herói | idle, walk; por arma: leve, pesado, carregado (segurar + soltar) e disparo; esquiva; guarda (segurar) e parry; dano/stagger; morte | ⬜ |
-| Inimigo comum | idle, walk; **telegrafia (400 ms), golpe (150 ms), recuperação (500 ms)** com poses distintas; dano; morte | ⬜ |
+| Inimigo comum | idle, walk; **telegrafia (450 ms; 320 no 2º golpe do combo, 500 no *lunge*, 700 na pancada), golpe (150 ms), recuperação (500 ms)** com poses distintas; dano; morte | ⬜ |
 | Chefe | a definir depois do design do boss | 🔵 |
 
 ## 3.5 HUD de análise e HUD de jogador ✅
@@ -416,11 +445,11 @@ Princípio: **toda mecânica tem um sinal**, e o critério de suficiência é **
 | `player.defense` bloqueio | Faísca; barra de estamina visível | Som metálico surdo | O jogador percebe a estamina caindo | ⬜ |
 | `player.defense` parry | Flash dourado distinto do bloqueio | "Clang" agudo | Parry e bloqueio são inconfundíveis sem olhar o HUD | ⬜ |
 | `player.hurt` / golpe não mitigado | Flash vermelho, tremor leve, animação de stagger | Impacto grave | O dano é percebido sem olhar a vida | ⬜ |
-| **`enemy.attack_start` (telegrafia de 400 ms)** | Pose de preparação **distinta** de idle e walk, visível desde o 1º quadro; marcador do leque no chão (sobreposição autoral) | Aviso ascendente | **O sinal mais importante para a validade da medição:** um jogador novo percebe o golpe iminente durante a telegrafia | ⬜ |
+| **`enemy.attack_start` (telegrafia de 450 ms; varia por padrão)** | Pose de preparação **distinta** de idle e walk, visível desde o 1º quadro; marcador do leque no chão (sobreposição autoral) | Aviso ascendente | **O sinal mais importante para a validade da medição:** um jogador novo percebe o golpe iminente durante a telegrafia | ⬜ |
 | Golpe do inimigo (150 ms) | Slash da animação | Whoosh forte | O instante do golpe é inequívoco | ⬜ |
 | `enemy.hurt` / `enemy.death` | Flash branco; animação ou dissolução de morte | Acerto; som de morte | O acerto é percebido sem olhar a vida do inimigo | ⬜ |
 | **Janela de punição** (recuperação do inimigo, 500/750 ms) | Pose de recuperação legível; **sem destaque extra por padrão** | — | 🔵 Decisão metodológica: um destaque funciona como andaime e altera o sinal de omissão; se adotado, deve ser constante em todo o estudo | 🔵 |
-| **Perfect dodge** | A definir | A definir | Mecânica implementada na 0.0.4 (janela ≤ 80 ms, devolve 30 de estamina; ver 2.5); falta o sinal audiovisual | 🟡 mecânica; ⬜ sinal |
+| **Perfect dodge** | A definir | A definir | Mecânica implementada na 0.0.4 (janela ≤ 110 ms desde a 0.0.5, devolve 30 de estamina; ver 2.5); o anel visual existe desde a 0.0.5 (não verificado jogando); falta o som | 🟡 mecânica e anel; ⬜ som |
 | Troca de arma (1/2/3) | A arma muda na mão | Som de equipar | A arma ativa é identificável pela silhueta | ⬜ |
 | `run.start`, `room.enter`, saída de sala | Transição curta e texto | Estinger | Marca o ritmo sem tapar o combate | ⬜ |
 | `player.death` / `run.end` | Animação de morte e tela de fim de run | Estinger | O fim da run é inequívoco | ⬜ |
@@ -474,16 +503,18 @@ combate ──▶ eventos ──▶ oportunidades ──▶ perfil descritivo �
 
 | Camada | Peso | Concluído |
 |---|---|---|
-| Base jogável | 5 | 70% |
+| Base jogável | 5 | 75% |
 | Oportunidades | 5 | 90% |
 | Perfil descritivo | 20 | 85% |
 | Dados e persistência | 15 | 85% |
 | Preditor | 25 | 5% |
 | Validação empírica | 20 | 10% |
 | Boss (validação) | 10 | 5% |
-| **Total** | **100** | **≈ 41,5%** |
+| **Total** | **100** | **≈ 41,75%** |
 
 A fundação (as quatro primeiras linhas) está em ≈ 84%; o núcleo da tese (preditor, validação e boss) em ≈ 7%.
+
+**Revisão de 29/10/2026 (versão 0.0.5).** Só a **Base jogável** subiu de novo (70% → 75%) e o total foi de ≈ 41,5% a ≈ 41,75%, também de propósito: o combate v2 (elite com quatro padrões, janelas mais folgadas, *hit-stop*, feedback visual, métrica de ataques do inimigo) amplia o jogo e o log, mas **nada foi jogado pelo autor**: os playtests da 0.0.4 e da 0.0.5 seguem pendentes, os efeitos visuais só passaram por testes de unidade e pela carga da página, e os agentes sintéticos da V0 continuam cegos para o *lunge* e não distinguem pancada de combo (ver 4.8). A duração de 40 a 70 s por encontro é uma meta, não uma medição. Perfil, preditor, validação e boss ficam como estavam.
 
 **Revisão de 21/10/2026 (versão 0.0.4).** Só a **Base jogável** subiu (65% → 70%), e o total quase não se move (≈ 41,25% → ≈ 41,5%), de propósito: estamina, esquiva com timing, arco com projétil, *lunge*, itens e as métricas novas ampliam o que o jogo oferece e o que o log registra, mas **nenhuma está validada por playtest** e a camada de dados ganhou campos sem ganhar uma coleta oficial. Lacunas que seguram a nota: um só arquétipo de inimigo (agora com dois estímulos), sem mapa, portas ou rotas; recuo ainda inferido; apresentação (animações, som) por fazer; a regra das 8 ações vale só na análise, não no perfil ao vivo. Perfil, preditor, validação e boss ficam como estavam. Os percentuais não medem tempo restante: preditor e validação são as partes mais difíceis. Não há prazo registrado em lugar nenhum.
 
@@ -504,7 +535,7 @@ Cada janela aberta termina com **exatamente um** desfecho, resolvido por preced�
 
 | Tipo | Abre | Dura | Fecha como `taken` quando |
 |---|---|---|---|
-| `dodge` | No início do ataque do Assaltante | **550 ms** (telegrafia 400 + golpe 150) | O jogador está invulnerável quando o golpe conecta |
+| `dodge` | No início do ataque do Assaltante | **600 ms** (golpe comum: telegrafia 450 + golpe 150; 0.0.5) | O jogador está invulnerável quando o golpe conecta |
 | `punish` | No início da recuperação do Assaltante | **500 ms** (750 após parry) | O golpe do jogador acerta o Assaltante |
 
 **Motivos de invalidação:** seis previstos (`other_source_hitstun`, `out_of_range`, `player_dead`, `tool_locked`, `source_interrupted`, `overlapping_priority`); **três são emitidos hoje**: `out_of_range` (a punição fecha sem que o jogador tenha estado ao alcance), `source_interrupted` (o Assaltante morre com janela aberta) e `player_dead` (a run termina com janela aberta).
@@ -681,6 +712,8 @@ Princípio (autor, 16/10): toda métrica que precisa ser **combinada com outra p
 | S7 | *Guard breaks* | Contagem de `player.guard_break` | B13 | 🟡 |
 | S8 | *Perfect dodges* | `perfect ÷ esquivas` (`player.defense` com `label: 'dodge'`); mostra também a contagem bruta | B6, B13 | 🟡 |
 
+**Métrica de ataques do inimigo (0.0.5).** Linha `m16` do painel ("ataques do inimigo por tipo"), nas mesmas janelas. `WindowMetrics.enemyAttacks` = `{count, byKind}`: conta **todo** `enemy.attack_start` (kind ausente em logs antigos conta como `swing`); `byKind` é uma distribuição com entropia normalizada com *n* = 4 (golpe, avanço, combo, queda). O **2º golpe do combo conta como um golpe** (é um `attack_start` com `hit: 2`). Um `kind` string desconhecido **não é rejeitado**: é contado na própria chave e o painel acrescenta `outros:N` só quando N > 0. A fita de eventos mostra "ataque <kind> (golpe N)". Status 🟡.
+
 **Métricas de itens (0.0.4).** Linhas `i1` a `i8` do painel.
 
 | ID | Métrica | Definição | Brutos | Status |
@@ -714,7 +747,7 @@ O autor pediu que o trabalho do novo ambiente também deixe **mais completo o qu
 | `ArenaScene` (575 linhas) e `ai/` sem testes | Regressão não detectada na apresentação | Modularizar a cena e cobrir com testes | ✅ E1 (cena modularizada em controlador de sessão, entrada/atalhos, câmera, vista do mundo, debug e HUD; regras do Assaltante testadas) |
 | Recuo (`retreat`) é **inferido** | Dim 4 depende de uma inferência. Na 0.0.4 continua assim: um dash lateral que sai do raio de contato do *lunge* antes do corpo chegar é `retreat`, não `dodge` | Declarar como limitação | texto |
 | Um único arquétipo de inimigo | O perfil é medido diante de um só arquétipo | Sub-projeto D. O *lunge* (0.0.4) acrescenta um **segundo estímulo** ao mesmo arquétipo, mas a IA segue fixa e única | 🔵 |
-| Agentes sintéticos da V0 não conhecem o *lunge*, a corrida nem os itens | Os resultados da V0 de 21/10 (versão 0.0.3) não cobrem as mecânicas novas | Spec da V0.1 (agentes com *lunge*, corrida e itens, depois re-execução). Os resultados de 21/10 ficam como piloto arquivado | 🔵 |
+| Agentes sintéticos da V0 não conhecem o *lunge*, a corrida, os itens nem os padrões da elite (a `Observation` não traz `attackKind`: não distinguem pancada de combo) | Os resultados da V0 de 21/10 (versão 0.0.3) não cobrem as mecânicas novas | Spec da V0.1 (agentes com *lunge*, corrida, itens e padrões da elite, depois re-execução). Na 0.0.5 os agentes foram adaptados só para continuarem jogáveis: o 2º golpe do combo é lido por uma heurística provisória (inimigo ainda em `attacking` além de um ciclo de golpe), que também lê uma pancada como 2º golpe. Os resultados de 21/10 ficam como piloto arquivado | 🔵 |
 | `public/assets/README.md` desatualizado; `public/assets/_unused/` (≈ 3 MB de pacotes de terceiros, sem registro de licença) | Documentação e repositório sujos | Atualizar o README; decidir manter ou remover; criar `LICENSES.md` | ✅ E1 (README atualizado, `_unused/` removido, `LICENSES.md` criado; tiles `grass.png` e `water.png` com licença a conferir, removidos depois no E2) |
 | Documento de arquitetura v1.1 fora do repositório | As specs o citam, mas ele não está versionado | Copiar para o repositório ou registrar o que ele definia | 🔵 |
 
@@ -767,7 +800,7 @@ Por que duas camadas: algumas entradas do perfil são calculadas com estado ao v
 
 | Evento | Carga |
 |---|---|
-| `session.start` | `wall_clock_iso`, `game_version`, `schema_v`, `persistent` |
+| `session.start` | `wall_clock_iso`, `game_version`, `config_version` (`0.0.5-c1`), `schema_v`, `windows_ms` {`iframes`, `perfect`, `parry`, `buffer`, `telegraph_swing`, `telegraph_combo`, `telegraph_lunge`, `telegraph_slam`}, `persistent`. Logs anteriores à 0.0.5 não têm `config_version` nem `windows_ms`; os leitores os toleram |
 | `run.start` | `run_idx`, `seed` |
 | `run.end` | `run_idx`, `cause` (`death` ou `abandoned`), `duration_ms`, `rooms_cleared`, `encounters_cleared` |
 | `room.enter`, `encounter.start`, `encounter.end` | `room_idx` ou `enc_idx` |
@@ -789,7 +822,7 @@ Por que duas camadas: algumas entradas do perfil são calculadas com estado ao v
 | `player.defense` | `label` (`dodge`, `block`, `parry`, `retreat`); `perfect?` e `refund?` (só no *perfect dodge*: `true` e 30) |
 | `player.stamina_denied` | `action` (id da ação de ataque, `block` ou `dodge`): entrada recusada por falta de estamina |
 | `player.guard_break` | — (bloqueio com menos de 15 de estamina) |
-| `enemy.attack_start` | `kind` (`swing` ou `lunge`) |
+| `enemy.attack_start` | `kind` (`swing`, `lunge`, `combo` ou `slam`; ausente em logs antigos = `swing`); `hit?` (`1` ou `2`, só no combo). Um `kind` string desconhecido é aceito e contado nas métricas |
 | `projectile.hit` | `id`, `dmg` |
 | `projectile.expire` | `id` |
 | `player.hurt` | `dmg`, `hp_after` |
@@ -799,7 +832,7 @@ Por que duas camadas: algumas entradas do perfil são calculadas com estado ao v
 
 O campo `type` das cargas de oportunidade (`dodge` ou `punish`) é gravado como **`opp_type`**, para não colidir com o `type` do envelope.
 
-**Sobre o tipo de ataque:** o `kind` (`swing` ou `lunge`) vive em `enemy.attack_start`, **não** em `opp.open`; quem precisar saber de que ataque é uma janela de esquiva liga os dois pela ordem causal (5.5). **Os eventos `item.*` não passam pelo sistema de oportunidades** e não levam `ctx` (são gravados como eventos simples).
+**Sobre o tipo de ataque:** o `kind` (`swing`, `lunge`, `combo` ou `slam`) vive em `enemy.attack_start`, **não** em `opp.open`; quem precisar saber de que ataque é uma janela de esquiva liga os dois pela ordem causal (5.5). O `src` de `opp.open` distingue o padrão (`assaltante.attack`, `.combo`, `.slam`, `.lunge`); o combo abre **duas** janelas de esquiva, uma por golpe. O *hit-stop* congela a simulação inteira, **inclusive o relógio do log** (`t_ms`): nenhum evento ocorre durante o congelamento. **Os eventos `item.*` não passam pelo sistema de oportunidades** e não levam `ctx` (são gravados como eventos simples).
 
 ### Contexto (`ctx`)
 
@@ -831,7 +864,7 @@ O log segue a **ordem causal**: o gatilho vem antes dos efeitos. O gravador assi
 
 ## 5.7 Versionamento e comparabilidade de dados
 
-`GAME_VERSION` (em `telemetry/schema.ts`, hoje `0.0.4`) entra em todo `session.start`. **Regra:** mudou jogabilidade, balanceamento ou geometria → nova versão, e logs de versões diferentes não se misturam para as dimensões afetadas.
+`GAME_VERSION` (em `telemetry/schema.ts`, hoje `0.0.5`; a `config_version` das janelas é `0.0.5-c1`) entra em todo `session.start`. **Regra:** mudou jogabilidade, balanceamento ou geometria → nova versão, e logs de versões diferentes não se misturam para as dimensões afetadas.
 
 | Marco | Efeito sobre os dados |
 |---|---|
@@ -840,6 +873,7 @@ O log segue a **ordem causal**: o gatilho vem antes dos efeitos. O gravador assi
 | 01/10/2026 (combate B) | `0.0.2+combatB`: velocidades, esquiva, stagger, recuperação cancelável e janela da dim 6. **Dims 4 a 6 e a dim 5 não são comparáveis com a versão anterior** |
 | 17/10/2026 (E2, vista) e Revisão 2 (19/10/2026) | `0.0.3+viewB`. Em 17/10 a vista era retangular (sem giro de 45°, 64 × 48), descartada em 19/10: a Revisão 2 voltou ao losango 2:1 com WASD girado como na `0.0.2`. O sufixo `viewB` ficou histórico (a vista retangular nunca produziu dados oficiais). O que separa a `0.0.3` da `0.0.2` é a **mira a partir do centro do hurtbox**, que pode alterar o comportamento do jogador, então os logs não se misturam. A lógica de combate é a mesma. **Dados coletados até 16/10/2026 usam `0.0.2+combatB`** |
 | 21/10/2026 (mecânicas 0.0.4) | `0.0.4`: estamina no lugar da postura (`p_poise` → `p_stam`), caminhada 175 / corrida 220, perseguição 150, esquiva com crédito no golpe e *perfect dodge*, arco com projétil (alcance 260), *lunge* do Assaltante, itens e ação `utility`. **Os dados e os resultados da V0 de 21/10/2026 (versão `0.0.3`) não são comparáveis com a `0.0.4`** em nenhuma dimensão de combate; ficam como piloto arquivado. Leitores de log toleram o campo `stam`/`spent` ausente em logs antigos |
+| 29/10/2026 (combate v2) | `0.0.5`, `config_version` `0.0.5-c1`: estamina 150 (regen 50/s), esquiva 220 / 200 / 160 ms, *perfect* ≤ 110 ms, buffer 170 ms, movimento a 40% na parte travada, dash cancelando os últimos 60 ms da fase ativa, jogador invulnerável nunca atingido, elite (vida 160, quatro padrões, pausa de 700 ms, primeiro ataque aos 2 s), 2 encontros por sala, *hit-stop* na simulação. **Os dados da `0.0.3` e da `0.0.4` (inclusive o piloto da V0) não são comparáveis com a `0.0.5`** em nenhuma dimensão de combate. Mudar qualquer valor de janela ou da elite depois de haver dados ⇒ nova `config_version`. O *hit-stop* congela o relógio do log |
 | Reconstrução do ambiente | Arte, som e HUD **não** exigem nova versão se a lógica ficar igual. Mudar hurtbox, alcances ou velocidades exige |
 
 ## 5.8 Limitações conhecidas
@@ -965,8 +999,8 @@ isPatientAttack(exposição, ameaças, alvo) = ∀ a ∈ ameaças: a.msUntilThre
 ### Buffer de entrada e cancelamento
 
 ```
-tryAction / tryDodge: se pode executar → executa; senão, se for armazenável e não for carregado → push no buffer (1 slot, 120 ms)
-a cada passo: avança o estado → depois, se há entrada pendente executável, executa; se expirou (> 120 ms), descarta
+tryAction / tryDodge: se pode executar → executa; senão, se for armazenável e não for carregado → push no buffer (1 slot, 170 ms)
+a cada passo: avança o estado → depois, se há entrada pendente executável, executa; se expirou (> 170 ms), descarta; o buffer é limpo ao levar golpe ou entrar em stagger
 recuperação + entrada de movimento → player.cancel{move}, volta a idle e move no mesmo passo
 ```
 
@@ -978,7 +1012,7 @@ Ver 4.3. Implementadas literalmente em `entropyAccumulator.ts` e `profileAccumul
 
 ```
 alcance_carregado = interpolação linear entre alcance (minHold) e alcanceMáx (maxHold)
-estamina: 100 máx; −15 por golpe bloqueado (com menos de 15: guard break → stagger de 250 ms); regenera 35/s após 600 ms (1200 ms se zerou) em idle e sem correr
+estamina: 150 máx; −15 por golpe bloqueado (com menos de 15: guard break → stagger de 250 ms); regenera 50/s após 600 ms (1200 ms se zerou) em idle e sem correr
 parry ⇔ guarda levantada há < 150 ms quando o golpe conecta → o inimigo pula o resto do golpe e abre punição de 750 ms (vs. 500)
 ```
 
@@ -1144,10 +1178,11 @@ O desenvolvimento usou o **Claude Code** (assistente de programação da Anthrop
 - Dados anteriores ao leque angular (07/09) e à versão `0.0.2+combatB` não são comparáveis com os atuais nas dimensões afetadas. A versão `0.0.3+viewB` (17/10/2026) também separa os dados: a mira passou a partir do centro do hurtbox (a vista retangular daquele dia foi descartada em 19/10, sem dados oficiais).
 - Viés de discretização da previsão de ameaça (≈ 16 ms, conservador).
 - A regra de 8 ações mínimas por segmento de `H` vale só na análise offline (eventos brutos da janela); o perfil ao vivo do jogo não a aplica.
-- Os resultados da V0 de 21/10/2026 (versão `0.0.3`) não cobrem as mecânicas da `0.0.4` (estamina, *lunge*, itens): são piloto arquivado.
+- Os resultados da V0 de 21/10/2026 (versão `0.0.3`) não cobrem as mecânicas da `0.0.4` (estamina, *lunge*, itens) nem da `0.0.5` (elite, janelas novas): são piloto arquivado.
+- **Limitações conhecidas da 0.0.5:** a previsão de ameaça (`threatPrediction`), no ramo de perseguição, ignora o atraso do primeiro ataque, a pausa e a pancada (o perfil ao vivo da paciência fica levemente errado durante a perseguição); após um *parry* a recuperação dura 500 ms e a janela de punição 750 ms (herdado); os efeitos visuais do feedback não foram verificados jogando.
 - `retreat` é **inferido**, não observado.
 - As sete dimensões dividem o mesmo orçamento de oportunidades por sala.
-- **Um único arquétipo de inimigo:** com dois estímulos (golpe e *lunge*) desde a 0.0.4, mas ainda um só arquétipo de IA fixa.
+- **Um único arquétipo de inimigo:** com quatro padrões (golpe, combo, *lunge* e pancada) desde a 0.0.5, mas ainda um só arquétipo de IA fixa e não adaptativa.
 - Os parâmetros de balanceamento são valores iniciais e ainda não passaram por playtest registrado.
 - **Poucos jogadores:** não há registro, nos documentos nem nas conversas, de dados de outros jogadores além do autor, e nenhum log foi analisado ainda.
 - Duas abas simultâneas, ausência de compactação e as demais limitações de 5.8.
@@ -1211,7 +1246,7 @@ Não mudam sem discussão explícita; mudar vira emenda registrada aqui.
 | — | Janela da dim 6 | **Revisada em 30/09/2026:** só a parte não cancelável da ação (`lockedMs`). *Antes (12 a 30/09):* o comprometimento total | 30/09/2026 |
 | — | Lógica separada da apresentação | `combat/`, `opportunity/`, `profile/`, `ai/`, `game/` e `telemetry/` não importam Phaser nem `visual/` | 08/2026 |
 | — | Armazenamento do log | IndexedDB atrás de `EventStore` | 30/09/2026 |
-| — | Estrutura de jogo | Encontro (inimigo morre), sala (3 encontros), run (jogador morre) | 30/09/2026 |
+| — | Estrutura de jogo | Encontro (inimigo morre), sala (3 encontros; **2** desde a 0.0.5), run (jogador morre) | 30/09/2026 |
 | — | Combate | Estilo ágil (referência *Hades*): preso só na preparação e no golpe; recuperação cancelável | 30/09/2026 |
 | — | Reconstrução do ambiente | Reconstruir **apresentação e casca de gameplay**; manter o núcleo lógico | 16/10/2026 |
 | — | Arena | Tiles feitos no Blender, **compostos proceduralmente**, expansível | 16/10/2026 |
@@ -1240,6 +1275,7 @@ Não mudam sem discussão explícita; mudar vira emenda registrada aqui.
 | 30/09 | **A: escala e câmera** | Zoom 2×, personagem de 40 px, câmera de interface (`1f0aa4f`) |
 | 01/10 | **B: combate fluido** | Recuperação cancelável, buffer, esquiva responsiva, nova janela da dim 6 (`676c9fc..5a998c3`, branch `combat-b`) |
 | 16/10 | **D-0 e este documento** | Foco no sistema de profilamento; especificação do novo ambiente |
+| 29/10 | **Combate v2 (`0.0.5`)** | Elite com quatro padrões, estamina 150, janelas novas, *hit-stop*, feedback visual e `F3`, métrica de ataques do inimigo, `config_version` (branch `combate-v2`; playtest pendente) |
 
 Estado do repositório: 156 commits; 15 specs e 15 planos; `master` em `1f0aa4f`, **sem o combate B**; `combat-b` com o B e **ainda local**, com duas alterações sem commit.
 
@@ -1360,8 +1396,8 @@ O texto foi escrito entre 12 e 28/09 sobre o enquadramento 2 (aprendizagem). Div
 | Título, resumo e §1 | Pergunta: **aprendizado transferível**; chefe adaptativo como mecanismo central | **D-0:** sistema de profilamento é o foco; boss preditivo valida |
 | §2.4 e §2.5 | Núcleo pedagógico (ponto ótimo de desafio, interferência contextual) | Passam a discussão ou consequência |
 | §3.1, progressão | Perfil **reiniciado entre sessões**; sessão = calibração → treino → transferência; sala de transferência | **D4 revisada:** perfil persiste entre sessões; sem sala de transferência (8.4) |
-| §3.1, regras | Troca de arma de 250 ms; invulnerabilidade da esquiva de 200 ms | **150 ms** e **150 ms** (esquiva: 180 ms, recarga 200, deslocamento 120) |
-| §3.1, janela de esquiva | "Aberta durante os 400 ms de anúncio" | **550 ms** (telegrafia 400 + golpe 150) |
+| §3.1, regras | Troca de arma de 250 ms; invulnerabilidade da esquiva de 200 ms | **150 ms** e **200 ms** (esquiva na 0.0.5: 220 ms, i-frames 200, recarga 160, deslocamento 120) |
+| §3.1, janela de esquiva | "Aberta durante os 400 ms de anúncio" | **600 ms** (golpe comum: telegrafia 450 + golpe 150; 0.0.5) |
 | §3.3, fase 6 | Exposição = comprometimento completo da ação | `lockedMs`: só preparação + golpe |
 | §3.3, fases | Seis fases até a janela segura | Faltam o 5a (runs e telemetria), A (escala) e B (combate fluido) |
 | §3.4 | Estudos 1 e 2 (ICC; adaptativo contra controle com sala de transferência) | Redesenho em 8.4 (V0 a V3) |
@@ -1389,9 +1425,9 @@ Regra de redação do próprio modelo da tese: usar "indicam", "sugerem" e "cont
 | **Fronteira** | Momento em que o perfil aplica o decaimento (fim de encontro, saída de sala) |
 | **Instantâneo (`profile.snapshot`)** | Foto do perfil na saída de uma sala |
 | **`lockedMs`** | Parte não cancelável de uma ação (preparação + golpe) |
-| **Telegrafia** | Aviso do ataque do inimigo (400 ms) |
+| **Telegrafia** | Aviso do ataque do inimigo (450 ms no golpe; 320, 500 e 700 ms nos outros padrões) |
 | **Parry / bloqueio / estamina** | Defesa por timing / defesa que gasta estamina / a barra única que paga ataques, esquiva, corrida e bloqueio (substituiu a postura na 0.0.4) |
-| **Encontro / sala / run** | Combate contra um inimigo / 3 encontros / do início até a morte do jogador |
+| **Encontro / sala / run** | Combate contra um inimigo / 2 encontros / do início até a morte do jogador |
 | **Observação (`obs.*`)** | Registro de uma alteração do perfil; fonte da reconstrução |
 | **Reconstrução / replay** | Recalcular o perfil reaplicando as observações do log |
 | **Ablação** | Comparar o sistema com e sem um componente |

@@ -138,3 +138,27 @@ Módulos novos (`combat/hitstop.ts`, `combat/elite*.ts` ou equivalentes), a form
 2. ~~Número de encontros por sala e duração-alvo~~ **FEITO em 2026-10-29**: 2 encontros por sala, 3 salas e uma sala do chefe, luta de 40 a 70 s.
 3. ~~Valores de §4.2 e padrões/danos da elite~~ **APROVADOS em 2026-10-29** (i-frames 200 ms explicados e aceitos).
 4. Regeneração da estamina de 150 (proposta 50/s): aceita junto com o resto; ajustar em playtest.
+
+## 10. Divergências do plano e rulings
+
+Registradas ao fim da implementação (branch `combate-v2`, 2026-10-29). Onde esta seção contradiz §4, vale esta seção.
+
+(a) **Movimento na recuperação (§4.2).** A linha "movimento na recuperação" partia de uma premissa errada: o movimento e o dash já cancelavam a recuperação desde o combate B. Virou **movimento a 40% da caminhada na parte travada** (preparação + golpe) do ataque leve, do pesado e do arco, mais o **cancelamento pelo dash nos últimos 60 ms da fase ativa**. O carregado segue imóvel.
+
+(b) **Pancada só em alcance corpo a corpo (§4.3).** Ela é elegível apenas a até 60 u (`slamMaxDistance` 60, não 140): com 140 a elite dava a pancada na aproximação, errava e nunca chegava ao corpo a corpo. Custo, se errado: a pancada fica menos usável a distâncias médias.
+
+(c) **Combo com duas janelas de esquiva.** Uma por golpe (`src: assaltante.combo`), cada uma creditada por conta própria, e o evento `enemy.attack_start` é emitido nos dois golpes com `hit: 1` e `hit: 2`. No painel o 2º golpe conta como um golpe.
+
+(d) **Jogador invulnerável nunca é atingido.** Defeito prévio do *lunge* achado na revisão: a aterrissagem era avaliada antes do passo e a sobreposição depois, o que fazia o resultado da esquiva variar de forma não monotônica com o tick do aperto. A sobreposição em invulnerabilidade agora credita `dodge`.
+
+(e) **Hit-stop.** Congela a simulação inteira, **inclusive o relógio do log**. O congelamento do golpe que mata **sobrevive ao renascimento** do inimigo (`respawnEnemy` não o zera; `resetPlayer` e o início de sessão zeram); pedidos simultâneos valem o **maior**. Custo, se errado: um congelamento de até 2 passos recai sobre o inimigo recém-nascido.
+
+(f) **`kind` desconhecido.** Um `kind` string desconhecido em `enemy.attack_start` é **contado** (na própria chave; `outros:N` no painel quando N > 0) em vez de rejeitado, por compatibilidade futura. Valores não string e `hit` fora de 1 ou 2 continuam malformados.
+
+(g) **Telegraph e corredor do *lunge*.** O telegraph tem um modelo de visão testado (`AssaltanteController.telegraph`), e o corredor do *lunge* é desenhado com a **distância de contato real** (60), não com um valor visual.
+
+(h) **Agentes da V0.** Seguem **cegos ao *lunge*** e não distinguem pancada de combo (a `Observation` não traz `attackKind`). A heurística do 2º golpe (inimigo ainda em `attacking` além de um ciclo de golpe) é **provisória**, para a V0.1: tem margem de um tick e lê uma pancada como 2º golpe (quem esquiva leva a pancada). Os agentes só continuam jogáveis; a V0 não foi reexecutada.
+
+(i) **Limitações conhecidas.** (1) O ramo de perseguição de `threatPrediction` ignora o atraso do primeiro ataque, a pausa e a pancada, então o perfil ao vivo da paciência fica levemente errado durante a perseguição. (2) Após um *parry* a recuperação dura 500 ms e a janela de punição 750 ms (herdado). (3) Os efeitos visuais não foram verificados jogando (só testes de unidade e carga da página). (4) Os efeitos de tela usam relógio real, então o *hit-stop* não os congela.
+
+(j) **A elite não adapta.** Só o futuro chefe usa o perfil; a seleção por peso é fixa.
