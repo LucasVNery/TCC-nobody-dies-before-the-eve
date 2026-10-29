@@ -81,6 +81,13 @@ export function createTelemetryStack(opts: TelemetryStackOptions): TelemetryStac
     encounter,
     director,
     step(stepMs: number) {
+      // Hit-stop: a frozen step advances nothing (log time, opportunities,
+      // stamina, input-buffer clock, enemy, player).
+      if (encounter.hitStop.active) {
+        encounter.hitStop.consume();
+        return;
+      }
+      encounter.hitStop.tickFree();
       recorder.beginTick(stepMs);
       director.step(stepMs);
     },

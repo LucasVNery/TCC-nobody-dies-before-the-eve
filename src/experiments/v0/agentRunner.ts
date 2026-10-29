@@ -187,10 +187,13 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
     let runsThisSession = 0;
     let runStartMs = recorder.nowMs;
     while (runsThisSession < cfg.runsPerSession && completedRuns + truncatedRuns < cfg.runsPerAgent) {
-      const t = recorder.nowMs;
-      const now = observe(encounter, t);
-      buffer.push(now);
-      applyIntent(encounter.player, policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t }));
+      // A hit-stop step does not advance the simulation (nor recorder.nowMs): the agent waits it out.
+      if (!encounter.hitStop.active) {
+        const t = recorder.nowMs;
+        const now = observe(encounter, t);
+        buffer.push(now);
+        applyIntent(encounter.player, policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t }));
+      }
       stack.step(cfg.stepMs);
       if (runEnded) {
         runEnded = false;

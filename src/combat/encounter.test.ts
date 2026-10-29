@@ -4,7 +4,7 @@ import { Encounter as BaseEncounter } from './encounter';
 import { primeElite } from './testing/eliteTestKit';
 import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
-import { resolveAction, totalCommitmentMs } from './actionRegistry';
+import { resolveAction, totalCommitmentMs, ACTION_REGISTRY } from './actionRegistry';
 import type { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE, ASSALTANTE_HIT_DAMAGE } from './movementDefs';
@@ -1395,4 +1395,102 @@ describe('Encounter map items', () => {
     }
     return { encounter, defenses };
   }
+});
+
+describe('hit-stop requests', () => {
+  function fresh() {
+    return new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 500, y: 0, width: 20, height: 20 },
+    );
+  }
+  function frozenSteps(encounter: Encounter): number {
+    let n = 0;
+    while (encounter.hitStop.active) {
+      encounter.hitStop.consume();
+      n++;
+    }
+    return n;
+  }
+
+  it.each([
+    ['sword_shield.light', 2],
+    ['heavy_weapon.heavy', 4],
+  ])('a connected %s asks for %i frozen steps', (actionId, steps) => {
+    const encounter = fresh();
+    encounter.bus.emit('enemy.hurt', { dmg: 5, hp_after: 50, actionId });
+    expect(frozenSteps(encounter)).toBe(steps);
+  });
+
+  it('a connected charged hit asks for 5 frozen steps', () => {
+    const encounter = fresh();
+    const charged = [...ACTION_REGISTRY.values()].find((a) => a.actionType === 'charged')!;
+    encounter.bus.emit('enemy.hurt', { dmg: 5, hp_after: 50, actionId: charged.id });
+    expect(frozenSteps(encounter)).toBe(5);
+  });
+
+  it('a real light hit from the engine freezes 2 steps', () => {
+    const encounter = new Encounter(
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 30, y: 0, width: 20, height: 20 },
+    );
+    let hit = false;
+    encounter.bus.on('enemy.hurt', () => { hit = true; });
+    encounter.player.tryAction('sword_shield.light');
+    for (let i = 0; i < 20 && !hit; i++) encounter.step(STEP_MS);
+    expect(hit).toBe(true);
+    expect(frozenSteps(encounter)).toBe(2);
+  });
+
+  it('player.hurt asks for 4', () => {
+    const encounter = fresh();
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    expect(frozenSteps(encounter)).toBe(4);
+  });
+
+  it('a parry asks for 5', () => {
+    const encounter = fresh();
+    encounter.bus.emit('player.defense', { label: 'parry' });
+    expect(frozenSteps(encounter)).toBe(5);
+  });
+
+  it('a perfect dodge asks for 5; a plain dodge, block and retreat ask for 0', () => {
+    const encounter = fresh();
+    encounter.bus.emit('player.defense', { label: 'dodge', perfect: true, refund: 10 });
+    expect(frozenSteps(encounter)).toBe(5);
+    for (const label of ['dodge', 'block', 'retreat'] as const) {
+      const e = fresh();
+      e.bus.emit('player.defense', { label });
+      expect(frozenSteps(e)).toBe(0);
+    }
+  });
+
+  it('a bow shot or a bomb never freezes', () => {
+    const encounter = fresh();
+    encounter.bus.emit('enemy.hurt', { dmg: 10, hp_after: 90, actionId: 'bow.shot' });
+    encounter.bus.emit('enemy.hurt', { dmg: 30, hp_after: 60, actionId: 'item.bomb' });
+    expect(encounter.hitStop.active).toBe(false);
+  });
+
+  it('overlapping impacts do not add up', () => {
+    const encounter = fresh();
+    encounter.bus.emit('enemy.hurt', { dmg: 5, hp_after: 50, actionId: 'heavy_weapon.heavy' });
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    expect(frozenSteps(encounter)).toBe(4);
+  });
+
+  it('resetPlayer and respawnEnemy end a freeze and its cooldown', () => {
+    const encounter = fresh();
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    encounter.resetPlayer({ x: 0, y: 0 });
+    expect(encounter.hitStop.active).toBe(false);
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    frozenSteps(encounter); // cooldown now running
+    encounter.respawnEnemy({ x: 600, y: 0 }, 'source_interrupted');
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    expect(frozenSteps(encounter)).toBe(4);
+    encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
+    encounter.respawnEnemy({ x: 600, y: 0 }, 'source_interrupted');
+    expect(encounter.hitStop.active).toBe(false);
+  });
 });

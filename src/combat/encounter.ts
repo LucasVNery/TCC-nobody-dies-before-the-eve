@@ -13,7 +13,8 @@ import { ELITE } from './eliteDefs';
 import { ATTACK_REACH, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
-import { resolveAction, lockedMs } from './actionRegistry';
+import { resolveAction, lockedMs, ACTION_REGISTRY } from './actionRegistry';
+import { HitStop, HITSTOP_STEPS } from './hitstop';
 import { isPatientAttack } from './patience';
 import { ProjectileSystem } from './projectile';
 import { ItemSystem, ITEM } from '../game/items';
@@ -24,6 +25,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly player: PlayerController;
   readonly assaltante: AssaltanteController;
   readonly projectiles = new ProjectileSystem();
+  /** Simulation freeze on impacts; consumed by TelemetryStack.step. */
+  readonly hitStop = new HitStop();
   readonly items: ItemSystem;
   /**
    * Write side of the profile. Defaults to a fresh `ProfileAccumulator` so
@@ -73,6 +76,17 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       this.profile.record('patience', isPatient ? 1 : 0, 1);
     });
 
+    this.bus.on('enemy.hurt', (e) => {
+      // item.* and bow.shot ids are not in the registry: they never freeze.
+      const type = ACTION_REGISTRY.get(e.actionId)?.actionType;
+      if (type === 'light' || type === 'heavy' || type === 'charged') this.hitStop.request(HITSTOP_STEPS[type]);
+    });
+    this.bus.on('player.hurt', () => this.hitStop.request(HITSTOP_STEPS.hurt));
+    this.bus.on('player.defense', (e) => {
+      if (e.label === 'parry') this.hitStop.request(HITSTOP_STEPS.parry);
+      else if (e.perfect) this.hitStop.request(HITSTOP_STEPS.perfect);
+    });
+
     this.bus.on('opp.open', (e) => {
       if (e.type === 'dodge') {
         this.currentDodgeOppId = e.opp_id;
@@ -105,6 +119,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Fresh Assaltante at `position`; see AssaltanteController.respawn for `reason`. */
   respawnEnemy(position: Vec2, reason: InvalidReason): void {
     this.assaltante.respawn(position, reason);
+    this.hitStop.reset();
     this.projectiles.clear();
     this.defenseRecordedThisAttack = false;
     this.firstLandingProcessed = false;
@@ -113,6 +128,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Start-of-run player. */
   resetPlayer(position: Vec2): void {
     this.player.reset(position);
+    this.hitStop.reset();
     this.projectiles.clear();
     this.hitAppliedThisAction = false;
   }

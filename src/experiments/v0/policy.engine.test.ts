@@ -32,7 +32,14 @@ function play(id: StyleId, seed: number, ms: number) {
   let earlyRelease = 0;
   let bothOnOneTick = 0;
   for (let i = 0; i < Math.round(ms / STEP); i++) {
-    const t = i * STEP;
+    // The policy runs on simulation time: hit-stop freezes it (recorder.nowMs) while the loop keeps counting.
+    const t = stack.recorder.nowMs;
+    // Hit-stop freezes the simulation: the agent's inputs during a frozen step
+    // would hit a world that does not advance (and be rejected), so it waits.
+    if (encounter.hitStop.active) {
+      stack.step(STEP);
+      continue;
+    }
     const now = observe(encounter, t);
     buffer.push(now);
     const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
