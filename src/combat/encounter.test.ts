@@ -1037,7 +1037,7 @@ describe('Encounter lunge', () => {
   });
 
   // The player dashes toward the oncoming enemy (a sideways dash escapes the 60 u contact and is a retreat instead).
-  // Lunge movement starts on tick 32; dash press ticks are pinned to the 16 ms step (dash 220 ms: tick 33 dodges, 32 does not).
+  // Lunge movement starts on tick 32; dash press ticks are pinned to the 16 ms step (swept: press ticks 25..37 dodge non-perfect, 38..50 perfect, <=24 and >=51 are hits).
   function dashTowardEnemy(pressTick: number) {
     const ctx = lungeEncounter();
     for (let tick = 0; tick < 100; tick++) {
@@ -1051,21 +1051,32 @@ describe('Encounter lunge', () => {
   }
 
   it('i-frames active when the body arrives within 60 u: dodge, window taken, no damage', () => {
-    const { defenses, hurts, closes } = dashTowardEnemy(33);
+    const { defenses, hurts, closes } = dashTowardEnemy(37) // pins the last non-perfect press (dash age at contact just above PERFECT_DODGE_MS);
     expect(hurts).toHaveLength(0);
     expect(defenses).toEqual([{ label: 'dodge' }]);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
   });
 
   it('a dash <= 110 ms old at the contact is a perfect dodge with the refund', () => {
-    const { defenses, hurts, closes } = dashTowardEnemy(42);
+    const { defenses, hurts, closes } = dashTowardEnemy(38) // pins the first perfect press (dash age at contact <= PERFECT_DODGE_MS);
     expect(hurts).toHaveLength(0);
     expect(defenses).toEqual([{ label: 'dodge', perfect: true, refund: STAMINA_COST.dodge }]);
     expect(closes.find((c) => c.type === 'dodge')?.outcome).toBe('taken');
   });
 
+  it('sweeping the dash press tick is monotonic: i-frames at the contact always dodge, never a hit', () => {
+    const outcome = (press: number) => {
+      const { defenses, hurts } = dashTowardEnemy(press);
+      return hurts.length > 0 ? 'hit' : defenses[0]?.perfect ? 'perfect' : defenses[0]?.label === 'dodge' ? 'dodge' : 'none';
+    };
+    const seq: string[] = [];
+    for (let press = 14; press <= 56; press++) seq.push(outcome(press));
+    // hit* dodge+ perfect+ hit*: a hit never sits between two dodges
+    expect(seq.filter((o, k) => o !== seq[k - 1])).toEqual(['hit', 'dodge', 'perfect', 'hit']);
+  });
+
   it('a dash whose i-frames are over before the contact does not protect', () => {
-    const { defenses, hurts } = dashTowardEnemy(30);
+    const { defenses, hurts } = dashTowardEnemy(24); // pins the i-frame boundary: 24 is the last press whose i-frames end before the contact
     expect(hurts).toHaveLength(1);
     expect(defenses.filter((d) => d.label === 'dodge')).toHaveLength(0);
   });

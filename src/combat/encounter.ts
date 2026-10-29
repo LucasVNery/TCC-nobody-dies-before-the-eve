@@ -159,11 +159,12 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     const firstLandingTick = landing && !this.firstLandingProcessed;
     if (landing) this.firstLandingProcessed = true;
     const overlaps = enemyAttack !== null && sectorOverlapsBox(enemyAttack, this.player.hurtbox());
+    // An invulnerable player is never hit: overlap alone (post-step hurtbox) also credits the
+    // dodge, which covers a lunge whose landing was computed from the pre-step player position.
     if (
-      landing &&
       !this.defenseRecordedThisAttack &&
       this.player.isInvulnerable &&
-      (firstLandingTick || overlaps)
+      ((landing && firstLandingTick) || overlaps)
     ) {
       const age = this.player.dashAgeMs;
       const perfect = age !== null && age <= PERFECT_DODGE_MS;
@@ -177,7 +178,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       } else {
         this.bus.emit('player.defense', { label: 'dodge' });
       }
-    } else if (overlaps) {
+    } else if (overlaps && !this.player.isInvulnerable) {
       if (!this.defenseRecordedThisAttack && this.player.isParryTiming) {
         this.assaltante.onPlayerParrySuccess();
         this.recordDefenseOnce('parry');

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventBus } from '../core/eventBus';
 import type { GameEvents } from '../core/events';
 import { PlayerController } from './playerController';
+import { InputBuffer } from './inputBuffer';
 import {
   DODGE,
   SWITCH_RECOVERY_MS,
@@ -744,7 +745,7 @@ function collect(bus: EventBus<GameEvents>) {
 }
 
 describe('combat B: responsive combat', () => {
-  it('is locked (no movement, no dash) during startup+active, recovery starts at lockedMs', () => {
+  it('moves slowly with no free dash during startup+active, recovery starts at lockedMs', () => {
     const { player } = makePlayer();
     player.tryAction(LIGHT.id);
     player.setMoveInput(1, 0);
@@ -1043,10 +1044,15 @@ describe('combat v2: forgiving player flow', () => {
   });
 
   it('enterStagger() clears the input buffer', () => {
+    // Not observable through behavior: STAGGER_MS (250) > INPUT_BUFFER_MS (170), so a leftover press would
+    // expire on its own before the stagger ends. Pin the clear with a spy on InputBuffer instead.
     const { player } = makePlayer();
     player.lockAttack(100);
     player.tryAction(LIGHT.id); // buffered
+    const clear = vi.spyOn(InputBuffer.prototype, 'clear');
     player.enterStagger();
+    expect(clear).toHaveBeenCalledTimes(1);
+    clear.mockRestore();
     player.step(STAGGER_MS + 20);
     expect(player.state).toBe('idle');
   });
