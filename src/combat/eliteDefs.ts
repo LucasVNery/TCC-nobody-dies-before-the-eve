@@ -18,4 +18,7 @@ export const ELITE = {
   chargedStaggerMs: 400,
 } as const;
 
+/** Relative weights of the patterns that are eligible at the current distance. */
+export const ELITE_PATTERN_WEIGHTS = { swing: 4, combo: 2, lunge: 2, slam: 1.5 } as const;
+
 export type AttackKind = 'swing' | 'lunge' | 'combo' | 'slam';

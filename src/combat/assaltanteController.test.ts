@@ -6,12 +6,14 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
+import { primeElite } from './eliteTestKit';
 import { ASSALTANTE_MAX_HP, ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, LUNGE } from './movementDefs';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
   const opp = new OpportunitySystem(bus);
   const enemy = new AssaltanteController(bus, opp, { x: 100, y: 0, width: 20, height: 20 });
+  primeElite(enemy); // fixtures start past the opening delay and the pause (covered by their own tests)
   return { bus, opp, enemy };
 }
 
@@ -388,7 +390,7 @@ describe('AssaltanteController lunge', () => {
 
   it('lunges only in [150, 260] once ready (120, 149, 261 do not)', () => {
     for (const [d, expected] of [
-      [120, 'chasing'],
+      [120, 'attacking'], // within 140 u only the slam is eligible
       [149, 'chasing'],
       [150, 'lunging'],
       [260, 'lunging'],

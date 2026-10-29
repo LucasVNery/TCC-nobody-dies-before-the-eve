@@ -4,6 +4,7 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
 import { GAME_VERSION, CONFIG_VERSION, windowsMs, sessionStartPayload, type LoggedEvent } from './schema';
 import { PLAYER_START } from '../game/runDirector';
+import { primeElite } from '../combat/eliteTestKit';
 import { TelemetryRecorder } from './telemetryRecorder';
 
 function makeStack(onRunEnd?: () => void) {
@@ -121,6 +122,7 @@ describe('TelemetryRecorder', () => {
     const stack = makeStack();
     stack.director.start();
     stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+    primeElite(stack.encounter.assaltante); // skip the opening delay: these tests look at the first attack
     stack.step(16); // Assaltante attacks -> opp.open
     const opens = ofType(stack.recorder.drain(), 'opp.open');
     expect(opens).toHaveLength(1);
@@ -151,6 +153,7 @@ describe('TelemetryRecorder', () => {
       const stack = makeStack();
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      primeElite(stack.encounter.assaltante); // skip the opening delay: these tests look at the first attack
       stack.step(16); // Assaltante starts its attack
       for (let i = 0; i < 24; i++) stack.step(16); // dodge is credited at the strike: press it ~60 ms before the 450 ms telegraph ends
       stack.encounter.player.tryDodge();
@@ -170,6 +173,7 @@ describe('TelemetryRecorder', () => {
       const stack = makeStack();
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      primeElite(stack.encounter.assaltante); // skip the opening delay: these tests look at the first attack
       stack.step(16); // Assaltante starts its attack -> dodge window open
       stack.encounter.player.tryAction('sword_shield.light');
       const events = stack.recorder.drain();
@@ -184,6 +188,7 @@ describe('TelemetryRecorder', () => {
       const stack = makeStack();
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      primeElite(stack.encounter.assaltante); // skip the opening delay: these tests look at the first attack
       stack.step(16);
       const events = stack.recorder.drain();
       const start = idx(events, (e) => e.type === 'enemy.attack_start');
@@ -196,6 +201,7 @@ describe('TelemetryRecorder', () => {
       const stack = makeStack();
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+      primeElite(stack.encounter.assaltante); // skip the opening delay: these tests look at the first attack
       stack.step(16); // attack starts
       // walk away so the swing misses and the dodge window expires
       stack.encounter.setPlayerMoveInput(-1, 0);

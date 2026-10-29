@@ -352,8 +352,8 @@ describe('dropEmptyRuns', () => {
 });
 
 describe('prepareValues', () => {
-  // seed 4242, 3 runs, 2 per session: the deaths that end sessions leave empty runs 2 and 4.
-  const LOG = playAgent('agressivo', { ...DEFAULT_EXPERIMENT, seed: 4242, runsPerAgent: 3, runsPerSession: 2, runCapMs: 20_000 }, 0);
+  // seed 4243 (was 4242 before combat v2 changed the deaths), 3 runs, 2 per session: the deaths that end sessions leave empty runs 2 and 4.
+  const LOG = playAgent('agressivo', { ...DEFAULT_EXPERIMENT, seed: 4243, runsPerAgent: 3, runsPerSession: 2, runCapMs: 20_000 }, 0);
 
   it('drops the empty runs and keeps the others', () => {
     expect(LOG.emptyRuns).toEqual([2, 4]);

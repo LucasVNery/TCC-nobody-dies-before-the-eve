@@ -139,6 +139,29 @@ describe('combo', () => {
     conserved(log);
   });
 
+  it('dodging strike 1 and strike 2 each credit a dodge, strike 2 by invulnerability alone while standing outside the sector', () => {
+    // Two dashes away from the elite: both end outside every sector. Strike 2's first active tick is credited
+    // only because firstLandingProcessed is re-armed when the second dodge window opens.
+    const { encounter, log } = setup({ x: 250, y: 0 }, { x: 330, y: 0 });
+    const a = encounter.assaltante;
+    a.beginPattern('combo', encounter.player.position);
+    steps(encounter, 1, SECOND_STRIKE_STEP + 4, (n) => {
+      if (n === SWING_STRIKE_STEP - 8 || n === SECOND_STRIKE_STEP - 8) {
+        encounter.setPlayerMoveInput(-1, 0);
+        encounter.player.tryDodge();
+      }
+    });
+    expect(log.defenses.map((d) => d.label)).toEqual(['dodge', 'dodge']);
+    const dodgeOpens = log.opens.filter((o) => o.type === 'dodge');
+    expect(dodgeOpens).toHaveLength(2);
+    for (const open of dodgeOpens) {
+      expect(log.closes.find((c) => c.opp_id === open.opp_id)?.outcome).toBe('taken');
+    }
+    expect(log.hurts).toHaveLength(0);
+    settle(encounter);
+    conserved(log);
+  });
+
   it('an unmitigated strike 1 hurts, and strike 2 hurts again (two separate defense flags)', () => {
     const { encounter, log } = setup({ x: 0, y: 0 }, { x: 30, y: 0 });
     encounter.assaltante.beginPattern('combo', encounter.player.position);

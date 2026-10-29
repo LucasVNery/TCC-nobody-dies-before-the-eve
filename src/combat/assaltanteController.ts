@@ -4,7 +4,8 @@ import type { GameEvents } from '../core/events';
 import type { OpportunitySystem } from '../opportunity/opportunitySystem';
 import type { AABB, EnemyState, Vec2 } from './types';
 import type { ActionId, InvalidReason } from '../opportunity/types';
-import { ASSALTANTE_RULES, ATTACK_RANGE, type Blackboard } from '../ai/rules/assaltanteRules';
+import { ATTACK_RANGE, choosePatternRule, type Blackboard } from '../ai/rules/assaltanteRules';
+import { createPrng, type Prng } from '../core/prng';
 import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD, ASSALTANTE_MAX_HP, LUNGE } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, sectorOverlapsBox, type AttackSector } from './sector';
@@ -30,7 +31,13 @@ export class AssaltanteController implements ThreatAssessor {
   private readonly height: number;
   private _attackDirection: Vec2 = { x: -1, y: 0 };
   private playerWasInRangeDuringPunish = false;
-  private lungeCooldownMs: number = LUNGE.cooldownMs;
+  private lungeCooldownMs: number = Math.max(ELITE.firstAttackDelayMs, LUNGE.cooldownMs);
+  /** Time since birth/respawn (first attack only after ELITE.firstAttackDelayMs). */
+  private ageMs = 0;
+  /** Time spent idle/chasing since the last pattern, stagger or parry recovery ended (mandatory pause). */
+  private sincePatternMs = 0;
+  /** Pattern draw; deterministic (seed 0) until RunDirector reseeds it per run. */
+  private prng: Prng = createPrng(0);
   private lungeMoving = false;
   private lungeTravelled = 0;
   private lungeLandedThisTick = false;
@@ -101,6 +108,16 @@ export class AssaltanteController implements ThreatAssessor {
     return this.patternKind === 'slam' ? ELITE.slamActiveMs : SWING_MS;
   }
 
+  /** New PRNG for the weighted pattern choice (RunDirector derives it from the run seed). */
+  reseed(seed: number): void {
+    this.prng = createPrng(seed);
+  }
+
+  /** The mandatory pause since the last pattern and the first-attack delay since birth are both over. */
+  private get patternReady(): boolean {
+    return this.ageMs >= ELITE.firstAttackDelayMs && this.sincePatternMs >= ELITE.patternPauseMs;
+  }
+
   /**
    * Starts a combo or a ground slam now. Ignored unless the elite is idle or chasing
    * (the weighted choice of the pattern lives in the selector, not here).
@@ -164,7 +181,9 @@ export class AssaltanteController implements ThreatAssessor {
     this.phaseElapsedMs = 0;
     this._activeRuleId = null;
     this.playerWasInRangeDuringPunish = false;
-    this.lungeCooldownMs = LUNGE.cooldownMs;
+    this.lungeCooldownMs = Math.max(ELITE.firstAttackDelayMs, LUNGE.cooldownMs);
+    this.ageMs = 0;
+    this.sincePatternMs = 0;
     this.lungeMoving = false;
     this.lungeTravelled = 0;
     this.lungeLandedThisTick = false;
@@ -302,6 +321,10 @@ export class AssaltanteController implements ThreatAssessor {
     this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
     this.lungeLandedThisTick = false;
     this.lungeCooldownMs = Math.max(0, this.lungeCooldownMs - stepMs);
+    this.ageMs += stepMs;
+    // The pause clock only runs while the elite is free (idle/chasing): any pattern, stagger or parry restarts it.
+    if (this.state === 'idle' || this.state === 'chasing') this.sincePatternMs += stepMs;
+    else this.sincePatternMs = 0;
 
     // The lunge ended (full travel or wall) with its dodge window still open: close it through the normal expiry
     // path on the next step (after Encounter evaluated the final charge tick), so a retreat is inferred in time
@@ -312,12 +335,17 @@ export class AssaltanteController implements ThreatAssessor {
     }
 
     if (this.state === 'idle' || this.state === 'chasing') {
-      const bb: Blackboard = { distanceToPlayer, state: this.state, lungeReady: this.lungeCooldownMs <= 0 };
-      const rule = ASSALTANTE_RULES.find((r) => r.precond(bb));
-      this._activeRuleId = rule?.id ?? null;
-      if (rule?.id === 'assaltante.attack') {
-        this.startPattern('swing', dx, dy, distanceToPlayer);
-      } else if (rule?.id === 'assaltante.lunge') {
+      const bb: Blackboard = {
+        distanceToPlayer,
+        state: this.state,
+        lungeReady: this.lungeCooldownMs <= 0,
+        patternReady: this.patternReady,
+      };
+      const rule = choosePatternRule(bb, this.prng);
+      this._activeRuleId = rule.id;
+      if (rule.pattern === 'swing' || rule.pattern === 'combo' || rule.pattern === 'slam') {
+        this.startPattern(rule.pattern, dx, dy, distanceToPlayer);
+      } else if (rule.pattern === 'lunge') {
         this.state = 'lunging';
         this.phaseElapsedMs = 0;
         this.lungeMoving = false;

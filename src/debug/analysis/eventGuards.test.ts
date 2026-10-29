@@ -53,6 +53,22 @@ describe('isWellFormed', () => {
     expect(isWellFormed(mk('projectile.expire', 0, { id: 1 }))).toBe(true);
     expect(isWellFormed(mk('projectile.expire', 0, {}))).toBe(false);
   });
+  it('enemy.attack_start accepts kind swing|lunge|combo|slam and hit 1|2; logs without them stay well formed', () => {
+    for (const kind of ['swing', 'lunge', 'combo', 'slam']) {
+      expect(isWellFormed(mk('enemy.attack_start', 0, { kind }))).toBe(true);
+    }
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: 1 }))).toBe(true);
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: 2 }))).toBe(true);
+    expect(isWellFormed(mk('enemy.attack_start', 0, {}))).toBe(true); // pre-0.0.5 log
+  });
+
+  it('enemy.attack_start rejects an unknown kind or a hit other than 1 or 2', () => {
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'laser' }))).toBe(false);
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 7 }))).toBe(false);
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: 3 }))).toBe(false);
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: '1' }))).toBe(false);
+  });
+
   it('passes event types the metrics do not read', () => {
     expect(isWellFormed(mk('obs.record', 0, { anything: NaN }))).toBe(true);
   });

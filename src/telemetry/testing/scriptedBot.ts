@@ -2,7 +2,6 @@
 import { ProfileAccumulator } from '../../profile/profileAccumulator';
 import { findWeaponAction } from '../../combat/actionRegistry';
 import { STAMINA_COST } from '../../combat/stamina';
-import { TELEGRAPH_MS } from '../../combat/assaltanteController';
 import { LUNGE } from '../../combat/movementDefs';
 import { createTelemetryStack, type TelemetryStack } from '../stack';
 
@@ -29,8 +28,8 @@ export function makeBotStack(opts: BotStackOptions = {}) {
   return { stack, runEnds };
 }
 
-/** Ticks into a swing telegraph at which the bot dodges: 5/6 of TELEGRAPH_MS = ~375 ms into the 450 ms telegraph, so the 150 ms i-frames cover the hit. */
-const SWING_DODGE_TICK = Math.round(((TELEGRAPH_MS * 5) / 6) / (1000 / 60));
+/** The bot dodges non-lunge strikes this long before they land (i-frames cover the hit). */
+const SWING_DODGE_LEAD_MS = 100;
 /** Ticks into a lunge at which the bot dodges: the end of its telegraph (the charge starts). */
 const LUNGE_DODGE_TICK = Math.round(LUNGE.telegraphMs / (1000 / 60));
 
@@ -68,7 +67,11 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     const lunging = encounter.assaltante.state === 'lunging';
     const threat = lunging || encounter.assaltante.state === 'attacking';
     threatTicks = threat ? threatTicks + 1 : 0;
-    if (threatTicks === (lunging ? LUNGE_DODGE_TICK : SWING_DODGE_TICK) && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
+    // Lunge: dodge when the charge starts. Other patterns (swing, combo strikes, slam): dodge when the strike is
+    // SWING_DODGE_LEAD_MS away, so the i-frames cover it whatever the pattern's telegraph is (combat v2).
+    const strikeInMs = lunging || !threat ? null : encounter.assaltante.msUntilThreatens(encounter.player.hurtbox(), SWING_DODGE_LEAD_MS);
+    const dodgeNow = lunging ? threatTicks === LUNGE_DODGE_TICK : strikeInMs !== null;
+    if (dodgeNow && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
     if (i % 12 === 0 && encounter.assaltante.state === 'recovering' && encounter.player.stamina.value > 0) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
       if (light) encounter.player.tryAction(light.id);

@@ -4,6 +4,9 @@ import { Encounter } from '../combat/encounter';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, MIN_SPAWN_DISTANCE, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
+import { AssaltanteController } from '../combat/assaltanteController';
+import { OpportunitySystem } from '../opportunity/opportunitySystem';
+import { primeElite } from '../combat/eliteTestKit';
 import { RunDirector, PLAYER_START, pickSpawn } from './runDirector';
 import { createPrng } from '../core/prng';
 import { ItemSystem } from './items';
@@ -139,6 +142,8 @@ describe('RunDirector', () => {
     d.encounter.bus.on('opp.close', (e) => closes.push(e));
     // put the Assaltante next to the player so it attacks and opens a dodge window
     d.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
+
+    primeElite(d.encounter.assaltante); // skip the opening delay
     d.director.step(STEP);
     expect(d.encounter.assaltante.state).toBe('attacking');
 
@@ -173,6 +178,32 @@ describe('RunDirector', () => {
     d.director.step(STEP);
     expect(order).toEqual(['expire:run_end', 'run.end']);
     expect(d.encounter.items.onMap).toHaveLength(0);
+  });
+
+  it('beginRun reseeds the elite pattern PRNG with (run seed ^ 0x5eed11) >>> 0', () => {
+    // A primed elite fights a stationary player 50 u away for 60 s: the drawn patterns depend only on the PRNG.
+    const sequence = (bus: EventBus<GameEvents>, elite: AssaltanteController) => {
+      const kinds: string[] = [];
+      bus.on('enemy.attack_start', (e) => kinds.push(`${e.kind}${(e as { hit?: number }).hit ?? ''}`));
+      elite.respawn({ x: 100, y: 100 }, 'source_interrupted');
+      primeElite(elite);
+      for (let t = 0; t < 60_000; t += STEP) elite.step(STEP, { x: 150, y: 100 });
+      return kinds;
+    };
+    const d = makeDirector(7);
+    d.director.start();
+    const fromDirector = sequence(d.encounter.bus, d.encounter.assaltante);
+
+    const make = (seed?: number) => {
+      const bus = new EventBus<GameEvents>();
+      const elite = new AssaltanteController(bus, new OpportunitySystem(bus), { x: 0, y: 0, width: 20, height: 20 });
+      if (seed !== undefined) elite.reseed(seed);
+      return sequence(bus, elite);
+    };
+    const reference = make((7 ^ 0x5eed11) >>> 0);
+    expect(reference.length).toBeGreaterThan(10);
+    expect(fromDirector).toEqual(reference);
+    expect(make(7)).not.toEqual(reference); // the run seed itself, without the xor, is a different stream
   });
 
   it('seeds items from (run seed ^ 0x1e7e55); a new run starts with an empty slot and map', () => {

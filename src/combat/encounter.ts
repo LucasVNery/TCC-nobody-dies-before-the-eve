@@ -9,6 +9,7 @@ import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
 import { PERFECT_DODGE_MS } from './actionDefs';
 import { STAMINA_COST } from './stamina';
+import { ELITE } from './eliteDefs';
 import { ATTACK_REACH, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
@@ -204,6 +205,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
         const dmg = PLAYER_DAMAGE_BY_ACTION_TYPE[action.actionType] * this.items.damageMultiplier;
         this.assaltante.takeDamage(dmg);
         this.bus.emit('enemy.hurt', { dmg, hp_after: this.assaltante.hp, actionId: action.id });
+        // Only a charged hit interrupts the elite; light, heavy and projectile hits do not.
+        if (action.actionType === 'charged' && !this.assaltante.isDead) this.assaltante.stagger(ELITE.chargedStaggerMs);
       }
     }
 

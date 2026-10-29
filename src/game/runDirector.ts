@@ -124,6 +124,7 @@ export class RunDirector {
     this.roomsCleared = 0;
     this.encountersCleared = 0;
     encounter.items.reset((seed ^ 0x1e7e55) >>> 0);
+    encounter.assaltante.reseed((seed ^ 0x5eed11) >>> 0);
     encounter.resetPlayer(PLAYER_START);
     encounter.respawnEnemy(pickSpawn(this.prng, PLAYER_START), 'source_interrupted');
     this.bus.emit('run.start', { run_idx: this._runIdx, seed });

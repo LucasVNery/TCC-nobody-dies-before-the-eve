@@ -1,14 +1,24 @@
 // src/combat/encounter.test.ts
 import { describe, it, expect, vi } from 'vitest';
-import { Encounter } from './encounter';
+import { Encounter as BaseEncounter } from './encounter';
+import { primeElite } from './eliteTestKit';
 import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';
+import type { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
 import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE, ASSALTANTE_HIT_DAMAGE } from './movementDefs';
 import { STAMINA_COST, STAMINA_MAX } from './stamina';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { ELITE_TELEGRAPH_MS } from './eliteDefs';
+
+// Fixtures start with the elite past its opening delay and pause (those have their own tests).
+class Encounter<P extends ProfileSink = ProfileAccumulator> extends BaseEncounter<P> {
+  constructor(...args: ConstructorParameters<typeof BaseEncounter<P>>) {
+    super(...args);
+    primeElite(this.assaltante);
+  }
+}
 
 const TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
 const SWING_MS = 150;
@@ -305,9 +315,11 @@ describe('Encounter', () => {
       { x: 0, y: 0, width: 20, height: 20 },
       { x: 200, y: 0, width: 20, height: 20 },
     );
+    // Since combat v2 the elite slams as soon as it is within 140 u (a miss at that range), so the swing it
+    // reaches after the slam recovery and the pause is awaited for longer.
     let overlapped = false;
     let elapsed = 0;
-    while (elapsed < 3000) {
+    while (elapsed < 8000) {
       encounter.step(STEP_MS);
       elapsed += STEP_MS;
       const hitbox = encounter.assaltante.attackHitbox();
@@ -762,9 +774,12 @@ describe('Encounter', () => {
     });
 
     it('agrees with reality when both models reach the threat within the horizon (positive case)', () => {
+      // Combat v2: from 140 u the elite draws the slam instead of closing to swing range, so the swing
+      // prediction is checked from a start already inside ATTACK_RANGE (the chase branch stays covered by the
+      // negative case above and by the predictor's own unit tests).
       const encounter = new Encounter(
         { x: 0, y: 0, width: 20, height: 20 },
-        { x: DISTANCE, y: 0, width: 20, height: 20 },
+        { x: 50, y: 0, width: 20, height: 20 },
       );
       // Comfortably above both the continuous prediction (1000ms) and the
       // real loop's actual active-at time (about 1000ms), with margin well beyond
@@ -783,7 +798,7 @@ describe('Encounter', () => {
       // the branch that would catch it: a wrong reach could make the
       // predicted sector miss the target (flipping this to null) or the real
       // sweep miss/hit differently than predicted.
-      expect(prediction).toBe(1050);
+      expect(prediction).toBe(ELITE_TELEGRAPH_MS.swing);
       expect(hitEvents.length).toBeGreaterThan(0);
       expect(prediction !== null).toBe(hitEvents.length > 0);
     });
