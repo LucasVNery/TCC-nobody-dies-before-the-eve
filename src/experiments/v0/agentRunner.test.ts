@@ -156,8 +156,10 @@ describe('agent runner', () => {
   });
 
   describe('stamina limits (Task 9)', () => {
-    // 150 runs of up to 60 s: every style simulates well over 600 s (the 160 HP elite kills the agents sooner, so more runs are needed)
-    const long = tiny({ runsPerAgent: 150, runsPerSession: 10, runCapMs: 60_000 });
+    // 60 runs (the default count) of up to 60 s, seed 4242. Measured simulated time per style against the 160 HP elite:
+    // agressivo 735 s (the lowest: it dies in ~12 s per run), repetitivo 850 s, aleatorio 1093 s, variado 1229 s,
+    // paciente 1681 s, bloqueador 2776 s, evasivo 3319 s. All clear the 600 s bar; 150 runs were not needed.
+    const long = tiny({ runsPerAgent: 60, runsPerSession: 10, runCapMs: 60_000 });
     const logs = runExperiment(long);
 
     it.each(STYLE_IDS.map((id, i) => [id, i] as const))('%s: 600 s+ of play with no player.stamina_denied and >= 2 completed runs', (id, i) => {

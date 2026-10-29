@@ -108,14 +108,16 @@ describe('FloorTracker extra cases', () => {
 
 describe('FloorTracker against a real recorded log', () => {
   it('matches floorFromEvents for every room.enter of a bot session', () => {
-    const { stack } = makeBotStack({ seedStart: 123 });
+    // Seed 9 (was 123) with the original 30000-tick horizon: reaching room 1 needs the bot to kill the 160 HP elite,
+    // which seed 9 does by ~15000 ticks; seed 123 needed ~60000, which is why the horizon had been raised to 120000.
+    const { stack } = makeBotStack({ seedStart: 9 });
     stack.director.start();
-    runBot(stack, 120000);
+    runBot(stack, 30000);
     const log = JSON.parse(JSON.stringify(stack.recorder.drain())) as LoggedEvent[];
 
     const starts = log.filter((e) => e.type === 'run.start');
     expect(starts.length).toBeGreaterThanOrEqual(1);
-    expect(starts[0].seed).toBe(123);
+    expect(starts[0].seed).toBe(9);
     expect(Number.isFinite(starts[0].seed)).toBe(true);
 
     const t = new FloorTracker(25, 19, 10, FLOOR_TILESET);

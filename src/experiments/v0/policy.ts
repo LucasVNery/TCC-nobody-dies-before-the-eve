@@ -1,6 +1,8 @@
 import type { EnemyState, Vec2 } from '../../combat/types';
 import { ACTION_REGISTRY, lockedMs, type ActionDef } from '../../combat/actionRegistry';
 import { DODGE, PARRY_WINDOW_MS, STAGGER_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
+import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
+import { SWING_MS } from '../../combat/assaltanteController';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { STAMINA_COST } from '../../combat/stamina';
 import { MIN_REACTION_MS, type Humanizer } from './humanizer';
@@ -22,16 +24,21 @@ import type { AgentStyle, DefenseWeights } from './styles';
 export const PERCEPTION_LAG_MS = MIN_REACTION_MS;
 
 /**
- * What a player learns by playing (not read from the enemy's code): the swing
- * lands about this long after the telegraph becomes visible. It is a copy of
- * the Assaltante's TELEGRAPH_MS (assaltanteController.ts, private there):
- * if combat balance changes that value, update this one too (drift risk).
+ * What a player learns by playing (not read from the enemy's code): a swing lands about this long after
+ * its telegraph becomes visible. Imported from the owner (eliteDefs), never copied.
  */
-const SEEN_TELEGRAPH_MS = 400;
-/** Parry plans aim the press at the middle of the parry window before the hit. */
-const PARRY_PRESS_MS = SEEN_TELEGRAPH_MS - PARRY_WINDOW_MS / 2;
-/** Parry timing error = (difference of two reaction draws) x this scale. */
-const PARRY_JITTER_SCALE = 0.75;
+const SEEN_TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
+/** A press aims to land this long before the strike: inside the dodge i-frames, and in the middle of the parry window. */
+const PRESS_LEAD_MS = PARRY_WINDOW_MS / 2;
+/**
+ * The agent only sees the enemy state, not the pattern. A swing is over this long after its telegraph became
+ * visible; an enemy still 'attacking' beyond it is mid-combo, so the second strike is treated as a fresh threat.
+ * (A slam, which also stays 'attacking' past this point, is read the same way: one defence press that comes
+ * late for it. Not distinguishing them is accepted until V0.1.)
+ */
+const SWING_CYCLE_MS = SEEN_TELEGRAPH_MS + SWING_MS;
+/** Dodge/parry timing error = (difference of two reaction draws) x this scale. */
+const PRESS_JITTER_SCALE = 0.75;
 /** Guard is held at least this long once raised. */
 const MIN_BLOCK_HOLD_MS = 100;
 /** Slack added to an action's reach (about half an entity) when deciding it can hit. */
@@ -102,6 +109,9 @@ const ACTIONS: readonly ActionDef[] = [...ACTION_REGISTRY.values()];
 export class AgentPolicy {
   private readonly weaponKeys: readonly string[];
   private prevSeenState: EnemyState | null = null;
+  /** seen.tMs at which the current 'attacking' stretch started, and whether its follow-up threat was already planned. */
+  private attackSeenSince = 0;
+  private followUpPlanned = false;
   private weaponId: string | null = null;
   private lastSwitchCheckAt = 0;
   private plan: Plan | null = null;
@@ -154,7 +164,15 @@ export class AgentPolicy {
     }
 
     const st = seen.enemyState;
-    if (st === 'attacking' && this.prevSeenState !== 'attacking') this.planDefense(seen.tMs);
+    if (st === 'attacking' && this.prevSeenState !== 'attacking') {
+      this.attackSeenSince = seen.tMs;
+      this.followUpPlanned = false;
+      this.planDefense(seen.tMs, ELITE_TELEGRAPH_MS.swing);
+    } else if (st === 'attacking' && !this.followUpPlanned && seen.tMs - this.attackSeenSince > SWING_CYCLE_MS) {
+      // still attacking after a whole swing: the combo's second strike winds up now
+      this.followUpPlanned = true;
+      this.planDefense(this.attackSeenSince + SWING_CYCLE_MS, ELITE_TELEGRAPH_MS.combo);
+    }
     if (st !== 'recovering') this.openingAt = null;
     else if (this.prevSeenState !== 'recovering' && this.style.waitForOpening) {
       this.openingAt = seen.tMs + this.humanizer.sampleReactionMs();
@@ -276,16 +294,21 @@ export class AgentPolicy {
     this.chargeAction = null;
   }
 
-  private planDefense(threatSeenAtMs: number): void {
+  /**
+   * Plans the defence against a strike landing `telegraphMs` after the threat became visible at `threatSeenAtMs`.
+   * Dodge and parry aim the press PRESS_LEAD_MS before the strike (+- noise), never sooner than the reaction
+   * delay; the plain guard goes up as soon as the agent reacts.
+   */
+  private planDefense(threatSeenAtMs: number, telegraphMs: number): void {
     const kind = pick(this.style.defenseWeights, DEFENSE_KINDS, this.rng) ?? 'none';
     this._lastPlannedDefense = kind;
     this.pending = null;
     if (kind === 'none' || this.humanizer.lapses()) return;
     const reaction = this.humanizer.sampleReactionMs();
     let at = threatSeenAtMs + reaction;
-    if (kind === 'parry') {
-      const jitter = (this.humanizer.sampleReactionMs() - this.humanizer.sampleReactionMs()) * PARRY_JITTER_SCALE;
-      at = threatSeenAtMs + Math.max(reaction, PARRY_PRESS_MS + jitter);
+    if (kind === 'parry' || kind === 'dodge') {
+      const jitter = (this.humanizer.sampleReactionMs() - this.humanizer.sampleReactionMs()) * PRESS_JITTER_SCALE;
+      at = threatSeenAtMs + Math.max(reaction, telegraphMs - PRESS_LEAD_MS + jitter);
     }
     this.pending = { kind, at };
   }

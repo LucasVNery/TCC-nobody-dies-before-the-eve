@@ -16,7 +16,7 @@ import type { ThreatAssessor } from './patience';
 
 /** The plain swing's telegraph; the real value logged as windows_ms.telegraph_swing. */
 export const TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
-const SWING_MS = 150;
+export const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
 const LUNGE_DODGE_WINDOW_MS = LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;
 

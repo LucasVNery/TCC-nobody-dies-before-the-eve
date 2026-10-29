@@ -8,6 +8,8 @@ import type { Observation } from './perception';
 import { AGENT_STYLES, STYLE_IDS, type AgentStyle, type StyleId } from './styles';
 import { STAGGER_MS } from '../../combat/actionDefs';
 import { STAMINA_COST } from '../../combat/stamina';
+import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
+import { SWING_MS } from '../../combat/assaltanteController';
 import { AgentPolicy, PERCEPTION_LAG_MS, type AgentIntent } from './policy';
 
 const STEP = 1000 / 60;
@@ -76,12 +78,13 @@ function drive(
   return log;
 }
 
-/** chasing 300 ms, attacking 550 ms (telegraph 400 + swing 150), recovering 500 ms, repeat. */
-const CYCLE_MS = 1350;
+/** chasing 300 ms, attacking 600 ms (swing telegraph 450 + swing 150), recovering 500 ms, repeat. */
+const ATTACK_MS = ELITE_TELEGRAPH_MS.swing + SWING_MS;
+const CYCLE_MS = 300 + ATTACK_MS + 500;
 function cycleWorld(dist: number): (t: number) => World {
   return (t) => {
     const p = ((t % CYCLE_MS) + CYCLE_MS) % CYCLE_MS;
-    const enemyState: EnemyState = p < 300 ? 'chasing' : p < 850 ? 'attacking' : 'recovering';
+    const enemyState: EnemyState = p < 300 ? 'chasing' : p < 300 + ATTACK_MS ? 'attacking' : 'recovering';
     return { enemyState, offset: { x: dist, y: 0 } };
   };
 }
@@ -266,6 +269,8 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
         for (let i = 0; i < 120; i++) {
           const t = 900 + i * STEP;
           const seenT = t - PERCEPTION_LAG_MS;
+          // only the first swing's plan is under test; past one swing cycle the policy plans the combo follow-up
+          if (seenT - threatAt > ATTACK_MS) break;
           const seenState: EnemyState = seenT >= threatAt ? 'attacking' : 'chasing';
           const seen = obsOf(seenT, { enemyState: seenState, offset: { x: 30, y: 0 } }, body);
           const now = obsOf(t, { enemyState: t >= threatAt ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }, body);
@@ -274,8 +279,9 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
           if (isDefense(intent)) {
             // first sight of the threat is at seen.tMs >= threatAt; reaction ~300 ms from there
             expect(t, `${id}#${seed}`).toBeGreaterThanOrEqual(threatAt + 299);
-            // ...and no extra delay: within one tick of seen.tMs + sampled delay (parry aims at 325 ms)
-            const planned = p.lastPlannedDefense === 'parry' ? 325 : 300;
+            // ...and no extra delay: within one tick of seen.tMs + sampled delay (block 300 ms); dodge and parry
+            // aim 75 ms before the swing lands (telegraph 450 - 75 = 375 ms)
+            const planned = p.lastPlannedDefense === 'parry' || p.lastPlannedDefense === 'dodge' ? ELITE_TELEGRAPH_MS.swing - 75 : 300;
             expect(t, `${id}#${seed}`).toBeLessThanOrEqual(firstSeenThreat! + planned + 5 + STEP);
             reacted++;
             break;
@@ -530,6 +536,94 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
       const log = drive(makePolicy(id, 3), 600, still('lunging', 30));
       expect(log).toHaveLength(600);
     }
+  });
+
+  it('never throws on any enemy state sequence, back-to-back attacking (combo) and lunging included', () => {
+    const states: EnemyState[] = ['idle', 'chasing', 'attacking', 'lunging', 'recovering'];
+    for (const id of STYLE_IDS) {
+      for (const stamina of [0, 10, 150]) {
+        const rnd = createPrng(77).next;
+        // random runs of states, plus a combo-like stretch: attacking, one step of another state, attacking again
+        const worlds: EnemyState[] = Array.from({ length: 300 }, () => states[Math.floor(rnd() * states.length)]);
+        const log = drive(
+          makePolicy(id, 6, DEFAULT_HUMANIZER),
+          6000,
+          (t) => ({ enemyState: t % 3000 < 1200 ? 'attacking' : t % 3000 < 1217 ? 'idle' : worlds[Math.floor(t / 100) % 300], offset: { x: 30, y: 0 } }),
+          'sword_shield',
+          undefined,
+          stamina,
+        );
+        expect(log, `${id}/${stamina}`).toHaveLength(6000);
+      }
+    }
+  });
+
+  describe('defence timing against the 450 ms swing telegraph', () => {
+    const exact: HumanizerConfig = { reactionMeanMs: 250, reactionSdMs: 1, lapseProb: 0, aimNoiseRad: 0 };
+    const only = (kind: 'dodge' | 'block' | 'parry'): AgentStyle => ({
+      ...AGENT_STYLES.agressivo,
+      id: 'agressivo',
+      defenseWeights: { dodge: 0, block: 0, parry: 0, none: 0, [kind]: 1 },
+      actionWeights: { 'sword_shield.light': 1 },
+      weaponWeights: { sword_shield: 1 },
+    });
+    /** Time (after the telegraph became visible) of the first defence press; the enemy starts attacking at 1000 ms. */
+    const pressAfterSeen = (kind: 'dodge' | 'block' | 'parry', seed: number, cfg = exact): number | null => {
+      const policy = makePolicy('agressivo', seed, cfg, only(kind));
+      const log = drive(policy, 150, (t) => ({ enemyState: t >= 1000 ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }));
+      const hit = log.find((l) => isDefense(l.intent) && l.t > 1000);
+      return hit ? hit.t - 1000 : null;
+    };
+
+    it('a dodge is pressed 75 ms before the swing lands, inside the i-frame window before the strike', () => {
+      for (let seed = 1; seed <= 20; seed++) {
+        const dt = pressAfterSeen('dodge', seed)!;
+        // the swing lands 450 ms after the enemy started attacking (t = 1000); the press is exact to a tick
+        expect(dt, `seed ${seed}`).toBeGreaterThanOrEqual(ELITE_TELEGRAPH_MS.swing - 75 - 1);
+        expect(dt, `seed ${seed}`).toBeLessThanOrEqual(ELITE_TELEGRAPH_MS.swing - 75 + STEP + 2);
+      }
+    });
+
+    it('with the default noise the dodge press centres on 75 ms before the strike and mostly lands inside the 200 ms i-frames (the late tail is the humanizer)', () => {
+      let inside = 0;
+      let n = 0;
+      let sum = 0;
+      for (let seed = 1; seed <= 60; seed++) {
+        const dt = pressAfterSeen('dodge', seed, NO_LAPSE);
+        if (dt === null) continue;
+        n++;
+        sum += dt;
+        const beforeStrike = ELITE_TELEGRAPH_MS.swing - dt; // ms between the press and the strike
+        if (beforeStrike > 0 && beforeStrike < 200) inside++;
+      }
+      expect(n).toBe(60);
+      expect(Math.abs(sum / n - (ELITE_TELEGRAPH_MS.swing - 75))).toBeLessThan(25);
+      // noise sd is ~64 ms, so ~12% of presses come after the strike (a human mistake) and almost none too early
+      expect(inside / n).toBeGreaterThan(0.7);
+    });
+
+    it('a parry is pressed in the middle of its window before the strike; a plain guard as soon as the agent reacts', () => {
+      const parry = pressAfterSeen('parry', 3)!;
+      expect(parry).toBeGreaterThanOrEqual(ELITE_TELEGRAPH_MS.swing - 75 - 1);
+      expect(parry).toBeLessThanOrEqual(ELITE_TELEGRAPH_MS.swing - 75 + STEP + 2);
+      const block = pressAfterSeen('block', 3)!;
+      expect(block).toBeLessThan(parry - 50);
+    });
+
+    it('the second strike of a combo (attacking for longer than a swing) is a fresh threat: a second press', () => {
+      const policy = makePolicy('agressivo', 4, exact, only('dodge'));
+      const log = drive(policy, 120, (t) => ({ enemyState: t >= 1000 && t < 1000 + 1070 ? 'attacking' : 'recovering', offset: { x: 30, y: 0 } }));
+      const presses = log.filter((l) => l.intent.dodge);
+      expect(presses).toHaveLength(2);
+      // the second press aims 75 ms before the second strike (swing cycle 600 + combo telegraph 320 - 75)
+      expect(presses[1].t - 1000).toBeGreaterThan(ELITE_TELEGRAPH_MS.swing + SWING_MS);
+    });
+
+    it('a plain swing (attacking for one swing cycle only) plans no second press', () => {
+      const policy = makePolicy('agressivo', 4, exact, only('dodge'));
+      const log = drive(policy, 120, (t) => ({ enemyState: t >= 1000 && t < 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS ? 'attacking' : 'recovering', offset: { x: 30, y: 0 } }));
+      expect(log.filter((l) => l.intent.dodge)).toHaveLength(1);
+    });
   });
 
   it('a guard break (stamina emptied while blocking, HP intact) is read as a stagger: no attack until it ends', () => {
