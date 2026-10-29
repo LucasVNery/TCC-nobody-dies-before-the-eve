@@ -34,6 +34,8 @@ export interface TelegraphView {
   radius?: number;
   /** Lunge travel distance. */
   travel?: number;
+  /** Lunge danger radius around the body's path (LUNGE.contactDistance). */
+  contactDistance?: number;
   /** Combo strike (1 or 2). */
   hit?: 1 | 2;
 }
@@ -124,6 +126,7 @@ export class AssaltanteController implements ThreatAssessor {
         reach: ATTACK_REACH + this.width / 2,
         halfAngleRad: ATTACK_HALF_ANGLE_RAD,
         travel: LUNGE.maxTravel,
+        contactDistance: LUNGE.contactDistance,
       };
     }
     if (this.state !== 'attacking') return null;

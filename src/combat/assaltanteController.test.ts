@@ -597,7 +597,6 @@ describe('AssaltanteController telegraph view', () => {
   });
 
   it('swing: progress runs 0 -> 1 over 450 ms, then null in the active phase', () => {
-    const { enemy } = makeAssaltante();
     const { enemy: e } = makeAssaltante();
     e.step(1, NEAR); // enters 'attacking' (swing)
     expect(e.state).toBe('attacking');
@@ -613,14 +612,12 @@ describe('AssaltanteController telegraph view', () => {
   });
 
   it('swing: origin is the enemy centre and the reach matches the logical hitbox', () => {
-    const { enemy } = makeAssaltante();
-    enemy.step(1, NEAR);
-    enemy.step(450, NEAR); // into the active phase
-    const sector = enemy.attackHitbox();
-    expect(sector).not.toBeNull();
     const { enemy: e } = makeAssaltante();
     e.step(1, NEAR);
     const t = e.telegraph!;
+    e.step(450, NEAR); // into the active phase
+    const sector = e.attackHitbox();
+    expect(sector).not.toBeNull();
     expect(t.origin).toEqual(sector!.origin);
     expect(t.reach).toBe(sector!.reach);
     expect(t.halfAngleRad).toBe(sector!.halfAngleRad);
@@ -659,7 +656,7 @@ describe('AssaltanteController telegraph view', () => {
     const player = { x: 200, y: 600 };
     enemy.step(1, player);
     expect(enemy.state).toBe('lunging');
-    expect(enemy.telegraph).toMatchObject({ kind: 'lunge', travel: 260 });
+    expect(enemy.telegraph).toMatchObject({ kind: 'lunge', travel: 260, contactDistance: 60 });
     expect(enemy.telegraph?.progress).toBeCloseTo(1 / 500, 6);
     enemy.step(249, player);
     expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);

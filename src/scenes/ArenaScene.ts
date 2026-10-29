@@ -129,9 +129,14 @@ export class ArenaScene extends Phaser.Scene {
             agg.apply(e);
             tape.push(e);
             world.handleEvent(e);
-            feedback.handleEvent(e);
           } catch (err) {
             console.warn('[analysis] failed to fold an event', err);
+          }
+          // Separate guard: a failure above must not skip the effects, nor the reverse.
+          try {
+            feedback.handleEvent(e);
+          } catch (err) {
+            console.warn('[feedback] failed to apply an event', err);
           }
         });
         this.loop = createFixedTimestepLoop(STEP_MS, (ms) => { stack.step(ms); world.recordStep(stack.encounter); });

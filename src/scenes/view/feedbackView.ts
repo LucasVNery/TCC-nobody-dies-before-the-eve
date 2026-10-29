@@ -18,7 +18,7 @@ const ENEMY_ARC_COLOR = 0xff5252;
 const TELEGRAPH_OUTLINE_ALPHA = 0.55;
 const TELEGRAPH_FILL_ALPHA = 0.35;
 const TELEGRAPH_COLORS = { swing: 0xff9800, combo: 0xff9800, slam: 0xf44336, lunge: 0x00bcd4 } as const;
-const LUNGE_HALF_WIDTH = 28; // world units, half the width of the charge corridor
+const CAP_SAMPLES = 8;
 const RING_MS = 350;
 const POOL_SIZE = 16;
 const ITEM_RING_COLORS = { heal: 0x4caf50, power: 0x9c27b0, bomb: 0xf44336 } as const;
@@ -55,6 +55,7 @@ function centre(pos: Vec2): Vec2 {
 }
 
 function hitKind(actionId: string): 'light' | 'heavy' {
+  // actionIds outside the registry (item.bomb, bow.shot) shake as light.
   const type = ACTION_REGISTRY.get(actionId)?.actionType;
   return type === 'heavy' || type === 'charged' ? 'heavy' : 'light';
 }
@@ -178,21 +179,29 @@ export class FeedbackView {
     if (!t) return;
     const color = TELEGRAPH_COLORS[t.kind];
     const fill = telegraphFill(t.progress);
-    if (t.kind === 'lunge' && t.travel !== undefined) {
+    if (t.kind === 'lunge' && t.travel !== undefined && t.contactDistance !== undefined) {
+      // Stadium: the logic hits within contactDistance of the body at any point of the path (and 'travel' is the
+      // real path length), so the danger area extends contactDistance sideways and past the end, with a round cap.
       const dir = t.direction;
-      const perp = { x: -dir.y, y: dir.x };
+      const w = t.contactDistance;
       const travel = t.travel;
-      const rect = (len: number): Vec2[] =>
-        [
-          { x: t.origin.x + perp.x * LUNGE_HALF_WIDTH, y: t.origin.y + perp.y * LUNGE_HALF_WIDTH },
-          { x: t.origin.x + dir.x * len + perp.x * LUNGE_HALF_WIDTH, y: t.origin.y + dir.y * len + perp.y * LUNGE_HALF_WIDTH },
-          { x: t.origin.x + dir.x * len - perp.x * LUNGE_HALF_WIDTH, y: t.origin.y + dir.y * len - perp.y * LUNGE_HALF_WIDTH },
-          { x: t.origin.x - perp.x * LUNGE_HALF_WIDTH, y: t.origin.y - perp.y * LUNGE_HALF_WIDTH },
-        ].map((p) => toScreen(p, GROUND_PROJECTION));
+      const stadium = (len: number): Vec2[] => {
+        const base = Math.atan2(dir.y, dir.x);
+        const pts: Vec2[] = [];
+        // Start side: square at the origin (the cap behind the enemy is not a threat worth drawing).
+        pts.push({ x: t.origin.x + dir.y * w, y: t.origin.y - dir.x * w });
+        const end = { x: t.origin.x + dir.x * len, y: t.origin.y + dir.y * len };
+        for (let i = 0; i <= CAP_SAMPLES; i++) {
+          const a = base - Math.PI / 2 + (Math.PI * i) / CAP_SAMPLES;
+          pts.push({ x: end.x + Math.cos(a) * w, y: end.y + Math.sin(a) * w });
+        }
+        pts.push({ x: t.origin.x - dir.y * w, y: t.origin.y + dir.x * w });
+        return pts.map((p) => toScreen(p, GROUND_PROJECTION));
+      };
       g.lineStyle(2, color, TELEGRAPH_OUTLINE_ALPHA);
-      g.strokePoints(rect(travel), true);
+      g.strokePoints(stadium(travel), true);
       g.fillStyle(color, TELEGRAPH_FILL_ALPHA);
-      g.fillPoints(rect(travel * fill), true);
+      g.fillPoints(stadium(travel * fill), true);
       return;
     }
     if (t.kind === 'slam') {
