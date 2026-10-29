@@ -17,6 +17,60 @@ function started(sessionId = 's') {
   return { stack, runEnds };
 }
 
+describe('TelemetryStack hit-stop, real flow', () => {
+  it('the killing blow on the enemy keeps its 2-step freeze across the respawn, then everything resumes', () => {
+    const { stack } = started();
+    const { encounter, recorder } = stack;
+    const px = encounter.player.position;
+    encounter.respawnEnemy({ x: px.x + 30, y: px.y }, 'source_interrupted');
+    encounter.assaltante.hp = 1;
+    let died = false;
+    encounter.bus.on('enemy.death', () => { died = true; });
+    encounter.player.tryAction('sword_shield.light');
+    let guard = 0;
+    while (!died && guard++ < 60) stack.step(STEP);
+    expect(died).toBe(true);
+    expect(encounter.hitStop.active).toBe(true); // armed by the killing hit, kept by the respawn
+    const t = recorder.nowMs;
+    const enemy = { ...encounter.assaltante.position };
+    const state = encounter.assaltante.state;
+    stack.step(STEP);
+    stack.step(STEP);
+    expect(encounter.hitStop.active).toBe(false);
+    expect(recorder.nowMs).toBe(t);
+    expect(encounter.assaltante.position).toEqual(enemy);
+    expect(encounter.assaltante.state).toBe(state);
+    stack.step(STEP);
+    expect(recorder.nowMs).toBeCloseTo(t + STEP);
+  });
+
+  it('a lethal hit on the player: after the step the freeze is cleared and the new run starts normally', () => {
+    const { stack, runEnds } = started();
+    const { encounter, recorder } = stack;
+    const px = encounter.player.position;
+    encounter.respawnEnemy({ x: px.x + 30, y: px.y }, 'source_interrupted');
+    encounter.player.takeDamage(encounter.player.hp - 1);
+    let hurt = false;
+    encounter.bus.on('player.hurt', () => { hurt = true; });
+    let guard = 0;
+    while (runEnds.count === 0 && guard++ < 3000) stack.step(STEP);
+    expect(hurt).toBe(true);
+    expect(runEnds.count).toBe(1);
+    expect(encounter.hitStop.active).toBe(false);
+    const t = recorder.nowMs;
+    stack.step(STEP);
+    expect(recorder.nowMs).toBeCloseTo(t + STEP);
+  });
+
+  it('a bomb kill and a bow kill request no freeze', () => {
+    const { stack } = started();
+    const { encounter } = stack;
+    encounter.bus.emit('enemy.hurt', { dmg: 30, hp_after: 0, actionId: 'item.bomb' });
+    encounter.bus.emit('enemy.hurt', { dmg: 10, hp_after: 0, actionId: 'bow.shot' });
+    expect(encounter.hitStop.active).toBe(false);
+  });
+});
+
 describe('TelemetryStack hit-stop', () => {
   it('a frozen step advances neither the log time, the enemy, the player, the opportunities nor the stamina', () => {
     const { stack } = started();

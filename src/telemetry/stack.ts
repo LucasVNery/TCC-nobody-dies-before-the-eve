@@ -93,6 +93,7 @@ export function createTelemetryStack(opts: TelemetryStackOptions): TelemetryStac
     },
     closeAbandonedRun,
     startSession(sessionStart, abandoned) {
+      encounter.hitStop.reset();
       recorder.log('session.start', sessionStart);
       if (abandoned) closeAbandonedRun(abandoned);
       director.start();

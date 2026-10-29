@@ -13,20 +13,29 @@ export const HITSTOP_COOLDOWN_STEPS = 6;
 export class HitStop {
   private remaining = 0;
   private cooldown = 0;
+  /** Armed this step: no frozen step consumed yet, so a larger simultaneous request may still raise it. */
+  private fresh = false;
 
   get active(): boolean {
     return this.remaining > 0;
   }
 
   request(steps: number): void {
-    if (this.remaining > 0 || this.cooldown > 0 || steps <= 0) return;
+    if (steps <= 0 || this.cooldown > 0) return;
+    if (this.remaining > 0) {
+      // Simultaneous impacts in the same step take the largest; a running freeze is never extended.
+      if (this.fresh && steps > this.remaining) this.remaining = steps;
+      return;
+    }
     this.remaining = steps;
+    this.fresh = true;
   }
 
   /** One frozen step. When the last one is consumed the cooldown starts. */
   consume(): void {
     if (this.remaining <= 0) return;
     this.remaining -= 1;
+    this.fresh = false;
     if (this.remaining === 0) this.cooldown = HITSTOP_COOLDOWN_STEPS;
   }
 
@@ -38,5 +47,6 @@ export class HitStop {
   reset(): void {
     this.remaining = 0;
     this.cooldown = 0;
+    this.fresh = false;
   }
 }

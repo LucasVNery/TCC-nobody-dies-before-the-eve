@@ -118,8 +118,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
 
   /** Fresh Assaltante at `position`; see AssaltanteController.respawn for `reason`. */
   respawnEnemy(position: Vec2, reason: InvalidReason): void {
+    // No hitStop.reset(): the killing blow's freeze must survive the respawn that follows it.
     this.assaltante.respawn(position, reason);
-    this.hitStop.reset();
     this.projectiles.clear();
     this.defenseRecordedThisAttack = false;
     this.firstLandingProcessed = false;

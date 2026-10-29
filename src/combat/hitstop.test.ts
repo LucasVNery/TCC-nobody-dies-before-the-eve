@@ -36,6 +36,22 @@ describe('HitStop', () => {
     expect(freeze(h)).toBe(3);
   });
 
+  it('simultaneous requests before any frozen step take the largest, in either order', () => {
+    for (const order of [[5, 2], [2, 5]]) {
+      const h = new HitStop();
+      for (const n of order) h.request(n);
+      expect(freeze(h)).toBe(5);
+    }
+  });
+
+  it('a request after the first frozen step never raises the freeze', () => {
+    const h = new HitStop();
+    h.request(2);
+    h.consume();
+    h.request(5);
+    expect(freeze(h)).toBe(1);
+  });
+
   it('is ignored until 6 free steps pass after the previous freeze, then accepted', () => {
     const h = new HitStop();
     h.request(2);

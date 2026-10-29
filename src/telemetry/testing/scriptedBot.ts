@@ -44,6 +44,12 @@ export function runBot(stack: TelemetryStack, ticks: number) {
   const { encounter } = stack;
   let threatTicks = 0;
   for (let i = 0; i < ticks; i++) {
+    // Hit-stop freezes the simulation: the bot has nothing to react to, and tick-indexed cadences/threat timers
+    // would drift against a frozen world. It waits the frozen step out.
+    if (encounter.hitStop.active) {
+      stack.step(1000 / 60);
+      continue;
+    }
     const p = encounter.player.position;
     const e = encounter.assaltante.position;
     const dx = e.x - p.x;

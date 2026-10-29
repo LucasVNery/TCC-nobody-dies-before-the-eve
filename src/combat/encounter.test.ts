@@ -1479,18 +1479,29 @@ describe('hit-stop requests', () => {
     expect(frozenSteps(encounter)).toBe(4);
   });
 
-  it('resetPlayer and respawnEnemy end a freeze and its cooldown', () => {
+  it('simultaneous perfect dodge (5) and light hit (2) freeze 5 in either order', () => {
+    for (const first of ['perfect', 'light'] as const) {
+      const encounter = fresh();
+      const perfect = () => encounter.bus.emit('player.defense', { label: 'dodge', perfect: true, refund: 10 });
+      const light = () => encounter.bus.emit('enemy.hurt', { dmg: 5, hp_after: 50, actionId: 'sword_shield.light' });
+      if (first === 'perfect') { perfect(); light(); } else { light(); perfect(); }
+      expect(frozenSteps(encounter)).toBe(5);
+    }
+  });
+
+  it('resetPlayer ends a freeze and its cooldown; respawnEnemy keeps them', () => {
     const encounter = fresh();
     encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
     encounter.resetPlayer({ x: 0, y: 0 });
     expect(encounter.hitStop.active).toBe(false);
     encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
     frozenSteps(encounter); // cooldown now running
-    encounter.respawnEnemy({ x: 600, y: 0 }, 'source_interrupted');
+    encounter.resetPlayer({ x: 0, y: 0 });
     encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
     expect(frozenSteps(encounter)).toBe(4);
+    encounter.hitStop.reset();
     encounter.bus.emit('player.hurt', { dmg: 10, hp_after: 90 });
     encounter.respawnEnemy({ x: 600, y: 0 }, 'source_interrupted');
-    expect(encounter.hitStop.active).toBe(false);
+    expect(frozenSteps(encounter)).toBe(4);
   });
 });
