@@ -125,6 +125,11 @@ export class DirectionalSprite {
     this.sprite.setTint(color);
   }
 
+  /** Solid single-colour fill (hit flash); the next setTint call restores the additive tint. */
+  setTintFill(color: number): void {
+    this.sprite.setTintFill(color);
+  }
+
   private registerAnimations(): void {
     for (let row = 0; row < DIRECTION_COUNT; row++) {
       const idleKey = `${this.textures.idleTextureKey}_${row}`;

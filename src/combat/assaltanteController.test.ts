@@ -585,3 +585,85 @@ describe('AssaltanteController lunge', () => {
     expect(enemy.msUntilThreatens(far, 1)).toBeNull();
   });
 });
+
+describe('AssaltanteController telegraph view', () => {
+  const NEAR = { x: 70, y: 0 }; // enemy at x=100: player in melee range
+
+  it('is null outside a telegraph', () => {
+    const { enemy } = makeAssaltante();
+    expect(enemy.telegraph).toBeNull();
+    enemy.step(16, { x: -100, y: 0 }); // chasing
+    expect(enemy.telegraph).toBeNull();
+  });
+
+  it('swing: progress runs 0 -> 1 over 450 ms, then null in the active phase', () => {
+    const { enemy } = makeAssaltante();
+    const { enemy: e } = makeAssaltante();
+    e.step(1, NEAR); // enters 'attacking' (swing)
+    expect(e.state).toBe('attacking');
+    const start = e.telegraph;
+    expect(start?.kind).toBe('swing');
+    expect(start?.progress).toBeCloseTo(1 / 450, 6);
+    e.step(224, NEAR);
+    expect(e.telegraph?.progress).toBeCloseTo(225 / 450, 6);
+    e.step(224, NEAR);
+    expect(e.telegraph?.progress).toBeCloseTo(449 / 450, 6);
+    e.step(1, NEAR);
+    expect(e.telegraph).toBeNull();
+  });
+
+  it('swing: origin is the enemy centre and the reach matches the logical hitbox', () => {
+    const { enemy } = makeAssaltante();
+    enemy.step(1, NEAR);
+    enemy.step(450, NEAR); // into the active phase
+    const sector = enemy.attackHitbox();
+    expect(sector).not.toBeNull();
+    const { enemy: e } = makeAssaltante();
+    e.step(1, NEAR);
+    const t = e.telegraph!;
+    expect(t.origin).toEqual(sector!.origin);
+    expect(t.reach).toBe(sector!.reach);
+    expect(t.halfAngleRad).toBe(sector!.halfAngleRad);
+  });
+
+  it('slam: progress over 700 ms with radius 110', () => {
+    const { enemy } = makeAssaltante();
+    enemy.beginPattern('slam', NEAR);
+    expect(enemy.telegraph).toMatchObject({ kind: 'slam', progress: 0, radius: 110 });
+    enemy.step(350, NEAR);
+    expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);
+    enemy.step(349, NEAR);
+    expect(enemy.telegraph?.progress).toBeCloseTo(699 / 700, 6);
+    enemy.step(1, NEAR);
+    expect(enemy.telegraph).toBeNull();
+  });
+
+  it('combo: strike 1 over 450 ms, then strike 2 restarts over 320 ms', () => {
+    const { enemy } = makeAssaltante();
+    enemy.beginPattern('combo', NEAR);
+    expect(enemy.telegraph).toMatchObject({ kind: 'combo', progress: 0, hit: 1 });
+    enemy.step(225, NEAR);
+    expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);
+    enemy.step(225, NEAR); // telegraph done, strike 1 active
+    expect(enemy.telegraph).toBeNull();
+    enemy.step(150, NEAR); // active ends -> strike 2 telegraph begins
+    expect(enemy.telegraph).toMatchObject({ kind: 'combo', progress: 0, hit: 2 });
+    enemy.step(160, NEAR);
+    expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);
+  });
+
+  it('lunge: aim progress over 500 ms with travel 260, null once the charge starts', () => {
+    const { enemy } = makeAssaltante();
+    enemy.respawn({ x: 0, y: 600 }, 'source_interrupted');
+    for (let t = 0; t < LUNGE.cooldownMs; t += 16) enemy.step(16, { x: -5000, y: 600 });
+    const player = { x: 200, y: 600 };
+    enemy.step(1, player);
+    expect(enemy.state).toBe('lunging');
+    expect(enemy.telegraph).toMatchObject({ kind: 'lunge', travel: 260 });
+    expect(enemy.telegraph?.progress).toBeCloseTo(1 / 500, 6);
+    enemy.step(249, player);
+    expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);
+    enemy.step(250, player);
+    expect(enemy.telegraph).toBeNull();
+  });
+});

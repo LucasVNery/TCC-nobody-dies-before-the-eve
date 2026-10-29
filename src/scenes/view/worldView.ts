@@ -11,6 +11,7 @@ import { DirectionalSprite } from '../../visual/directionalSprite';
 import { FLOOR_TILESET, SKIRT_TILES } from '../../visual/floor/composeFloor';
 import { FloorTracker } from '../../visual/floor/floorFromEvents';
 import { FLOOR_TILE_IDS } from '../../visual/floor/floorAssets';
+import { FLASH_MS } from '../../visual/feedbackDefs';
 import { PositionHistory } from '../../visual/stepInterpolation';
 import { FloorView } from './floorView';
 
@@ -30,6 +31,8 @@ export class WorldView {
   private readonly projectileGraphics: Phaser.GameObjects.Graphics;
   private readonly itemGraphics: Phaser.GameObjects.Graphics;
   private stepped = false;
+  private playerFlashUntil = 0;
+  private enemyFlashUntil = 0;
 
   constructor(scene: Phaser.Scene) {
     // The floor container must exist before any other world object and before CameraRig.attach.
@@ -73,6 +76,13 @@ export class WorldView {
     }
   }
 
+  /** White flash of FLASH_MS on the entity that was hit; the normal tint logic resumes afterwards. */
+  flash(target: 'player' | 'enemy'): void {
+    const until = performance.now() + FLASH_MS;
+    if (target === 'player') this.playerFlashUntil = until;
+    else this.enemyFlashUntil = until;
+  }
+
   /** Records the step positions; called after every simulation step. */
   recordStep(encounter: Encounter<ProfileSink>): void {
     this.playerTrail.push(encounter.player.position);
@@ -87,7 +97,9 @@ export class WorldView {
     if (!this.stepped) this.recordStep(encounter); // first frame before any step
     this.playerSprite.syncPosition(this.playerTrail.at(alpha));
     this.playerSprite.syncDirection(encounter.player.facing, playerMoving);
-    this.playerSprite.setTint(encounter.player.isInvulnerable ? 0x8bc34a : 0xffffff);
+    const now = performance.now();
+    if (now < this.playerFlashUntil) this.playerSprite.setTintFill(0xffffff);
+    else this.playerSprite.setTint(encounter.player.isInvulnerable ? 0x8bc34a : 0xffffff);
 
     this.assaltanteSprite.syncPosition(this.assaltanteTrail.at(alpha));
     this.assaltanteSprite.syncDirection(
@@ -98,7 +110,8 @@ export class WorldView {
     const lunge = encounter.assaltante.lungePhase;
     const tint =
       lunge === 'telegraph' ? 0x00bcd4 : lunge === 'charge' ? 0xf44336 : encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff;
-    this.assaltanteSprite.setTint(tint);
+    if (now < this.enemyFlashUntil) this.assaltanteSprite.setTintFill(0xffffff);
+    else this.assaltanteSprite.setTint(tint);
 
     // Placeholder arrows: one small circle per active projectile (logic positions).
     const g = this.projectileGraphics;

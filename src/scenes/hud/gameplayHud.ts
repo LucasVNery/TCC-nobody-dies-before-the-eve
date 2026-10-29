@@ -28,6 +28,8 @@ export interface GameplayHudData {
   encTotal: number;
 }
 
+const STAMINA_FLASH_MS = 300;
+
 const HELP_LINES = [
   'Controls:',
   '  WASD        - move',
@@ -41,6 +43,7 @@ const HELP_LINES = [
   '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
   '  F           - usar item (cura / poder / bomba)',
   '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
+  '  F3          - mostrar/ocultar hitboxes (depuracao)',
 ];
 
 /** Plain-text bar, 10 cells for 0..100. */
@@ -53,14 +56,20 @@ function staminaBar(value: number): string {
 export class GameplayHud {
   readonly objects: Phaser.GameObjects.GameObject[];
   private readonly statusText: Phaser.GameObjects.Text;
+  private readonly staminaText: Phaser.GameObjects.Text;
+  private readonly runText: Phaser.GameObjects.Text;
+  private staminaFlashUntil = 0;
   private readonly weaponText: Phaser.GameObjects.Text;
   private readonly hintText: Phaser.GameObjects.Text;
   private readonly helpText: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene) {
-    this.statusText = scene.add.text(10, 10, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' });
+    const line = { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' };
+    this.statusText = scene.add.text(10, 10, '', line);
+    this.staminaText = scene.add.text(10, 29, '', line);
+    this.runText = scene.add.text(10, 48, '', line);
     this.weaponText = scene.add.text(10, 690, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffeb3b' });
-    this.hintText = scene.add.text(10, 665, 'Tab: painel · H: controles', {
+    this.hintText = scene.add.text(10, 665, 'Tab: painel · H: controles · F3: hitboxes', {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#aaaaaa',
@@ -71,18 +80,25 @@ export class GameplayHud {
       color: '#ffffff',
     });
     this.helpText.setVisible(false);
-    for (const t of [this.statusText, this.weaponText, this.hintText, this.helpText]) t.setScrollFactor(0);
-    this.objects = [this.statusText, this.weaponText, this.hintText, this.helpText];
+    for (const t of [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText]) t.setScrollFactor(0);
+    this.objects = [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText];
   }
 
   update(m: GameplayHudData): void {
-    this.statusText.setText([
-      `HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`,
-      `estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/100${m.stamina <= 0 ? ' EXAUSTO' : ''}`,
-      `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`,
-    ]);
+    const exhausted = m.stamina <= 0;
+    this.statusText.setText(`HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`);
+    this.staminaText.setText(`estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/100${exhausted ? ' EXAUSTO' : ''}`);
+    const flashing = performance.now() < this.staminaFlashUntil;
+    this.staminaText.setColor(exhausted || flashing ? '#ff5252' : '#ffffff');
+    this.staminaText.setBackgroundColor(flashing ? '#7f0000' : '');
+    this.runText.setText(`run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`);
     const item = m.heldItem ? ITEM_LABELS[m.heldItem] : '-';
     this.weaponText.setText(`Arma: ${m.weaponLabel} · Item: ${item}${m.powerActive ? ' · PODER' : ''}`);
+  }
+
+  /** Brief flash of the stamina line when an action was denied for lack of stamina. */
+  flashStamina(): void {
+    this.staminaFlashUntil = performance.now() + STAMINA_FLASH_MS;
   }
 
   toggleHelp(): void {

@@ -20,6 +20,24 @@ export const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
 const LUNGE_DODGE_WINDOW_MS = LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;
 
+/** Presentation view of the wind-up in progress; progress runs 0..1 across the current telegraph. */
+export interface TelegraphView {
+  kind: AttackKind;
+  progress: number;
+  /** Enemy centre. */
+  origin: Vec2;
+  direction: Vec2;
+  /** Same reach as the logical hitbox (centre-based). */
+  reach: number;
+  halfAngleRad: number;
+  /** Slam radius. */
+  radius?: number;
+  /** Lunge travel distance. */
+  travel?: number;
+  /** Combo strike (1 or 2). */
+  hit?: 1 | 2;
+}
+
 export class AssaltanteController implements ThreatAssessor {
   state: EnemyState = 'idle';
   hp = ASSALTANTE_MAX_HP;
@@ -90,6 +108,49 @@ export class AssaltanteController implements ThreatAssessor {
     if (this.state === 'lunging') return 'lunge';
     if (this.state === 'attacking') return this.patternKind;
     return null;
+  }
+
+  /** The wind-up in progress (swing, combo strike, slam or lunge aim); null outside any telegraph. */
+  get telegraph(): TelegraphView | null {
+    const origin = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
+    const direction = { x: this._attackDirection.x, y: this._attackDirection.y };
+    if (this.state === 'lunging') {
+      if (this.lungeMoving) return null;
+      return {
+        kind: 'lunge',
+        progress: Math.min(1, this.phaseElapsedMs / LUNGE.telegraphMs),
+        origin,
+        direction,
+        reach: ATTACK_REACH + this.width / 2,
+        halfAngleRad: ATTACK_HALF_ANGLE_RAD,
+        travel: LUNGE.maxTravel,
+      };
+    }
+    if (this.state !== 'attacking') return null;
+    const tele = this.strikeTelegraphMs;
+    if (this.phaseElapsedMs >= tele) return null;
+    const progress = this.phaseElapsedMs / tele;
+    if (this.patternKind === 'slam') {
+      return {
+        kind: 'slam',
+        progress,
+        origin,
+        direction,
+        reach: ELITE.slamRadius + this.width / 2,
+        halfAngleRad: Math.PI,
+        radius: ELITE.slamRadius,
+      };
+    }
+    const view: TelegraphView = {
+      kind: this.patternKind,
+      progress,
+      origin,
+      direction,
+      reach: ATTACK_REACH + this.width / 2,
+      halfAngleRad: ATTACK_HALF_ANGLE_RAD,
+    };
+    if (this.patternKind === 'combo') view.hit = this.comboStrike;
+    return view;
   }
 
   /** HP damage of the strike in progress (the slam hits harder). */

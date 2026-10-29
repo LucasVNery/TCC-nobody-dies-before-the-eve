@@ -53,13 +53,25 @@ export function rangeEllipseSize(range: number, p: GroundProjection): { width: n
 
 export class DebugDraw {
   private readonly graphics: Phaser.GameObjects.Graphics;
+  private visible = false;
 
   constructor(scene: Phaser.Scene) {
     this.graphics = scene.add.graphics();
     this.graphics.setDepth(100000);
   }
 
+  /** Hitboxes start hidden; F3 toggles them. */
+  toggle(): void {
+    this.visible = !this.visible;
+    if (!this.visible) this.graphics.clear();
+  }
+
+  get isVisible(): boolean {
+    return this.visible;
+  }
+
   draw(encounter: Encounter<ProfileSink>): void {
+    if (!this.visible) return;
     const g = this.graphics;
     g.clear();
 

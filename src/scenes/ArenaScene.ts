@@ -12,6 +12,7 @@ import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindHotkeys } from './input/hotkeys';
 import { CameraRig } from './view/cameraRig';
 import { WorldView } from './view/worldView';
+import { FeedbackView } from './view/feedbackView';
 import { DebugDraw } from './view/debugDraw';
 import { GameplayHud, WEAPON_LABELS } from './hud/gameplayHud';
 import { MetricsAggregator } from '../debug/analysis/metricsAggregator';
@@ -50,6 +51,7 @@ export class ArenaScene extends Phaser.Scene {
   private world!: WorldView;
   private cameraRig!: CameraRig;
   private debugDraw!: DebugDraw;
+  private feedback!: FeedbackView;
   private hud!: GameplayHud;
   private panel!: AnalysisPanel;
   private gate!: RefreshGate;
@@ -84,6 +86,11 @@ export class ArenaScene extends Phaser.Scene {
     // Every Phaser object exists before the camera rig splits world and UI.
     this.world = new WorldView(this);
     this.debugDraw = new DebugDraw(this);
+    this.feedback = new FeedbackView(this, {
+      shake: (px, decayMs) => this.cameraRig.shake(px, decayMs),
+      flash: (target) => this.world.flash(target),
+      staminaDenied: () => this.hud.flashStamina(),
+    });
     this.hud = new GameplayHud(this);
     this.cameraRig = new CameraRig(this);
     this.cameraRig.attach(this.world.playerSprite.gameObject, this.hud.objects);
@@ -101,6 +108,7 @@ export class ArenaScene extends Phaser.Scene {
         }),
       togglePanel: () => this.panel.toggle(),
       toggleHelp: () => this.hud.toggleHelp(),
+      toggleDebug: () => this.debugDraw.toggle(),
     });
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void session.persist() });
@@ -113,7 +121,7 @@ export class ArenaScene extends Phaser.Scene {
     void session.start({
       after: this.previousShutdown,
       onStackReady: (stack, history) => {
-        const { aggregator: agg, tape, world } = this;
+        const { aggregator: agg, tape, world, feedback } = this;
         agg.applyAll(history);
         stack.recorder.subscribe((e) => {
           // recorder.log rethrows listener errors into the game loop; the HUD must never break it.
@@ -121,6 +129,7 @@ export class ArenaScene extends Phaser.Scene {
             agg.apply(e);
             tape.push(e);
             world.handleEvent(e);
+            feedback.handleEvent(e);
           } catch (err) {
             console.warn('[analysis] failed to fold an event', err);
           }
@@ -177,6 +186,7 @@ export class ArenaScene extends Phaser.Scene {
       powerActive: encounter.items.powerActive,
       run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,
     });
+    this.feedback.update(encounter);
     this.debugDraw.draw(encounter);
 
     if (!this.gate.due(performance.now(), this.panel.visible)) return;
