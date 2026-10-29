@@ -2,6 +2,7 @@
 import type { LoggedEvent } from '../../telemetry/schema';
 import { MOVING_SPEED_EPS, type Derived } from './streamTracker';
 import type { Distribution, ItemKindId, OppStats, SpendKind, WindowMetrics } from './metricsTypes';
+import { STAMINA_MAX } from '../../combat/stamina';
 
 const div = (a: number, b: number): number | null => (b > 0 && Number.isFinite(a / b) ? a / b : null);
 const bump = (m: Record<string, number>, k: string): void => {
@@ -11,7 +12,7 @@ const neutralOpp = (): OppStats => ({
   taken: 0, missed: 0, expired: 0, invalid: 0, rate: null, omission: null,
 });
 
-const HIGH_STAMINA = 80;
+const HIGH_STAMINA = 0.8 * STAMINA_MAX; // the panel labels it 'estamina ≥ 80%'
 const SPEND_KINDS: SpendKind[] = ['attack', 'sprint', 'dodge', 'block'];
 const zeroSpent = (): Record<SpendKind, number> => ({ attack: 0, sprint: 0, dodge: 0, block: 0 });
 const zeroUses = (): Record<ItemKindId, number> => ({ heal: 0, power: 0, bomb: 0 });
@@ -162,7 +163,7 @@ export class WindowAccumulator {
         }
         break;
       case 'enemy.attack_start':
-        // isWellFormed guarantees kind is absent or a known kind; absent (old logs) means swing.
+        // kind is absent (old logs: counted as swing) or any string (unknown kinds are counted as given).
         this.enemyAttackCount += 1;
         bump(this.enemyAttackKinds, typeof ev.kind === 'string' ? ev.kind : 'swing');
         break;

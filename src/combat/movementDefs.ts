@@ -13,8 +13,6 @@ export const ATTACK_HALF_ANGLE_RAD = Math.PI / 4; // 45° pra cada lado da mira 
 // Sub-project 5a (spec 2026-09-30 §3.1) — initial balance values, tune in playtest.
 export const PLAYER_MAX_HP = 100;
 export const ASSALTANTE_MAX_HP = 160;
-/** Damage of an unmitigated Assaltante hit. Block and parry deal no HP damage (block already costs stamina). */
-export const ASSALTANTE_HIT_DAMAGE = 20;
 /** Damage dealt by one connecting player action, applied at most once per action. */
 export const PLAYER_DAMAGE_BY_ACTION_TYPE: Record<ActionType, number> = {
   light: 10,

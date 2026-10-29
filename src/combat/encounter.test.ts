@@ -7,7 +7,7 @@ import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs, ACTION_REGISTRY } from './actionRegistry';
 import type { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { ProfileSink } from '../profile/profileSink';
-import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE, ASSALTANTE_HIT_DAMAGE } from './movementDefs';
+import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE } from './movementDefs';
 import { STAMINA_COST, STAMINA_MAX } from './stamina';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { ELITE_TELEGRAPH_MS } from './eliteDefs';
@@ -1044,11 +1044,11 @@ describe('Encounter lunge', () => {
     expect(encounter.player.hp).toBe(PLAYER_MAX_HP);
     stepTo(encounter, LUNGE.telegraphMs / STEP_MS, L + 3);
     expect(hurts).toHaveLength(1);
-    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - ASSALTANTE_HIT_DAMAGE);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - 20);
     expect(encounter.player.state).toBe('staggered');
     stepTo(encounter, L + 3, L + 60); // the body keeps moving through the player: no second hit
     expect(hurts).toHaveLength(1);
-    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - ASSALTANTE_HIT_DAMAGE);
+    expect(encounter.player.hp).toBe(PLAYER_MAX_HP - 20);
     expect(defenses).toEqual([]);
   });
 

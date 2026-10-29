@@ -164,7 +164,7 @@ export class AssaltanteController implements ThreatAssessor {
   /** Telegraph of the strike in progress, in ms. */
   private get strikeTelegraphMs(): number {
     if (this.patternKind === 'slam') return ELITE_TELEGRAPH_MS.slam;
-    if (this.patternKind === 'combo' && this.comboStrike === 2) return ELITE.comboGapTelegraphMs;
+    if (this.patternKind === 'combo' && this.comboStrike === 2) return ELITE_TELEGRAPH_MS.combo;
     return ELITE_TELEGRAPH_MS.swing;
   }
 
@@ -363,7 +363,7 @@ export class AssaltanteController implements ThreatAssessor {
 
     let patternEnd = strikeEnd;
     if (this.patternKind === 'combo' && this.comboStrike === 1) {
-      const second = strikeEnd + ELITE.comboGapTelegraphMs;
+      const second = strikeEnd + ELITE_TELEGRAPH_MS.combo;
       const circle = directionalSector(center, this._attackDirection, radius, Math.PI);
       if (second <= horizonMs && sectorOverlapsBox(circle, target)) return second;
       patternEnd = second + SWING_MS;

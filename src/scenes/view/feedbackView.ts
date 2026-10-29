@@ -55,7 +55,7 @@ function centre(pos: Vec2): Vec2 {
 }
 
 function hitKind(actionId: string): 'light' | 'heavy' {
-  // actionIds outside the registry (item.bomb, bow.shot) shake as light.
+  // Everything that is not heavy/charged (bow.shot is a 'throw'; item.bomb is not in the registry) shakes as light.
   const type = ACTION_REGISTRY.get(actionId)?.actionType;
   return type === 'heavy' || type === 'charged' ? 'heavy' : 'light';
 }

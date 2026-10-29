@@ -77,7 +77,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     });
 
     this.bus.on('enemy.hurt', (e) => {
-      // item.* and bow.shot ids are not in the registry: they never freeze.
+      // Only light/heavy/charged freeze: bow.shot is a 'throw' and item.* ids are not in the registry.
       const type = ACTION_REGISTRY.get(e.actionId)?.actionType;
       if (type === 'light' || type === 'heavy' || type === 'charged') this.hitStop.request(HITSTOP_STEPS[type]);
     });

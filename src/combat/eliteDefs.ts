@@ -6,7 +6,6 @@ export const ELITE_TELEGRAPH_MS = { swing: 450, combo: 320, lunge: 500, slam: 70
 
 /** Elite tuning (ms unless noted; radius in px). */
 export const ELITE = {
-  comboGapTelegraphMs: 320,
   slamRadius: 110,
   slamDamage: 30,
   slamRecoveryMs: 600,

@@ -27,7 +27,7 @@ export type ItemKindId = 'heal' | 'power' | 'bomb';
 export interface StaminaMetrics {
   /** Sum(stam*dt)/Sum(dt) between consecutive samples of the same run; each interval weighs the stam at its end. */
   meanLevel: number | null;
-  /** Time with stam >= 80 over total time. */
+  /** Time with stam >= 80% of STAMINA_MAX over total time. */
   highFraction: number | null;
   /** Time with stam <= 0 over total time. */
   exhaustedFraction: number | null;

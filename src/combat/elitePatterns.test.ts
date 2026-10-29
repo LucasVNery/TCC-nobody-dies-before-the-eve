@@ -282,7 +282,7 @@ describe('combo', () => {
     steps(encounter, 1, 1);
     const behind = { x: 60, y: 0, width: 20, height: 20 }; // behind the elite, aimed left
     const t = a.msUntilThreatens(behind, 2000);
-    expect(t).toBe(ELITE_TELEGRAPH_MS.swing + 150 - STEP_MS + ELITE.comboGapTelegraphMs);
+    expect(t).toBe(ELITE_TELEGRAPH_MS.swing + 150 - STEP_MS + ELITE_TELEGRAPH_MS.combo);
   });
 });
 

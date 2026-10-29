@@ -1,5 +1,8 @@
 import type Phaser from 'phaser';
 import type { ItemKind } from '../../game/items';
+import { STAMINA_MAX } from '../../combat/stamina';
+
+const STAMINA_BAR_CELLS = 15;
 
 export const WEAPON_LABELS: Record<string, string> = {
   sword_shield: 'Espada + Escudo',
@@ -46,10 +49,10 @@ const HELP_LINES = [
   '  F3          - mostrar/ocultar hitboxes (depuracao)',
 ];
 
-/** Plain-text bar, 10 cells for 0..100. */
-function staminaBar(value: number): string {
-  const filled = Math.max(0, Math.min(10, Math.ceil(value / 10)));
-  return `[${'#'.repeat(filled)}${'-'.repeat(10 - filled)}]`;
+/** Plain-text bar of `cells` cells for 0..max; any value above 0 shows at least one cell. */
+export function staminaBar(value: number, max: number = STAMINA_MAX, cells: number = STAMINA_BAR_CELLS): string {
+  const filled = value > 0 ? Math.max(0, Math.min(cells, Math.ceil((value / max) * cells))) : 0;
+  return `[${'#'.repeat(filled)}${'-'.repeat(cells - filled)}]`;
 }
 
 /** Minimal player HUD; the help list is hidden until toggled. */
@@ -87,7 +90,7 @@ export class GameplayHud {
   update(m: GameplayHudData): void {
     const exhausted = m.stamina <= 0;
     this.statusText.setText(`HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`);
-    this.staminaText.setText(`estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/100${exhausted ? ' EXAUSTO' : ''}`);
+    this.staminaText.setText(`estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/${STAMINA_MAX}${exhausted ? ' EXAUSTO' : ''}`);
     const flashing = performance.now() < this.staminaFlashUntil;
     this.staminaText.setColor(exhausted || flashing ? '#ff5252' : '#ffffff');
     this.staminaText.setBackgroundColor(flashing ? '#7f0000' : '');

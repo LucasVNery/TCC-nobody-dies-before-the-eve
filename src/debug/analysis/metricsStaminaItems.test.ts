@@ -25,8 +25,8 @@ describe('stamina metrics', () => {
     expect(s.exhaustedFraction).toBe(0.5);
   });
 
-  it('counts the high fraction at stam >= 80', () => {
-    const s = metricsFromLog([S(0, 50), S(250, 80), S(500, 79.9)]).windows.history.stamina;
+  it('counts the high fraction at stam >= 80% of STAMINA_MAX (120)', () => {
+    const s = metricsFromLog([S(0, 50), S(250, 120), S(500, 119.9)]).windows.history.stamina;
     expect(s.highFraction).toBe(0.5);
   });
 
