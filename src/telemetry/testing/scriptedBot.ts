@@ -29,7 +29,7 @@ export function makeBotStack(opts: BotStackOptions = {}) {
   return { stack, runEnds };
 }
 
-/** Ticks into a swing telegraph at which the bot dodges: 5/6 of TELEGRAPH_MS = ~333 ms into the 400 ms telegraph, so the 150 ms i-frames cover the hit. */
+/** Ticks into a swing telegraph at which the bot dodges: 5/6 of TELEGRAPH_MS = ~375 ms into the 450 ms telegraph, so the 150 ms i-frames cover the hit. */
 const SWING_DODGE_TICK = Math.round(((TELEGRAPH_MS * 5) / 6) / (1000 / 60));
 /** Ticks into a lunge at which the bot dodges: the end of its telegraph (the charge starts). */
 const LUNGE_DODGE_TICK = Math.round(LUNGE.telegraphMs / (1000 / 60));

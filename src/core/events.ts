@@ -4,6 +4,7 @@ import type { ActionType } from '../combat/actionRegistry';
 import type { DefensiveLabel } from '../profile/profileAccumulator';
 import type { ProfileSnapshotPayload } from '../profile/types';
 import type { ItemKind } from '../game/items';
+import type { AttackKind } from '../combat/eliteDefs';
 
 export interface PlayerActionPayload {
   actionId: string;
@@ -83,7 +84,7 @@ export type GameEvents = {
   'player.stamina_denied': { action: string };
   'player.guard_break': EmptyPayload;
   'player.hurt': PlayerHurtPayload;
-  'enemy.attack_start': { kind: 'swing' | 'lunge' };
+  'enemy.attack_start': { kind: AttackKind; hit?: 1 | 2 };
   'enemy.hurt': EnemyHurtPayload;
   'projectile.hit': { id: number; dmg: number };
   'projectile.expire': { id: number };

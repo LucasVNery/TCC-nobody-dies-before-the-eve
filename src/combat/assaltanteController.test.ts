@@ -100,7 +100,7 @@ describe('AssaltanteController', () => {
     const { enemy, opp, bus } = makeAssaltante();
     enemy.step(16, { x: 70, y: 0 });
     let elapsed = 16;
-    while (elapsed < 416) {
+    while (elapsed < 464) {
       enemy.step(16, { x: 70, y: 0 });
       elapsed += 16;
     }
@@ -126,7 +126,7 @@ describe('AssaltanteController', () => {
     enemy.step(16, { x: 130, y: 0 }); // player to the right, distance 30
     expect(enemy.state).toBe('attacking');
     let elapsed = 16;
-    while (elapsed < 416) {
+    while (elapsed < 464) {
       enemy.step(16, { x: 130, y: 0 });
       elapsed += 16;
     }
@@ -148,7 +148,7 @@ describe('AssaltanteController', () => {
     enemy.step(16, { x: 100, y: -30 }); // player directly above, distance 30
     expect(enemy.state).toBe('attacking');
     let elapsed = 16;
-    while (elapsed < 416) {
+    while (elapsed < 464) {
       enemy.step(16, { x: 100, y: -30 });
       elapsed += 16;
     }
@@ -267,7 +267,7 @@ describe('AssaltanteController', () => {
     enemy.step(16, playerPos);
     expect(enemy.state).toBe('attacking');
     let elapsed = 16;
-    while (elapsed < 416) {
+    while (elapsed < 464) {
       enemy.step(16, playerPos);
       elapsed += 16;
     }
@@ -288,7 +288,7 @@ describe('AssaltanteController', () => {
     enemy.step(16, { x: 70, y: 0 }); // distance 30 <= ATTACK_RANGE(60) -> attacking, aimed left
     expect(enemy.state).toBe('attacking');
     const target = { x: 70, y: 0, width: 20, height: 20 };
-    expect(enemy.msUntilThreatens(target, 500)).toBe(384); // TELEGRAPH_MS(400) - phaseElapsedMs(16)
+    expect(enemy.msUntilThreatens(target, 500)).toBe(434); // TELEGRAPH_MS(450) - phaseElapsedMs(16)
   });
 
   it('emits enemy.attack_start when it starts an attack', () => {

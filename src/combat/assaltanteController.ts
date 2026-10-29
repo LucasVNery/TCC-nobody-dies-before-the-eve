@@ -7,12 +7,14 @@ import type { ActionId, InvalidReason } from '../opportunity/types';
 import { ASSALTANTE_RULES, ATTACK_RANGE, type Blackboard } from '../ai/rules/assaltanteRules';
 import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD, ASSALTANTE_MAX_HP, LUNGE } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
-import { directionalSector, type AttackSector } from './sector';
+import { directionalSector, sectorOverlapsBox, type AttackSector } from './sector';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
+import { ELITE, ELITE_TELEGRAPH_MS, type AttackKind } from './eliteDefs';
 import { predictThreatMs, type ChaseTelegraphConfig, type ChaseTelegraphSnapshot } from './threatPrediction';
 import type { ThreatAssessor } from './patience';
 
-export const TELEGRAPH_MS = 400; // = dodge window
+/** The plain swing's telegraph; the real value logged as windows_ms.telegraph_swing. */
+export const TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
 const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
 const LUNGE_DODGE_WINDOW_MS = LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;
@@ -38,6 +40,10 @@ export class AssaltanteController implements ThreatAssessor {
   private lungeDodgeOppId: string | null = null;
   private recoveryDurationMs = RECOVERY_MS;
   private playerPosition: Vec2 = { x: 0, y: 0 };
+  /** Kind of the pattern while `attacking`; the lunge has its own state. */
+  private patternKind: 'swing' | 'combo' | 'slam' = 'swing';
+  /** Which strike of the combo is in progress. */
+  private comboStrike: 1 | 2 = 1;
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -72,6 +78,70 @@ export class AssaltanteController implements ThreatAssessor {
     return this.state === 'attacking' || this.state === 'lunging';
   }
 
+  /** Kind of the attack in progress (the lunge included); null while not attacking. */
+  get attackKind(): AttackKind | null {
+    if (this.state === 'lunging') return 'lunge';
+    if (this.state === 'attacking') return this.patternKind;
+    return null;
+  }
+
+  /** HP damage of the strike in progress (the slam hits harder). */
+  get currentStrikeDamage(): number {
+    return this.state === 'attacking' && this.patternKind === 'slam' ? ELITE.slamDamage : ELITE.swingDamage;
+  }
+
+  /** Telegraph of the strike in progress, in ms. */
+  private get strikeTelegraphMs(): number {
+    if (this.patternKind === 'slam') return ELITE_TELEGRAPH_MS.slam;
+    if (this.patternKind === 'combo' && this.comboStrike === 2) return ELITE.comboGapTelegraphMs;
+    return ELITE_TELEGRAPH_MS.swing;
+  }
+
+  private get strikeActiveMs(): number {
+    return this.patternKind === 'slam' ? ELITE.slamActiveMs : SWING_MS;
+  }
+
+  /**
+   * Starts a combo or a ground slam now. Ignored unless the elite is idle or chasing
+   * (the weighted choice of the pattern lives in the selector, not here).
+   */
+  beginPattern(kind: 'combo' | 'slam', playerPosition: Vec2): void {
+    if (this.state !== 'idle' && this.state !== 'chasing') return;
+    const dx = playerPosition.x - this._position.x;
+    const dy = playerPosition.y - this._position.y;
+    this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
+    this.startPattern(kind, dx, dy, Math.hypot(dx, dy));
+  }
+
+  private startPattern(kind: 'swing' | 'combo' | 'slam', dx: number, dy: number, distanceToPlayer: number): void {
+    this.state = 'attacking';
+    this.patternKind = kind;
+    this.comboStrike = 1;
+    this.phaseElapsedMs = 0;
+    this.aimAt(dx, dy, distanceToPlayer);
+    // attack start first: it is the cause of the dodge window (log order = causal order)
+    this.bus.emit('enemy.attack_start', kind === 'combo' ? { kind, hit: 1 } : { kind });
+    this.activeOppId = this.opp.open(
+      'dodge',
+      kind === 'swing' ? 'assaltante.attack' : `assaltante.${kind}`,
+      this.strikeTelegraphMs + this.strikeActiveMs,
+    );
+  }
+
+  private aimAt(dx: number, dy: number, distance: number): void {
+    if (distance > 0) this._attackDirection = normalizeVelocity(dx, dy);
+  }
+
+  /** End of combo strike 1: its window closes through the normal expiry path, then strike 2 opens its own. */
+  private startSecondComboStrike(dx: number, dy: number, distance: number): void {
+    if (this.activeOppId) this.opp.expire(this.activeOppId);
+    this.comboStrike = 2;
+    this.phaseElapsedMs = 0;
+    this.aimAt(dx, dy, distance);
+    this.bus.emit('enemy.attack_start', { kind: 'combo', hit: 2 });
+    this.activeOppId = this.opp.open('dodge', 'assaltante.combo', this.strikeTelegraphMs + this.strikeActiveMs);
+  }
+
   get isDead(): boolean {
     return this.hp <= 0;
   }
@@ -99,6 +169,8 @@ export class AssaltanteController implements ThreatAssessor {
     this.lungeTravelled = 0;
     this.lungeLandedThisTick = false;
     this.recoveryDurationMs = RECOVERY_MS;
+    this.patternKind = 'swing';
+    this.comboStrike = 1;
   }
 
   private closeOpenWindows(reason: InvalidReason): void {
@@ -122,6 +194,8 @@ export class AssaltanteController implements ThreatAssessor {
     this.lungeLandedThisTick = false;
     this.playerWasInRangeDuringPunish = false;
     this.recoveryDurationMs = ms;
+    this.patternKind = 'swing';
+    this.comboStrike = 1;
   }
 
   hurtbox(): AABB {
@@ -132,9 +206,12 @@ export class AssaltanteController implements ThreatAssessor {
     const lungeStrike = this.state === 'lunging' && this.lungeMoving;
     if (!lungeStrike) {
       if (this.state !== 'attacking') return null;
-      if (this.phaseElapsedMs < TELEGRAPH_MS) return null;
+      if (this.phaseElapsedMs < this.strikeTelegraphMs) return null;
     }
     const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
+    if (this.state === 'attacking' && this.patternKind === 'slam') {
+      return directionalSector(center, this._attackDirection, ELITE.slamRadius + this.width / 2, Math.PI);
+    }
     return directionalSector(center, this._attackDirection, ATTACK_REACH + this.width / 2, ATTACK_HALF_ANGLE_RAD);
   }
 
@@ -167,13 +244,55 @@ export class AssaltanteController implements ThreatAssessor {
     const config: ChaseTelegraphConfig = {
       attackRange: ATTACK_RANGE,
       chaseSpeedPxPerSec: ASSALTANTE_CHASE_SPEED,
-      telegraphMs: TELEGRAPH_MS,
+      telegraphMs: this.state === 'attacking' ? this.strikeTelegraphMs : TELEGRAPH_MS,
       swingMs: SWING_MS,
-      recoveryMs: RECOVERY_MS,
+      recoveryMs: this.state === 'recovering' ? this.recoveryDurationMs : RECOVERY_MS,
       reach: ATTACK_REACH + this.width / 2,
       halfAngleRad: ATTACK_HALF_ANGLE_RAD,
     };
+    if (this.state === 'attacking' && this.patternKind !== 'swing') {
+      return this.patternThreatMs(config, snapshot, target, horizonMs);
+    }
     return predictThreatMs(config, snapshot, target, horizonMs);
+  }
+
+  /**
+   * Combo or slam in progress. Conservative: a combo's second strike is re-aimed at an unknown
+   * direction, so while strike 1 runs it threatens anyone inside the full reach circle.
+   */
+  private patternThreatMs(
+    config: ChaseTelegraphConfig,
+    snapshot: ChaseTelegraphSnapshot,
+    target: AABB,
+    horizonMs: number,
+  ): number | null {
+    const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
+    const tele = this.strikeTelegraphMs;
+    const active = this.strikeActiveMs;
+    const toActive = Math.max(0, tele - this.phaseElapsedMs);
+    const strikeEnd = tele + active - this.phaseElapsedMs;
+    const radius = this.patternKind === 'slam' ? ELITE.slamRadius + this.width / 2 : ATTACK_REACH + this.width / 2;
+    const aimed =
+      this.patternKind === 'slam'
+        ? directionalSector(center, this._attackDirection, radius, Math.PI)
+        : directionalSector(center, this._attackDirection, radius, ATTACK_HALF_ANGLE_RAD);
+    if (toActive <= horizonMs && sectorOverlapsBox(aimed, target)) return toActive;
+
+    let patternEnd = strikeEnd;
+    if (this.patternKind === 'combo' && this.comboStrike === 1) {
+      const second = strikeEnd + ELITE.comboGapTelegraphMs;
+      const circle = directionalSector(center, this._attackDirection, radius, Math.PI);
+      if (second <= horizonMs && sectorOverlapsBox(circle, target)) return second;
+      patternEnd = second + SWING_MS;
+    }
+    if (patternEnd > horizonMs) return null;
+    const tail = predictThreatMs(
+      this.patternKind === 'slam' ? { ...config, recoveryMs: ELITE.slamRecoveryMs } : config,
+      { ...snapshot, state: 'recovering', phaseElapsedMs: 0 },
+      target,
+      horizonMs - patternEnd,
+    );
+    return tail === null ? null : patternEnd + tail;
   }
 
   step(stepMs: number, playerPosition: Vec2): void {
@@ -197,12 +316,7 @@ export class AssaltanteController implements ThreatAssessor {
       const rule = ASSALTANTE_RULES.find((r) => r.precond(bb));
       this._activeRuleId = rule?.id ?? null;
       if (rule?.id === 'assaltante.attack') {
-        this.state = 'attacking';
-        this.phaseElapsedMs = 0;
-        this._attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this._attackDirection;
-        // attack start first: it is the cause of the dodge window (log order = causal order)
-        this.bus.emit('enemy.attack_start', { kind: 'swing' });
-        this.activeOppId = this.opp.open('dodge', 'assaltante.attack', TELEGRAPH_MS + SWING_MS);
+        this.startPattern('swing', dx, dy, distanceToPlayer);
       } else if (rule?.id === 'assaltante.lunge') {
         this.state = 'lunging';
         this.phaseElapsedMs = 0;
@@ -234,11 +348,17 @@ export class AssaltanteController implements ThreatAssessor {
     }
 
     if (this.state === 'attacking') {
-      if (this.phaseElapsedMs >= TELEGRAPH_MS + SWING_MS) {
+      if (this.phaseElapsedMs >= this.strikeTelegraphMs + this.strikeActiveMs) {
+        if (this.patternKind === 'combo' && this.comboStrike === 1) {
+          this.startSecondComboStrike(dx, dy, distanceToPlayer);
+          return;
+        }
+        const punishMs = this.patternKind === 'slam' ? ELITE.slamRecoveryMs : RECOVERY_MS;
         this.state = 'recovering';
         this.phaseElapsedMs = 0;
+        this.recoveryDurationMs = punishMs;
         this.playerWasInRangeDuringPunish = false;
-        this.activeOppId = this.opp.open('punish', 'assaltante.recover', RECOVERY_MS, () =>
+        this.activeOppId = this.opp.open('punish', 'assaltante.recover', punishMs, () =>
           this.playerWasInRangeDuringPunish
             ? { outcome: 'expired' }
             : { outcome: 'invalid', reason: 'out_of_range' },

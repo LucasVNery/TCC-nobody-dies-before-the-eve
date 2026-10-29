@@ -9,7 +9,7 @@ import type { ProfileSink } from '../profile/profileSink';
 import { sectorOverlapsBox } from './sector';
 import { PERFECT_DODGE_MS } from './actionDefs';
 import { STAMINA_COST } from './stamina';
-import { ATTACK_REACH, ASSALTANTE_HIT_DAMAGE, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
+import { ATTACK_REACH, PLAYER_DAMAGE_BY_ACTION_TYPE, PLAYER_MAX_HP } from './movementDefs';
 import type { AABB, Vec2 } from './types';
 import type { InvalidReason } from '../opportunity/types';
 import { resolveAction, lockedMs } from './actionRegistry';
@@ -188,8 +188,9 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       } else if (!this.defenseRecordedThisAttack) {
         this.player.enterStagger();
         this.bus.emit('player.hit_unmitigated', {});
-        this.player.takeDamage(ASSALTANTE_HIT_DAMAGE);
-        this.bus.emit('player.hurt', { dmg: ASSALTANTE_HIT_DAMAGE, hp_after: this.player.hp });
+        const strikeDamage = this.assaltante.currentStrikeDamage;
+        this.player.takeDamage(strikeDamage);
+        this.bus.emit('player.hurt', { dmg: strikeDamage, hp_after: this.player.hp });
         this.defenseRecordedThisAttack = true; // no dim-4 label, but the window is "resolved"
       }
     }

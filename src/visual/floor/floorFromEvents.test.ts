@@ -110,7 +110,7 @@ describe('FloorTracker against a real recorded log', () => {
   it('matches floorFromEvents for every room.enter of a bot session', () => {
     const { stack } = makeBotStack({ seedStart: 123 });
     stack.director.start();
-    runBot(stack, 30000);
+    runBot(stack, 120000);
     const log = JSON.parse(JSON.stringify(stack.recorder.drain())) as LoggedEvent[];
 
     const starts = log.filter((e) => e.type === 'run.start');

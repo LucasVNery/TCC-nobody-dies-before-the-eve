@@ -8,8 +8,9 @@ import type { ProfileSink } from '../profile/profileSink';
 import { ASSALTANTE_MAX_HP, PLAYER_MAX_HP, LUNGE, ASSALTANTE_HIT_DAMAGE } from './movementDefs';
 import { STAMINA_COST, STAMINA_MAX } from './stamina';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
+import { ELITE_TELEGRAPH_MS } from './eliteDefs';
 
-const TELEGRAPH_MS = 400;
+const TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
 const SWING_MS = 150;
 const STEP_MS = 16;
 
@@ -31,10 +32,10 @@ function attackWith(encounter: Encounter, actionId: string, totalMs: number) {
   runFor(encounter, totalMs);
 }
 
-// Dodge credited at the strike (TELEGRAPH_MS = 400 => the swing starts on tick 25).
+// Dodge credited at the strike (TELEGRAPH_MS = 450 => the swing starts on tick 29).
 // `dashTicksBeforeStrike` ticks before the strike tick the dash is pressed, so
 // the dash age at the strike tick is ticks * 16 ms.
-const STRIKE_TICK = TELEGRAPH_MS / STEP_MS;
+const STRIKE_TICK = Math.ceil(TELEGRAPH_MS / STEP_MS);
 function dashScenario(playerX: number, enemyX: number, dashTicksBeforeStrike: number, dashX: number) {
   const encounter = new Encounter(
     { x: playerX, y: 0, width: 20, height: 20 },
@@ -726,7 +727,7 @@ describe('Encounter', () => {
     // predictThreatMs that a pure telegraph-only test (like the two above)
     // never exercises. With ASSALTANTE_CHASE_SPEED=150px/s:
     //   closeMs = (150 - 60) / 150 * 1000 = 600ms
-    //   predictThreatMs = closeMs + TELEGRAPH_MS = 600 + 400 = 1000ms
+    //   predictThreatMs = closeMs + TELEGRAPH_MS = 600 + 450 = 1050ms
     // The real 16ms-step loop re-checks distance (and only *then* moves)
     // every tick. At 150px/s each tick covers 2.4px, so 90px closes in
     // 37.5 ticks (the prediction is continuous; the loop is within one tick of it)
@@ -782,7 +783,7 @@ describe('Encounter', () => {
       // the branch that would catch it: a wrong reach could make the
       // predicted sector miss the target (flipping this to null) or the real
       // sweep miss/hit differently than predicted.
-      expect(prediction).toBe(1000);
+      expect(prediction).toBe(1050);
       expect(hitEvents.length).toBeGreaterThan(0);
       expect(prediction !== null).toBe(hitEvents.length > 0);
     });

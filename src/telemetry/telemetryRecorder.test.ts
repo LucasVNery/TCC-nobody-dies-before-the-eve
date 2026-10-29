@@ -110,7 +110,7 @@ describe('TelemetryRecorder', () => {
     expect(first).toMatchObject({
       p_pos: [PLAYER_START.x, PLAYER_START.y],
       p_hp: 100,
-      e_hp: 60,
+      e_hp: 160,
       weapon: 'sword_shield',
       p_state: 'acting',
     });
@@ -152,7 +152,7 @@ describe('TelemetryRecorder', () => {
       stack.director.start();
       stack.encounter.respawnEnemy({ x: PLAYER_START.x + 30, y: PLAYER_START.y }, 'source_interrupted');
       stack.step(16); // Assaltante starts its attack
-      for (let i = 0; i < 20; i++) stack.step(16); // dodge is credited at the strike: press it ~60 ms before
+      for (let i = 0; i < 24; i++) stack.step(16); // dodge is credited at the strike: press it ~60 ms before the 450 ms telegraph ends
       stack.encounter.player.tryDodge();
       for (let i = 0; i < 6; i++) stack.step(16); // strike lands while the i-frames are up
       const events = stack.recorder.drain();

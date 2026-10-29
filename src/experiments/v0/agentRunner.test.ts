@@ -156,8 +156,8 @@ describe('agent runner', () => {
   });
 
   describe('stamina limits (Task 9)', () => {
-    // 60 runs of up to 60 s: every style simulates well over 600 s
-    const long = tiny({ runsPerAgent: 60, runsPerSession: 10, runCapMs: 60_000 });
+    // 150 runs of up to 60 s: every style simulates well over 600 s (the 160 HP elite kills the agents sooner, so more runs are needed)
+    const long = tiny({ runsPerAgent: 150, runsPerSession: 10, runCapMs: 60_000 });
     const logs = runExperiment(long);
 
     it.each(STYLE_IDS.map((id, i) => [id, i] as const))('%s: 600 s+ of play with no player.stamina_denied and >= 2 completed runs', (id, i) => {
