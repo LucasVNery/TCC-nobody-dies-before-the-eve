@@ -71,7 +71,11 @@ describe('choosePatternRule', () => {
     expect(draw(42)).not.toEqual(draw(43));
   });
 
-  it('at 50 u the swing, combo and slam follow 4 : 2 : 1.5 over 4000 draws (+-5% absolute)', () => {
+  it('pins the literal pattern weights', () => {
+    expect(ELITE_PATTERN_WEIGHTS).toEqual({ swing: 4, combo: 2, lunge: 2, slam: 1.5 });
+  });
+
+  it('at 50 u the swing, combo and slam follow 4 : 2 : 1.5 over 4000 draws (+-5% absolute, literal shares)', () => {
     const prng = createPrng(2026);
     const counts: Record<string, number> = {};
     const N = 4000;
@@ -79,10 +83,9 @@ describe('choosePatternRule', () => {
       const id = choosePatternRule(bb(50), prng).id;
       counts[id] = (counts[id] ?? 0) + 1;
     }
-    const total = ELITE_PATTERN_WEIGHTS.swing + ELITE_PATTERN_WEIGHTS.combo + ELITE_PATTERN_WEIGHTS.slam;
     expect(Object.keys(counts).sort()).toEqual(['assaltante.attack', 'assaltante.combo', 'assaltante.slam']);
-    expect(Math.abs(counts['assaltante.attack'] / N - ELITE_PATTERN_WEIGHTS.swing / total)).toBeLessThan(0.05);
-    expect(Math.abs(counts['assaltante.combo'] / N - ELITE_PATTERN_WEIGHTS.combo / total)).toBeLessThan(0.05);
-    expect(Math.abs(counts['assaltante.slam'] / N - ELITE_PATTERN_WEIGHTS.slam / total)).toBeLessThan(0.05);
+    expect(Math.abs(counts['assaltante.attack'] / N - 0.5333)).toBeLessThan(0.05); // 4 / 7.5
+    expect(Math.abs(counts['assaltante.combo'] / N - 0.2667)).toBeLessThan(0.05); // 2 / 7.5
+    expect(Math.abs(counts['assaltante.slam'] / N - 0.2)).toBeLessThan(0.05); // 1.5 / 7.5
   });
 });

@@ -1,4 +1,4 @@
-// src/combat/eliteTestKit.ts
+// src/combat/testing/eliteTestKit.ts
 // Test-only helper: lets fixtures that exercise a pattern skip the elite's opening delay
 // (2000 ms since birth) and the mandatory pause, without changing positions or timing.
 import type { AssaltanteController } from '../assaltanteController';

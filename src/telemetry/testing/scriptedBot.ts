@@ -59,8 +59,8 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     }
     if (i % 400 === 0) encounter.player.switchWeapon('sword_shield');
     if (i % 400 === 200) encounter.player.switchWeapon('heavy_weapon');
-    // Stamina-aware, no refill. Dodge ~20 ticks (333 ms) into the enemy's swing telegraph, so the 150 ms
-    // i-frames cover the hit (30 ticks into a lunge's), and only when the bar pays for it; light attacks go
+    // Stamina-aware, no refill. Dodge SWING_DODGE_LEAD_MS before a non-lunge strike lands (msUntilThreatens), so the i-frames
+    // cover the hit (30 ticks into a lunge's), and only when the bar pays for it; light attacks go
     // out only in its recovery (the punish window) so the bar regenerates while it winds up.
     // Cadences were tuned empirically: dodging at the telegraph edge or at 16 ticks, or attacking while
     // it winds up, left the bot with ~0 kills (it died every ~8 s).
