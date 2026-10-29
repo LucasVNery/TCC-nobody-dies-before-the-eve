@@ -100,6 +100,8 @@ export interface WindowMetrics {
   coverage: number | null;
   stamina: StaminaMetrics;
   items: ItemMetrics;
+  /** enemy.attack_start: one count per strike (both strikes of a combo); kind-less (pre-0.0.5) counts as swing. */
+  enemyAttacks: { count: number; byKind: Distribution };
 }
 
 export interface OpenOpportunity {

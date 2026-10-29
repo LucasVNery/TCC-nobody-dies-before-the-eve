@@ -67,6 +67,7 @@ const METRIC_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => strin
   { id: 'm11', name: 'M11 dano causado/sofrido (razão)', cell: (w) => `${fmtNum(w.damage.dealt, 0)}/${fmtNum(w.damage.taken, 0)} (${fmtNum(w.damage.ratio)}) ${DASH}` },
   { id: 'm12', name: 'M12 ciclo encontro/run', cell: (w) => `${fmtMs(w.cycle.meanEncounterMs)}/${fmtMs(w.cycle.meanRunMs)} ${fmtSample(w.cycle.encounters)}` },
   { id: 'm14', name: 'M14 ociosidade (4 Hz)', cell: (w) => `${fmtPercent(w.idleFraction)} ${fmtSample(w.samples)}` },
+  { id: 'm16', name: 'ataques do inimigo por tipo', cell: (w) => `${ATTACK_LABEL.map(([l, k]) => `${l}:${w.enemyAttacks.byKind.counts[k] ?? 0}`).join(' ')} H=${fmtNum(w.enemyAttacks.byKind.entropy)} ${fmtSample(w.enemyAttacks.count)}` },
   { id: 'm15', name: 'M15 cobertura (4 Hz)', cell: (w) => `${fmtPercent(w.coverage)} ${fmtSample(w.samples)}` },
 ];
 
@@ -93,6 +94,7 @@ const SPEND_LABEL: [string, 'attack' | 'sprint' | 'dodge' | 'block'][] = [
   ['atq', 'attack'], ['corr', 'sprint'], ['esq', 'dodge'], ['def', 'block'],
 ];
 const USE_LABEL: [string, 'heal' | 'power' | 'bomb'][] = [['cura', 'heal'], ['poder', 'power'], ['bomba', 'bomb']];
+const ATTACK_LABEL: [string, string][] = [['golpe', 'swing'], ['avanço', 'lunge'], ['combo', 'combo'], ['queda', 'slam']];
 const SAMPLE_OF = (w: WindowMetrics): string => fmtSample(w.samples);
 
 const STAMINA_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [

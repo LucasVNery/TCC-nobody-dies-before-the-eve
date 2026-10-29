@@ -23,6 +23,7 @@ export const ARENA_CELLS = Math.ceil(1600 / CELL_SIZE) * Math.ceil(1200 / CELL_S
 const N_ACTION_TYPES = 5;
 const N_WEAPONS = 3;
 const N_DEFENSE_LABELS = 4;
+const N_ATTACK_KINDS = 4;
 
 /** H / ln(n) over raw counts; null with fewer than 2 labels used (same rule as the profile). */
 function normalizedEntropy(counts: Record<string, number>, n: number): number | null {
@@ -59,6 +60,8 @@ export class WindowAccumulator {
   private intervalN = 0;
   private byType: Record<string, number> = {};
   private byWeapon: Record<string, number> = {};
+  private enemyAttackCount = 0;
+  private enemyAttackKinds: Record<string, number> = {};
   private encounters = 0;
   private encounterMsSum = 0;
   private runs = 0;
@@ -157,6 +160,11 @@ export class WindowAccumulator {
           this.dodges += 1;
           if (ev.perfect === true) this.perfectDodges += 1;
         }
+        break;
+      case 'enemy.attack_start':
+        // isWellFormed guarantees kind is absent or a known kind; absent (old logs) means swing.
+        this.enemyAttackCount += 1;
+        bump(this.enemyAttackKinds, typeof ev.kind === 'string' ? ev.kind : 'swing');
         break;
       case 'player.stamina_denied':
         this.denied += 1;
@@ -278,6 +286,8 @@ export class WindowAccumulator {
     this.wastedUses = 0;
     this.heldSum = 0;
     this.useN = 0;
+    this.enemyAttackCount = 0;
+    this.enemyAttackKinds = {};
   }
 
   /** Median of the reactions, cached until a new reaction arrives. */
@@ -363,6 +373,10 @@ export class WindowAccumulator {
         healsAtFullHp: this.healsAtFullHp,
         bombHits: this.bombHits,
         meanHeldMs: div(this.heldSum, this.useN),
+      },
+      enemyAttacks: {
+        count: this.enemyAttackCount,
+        byKind: distribution(this.enemyAttackKinds, N_ATTACK_KINDS),
       },
     };
   }

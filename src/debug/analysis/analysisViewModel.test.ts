@@ -41,9 +41,9 @@ const sec = (v: AnalysisView, id: string) => v.find((s) => s.id === id)!;
 const allText = (v: AnalysisView) => v.flatMap((s) => s.rows.flatMap((r) => r.cells));
 
 describe('buildAnalysisView', () => {
-  it('metrics section has one row per metric M1–M15 and four value columns plus the metric name', () => {
+  it('metrics section has one row per metric M1–M15 plus the enemy attacks row (m16) and four value columns plus the metric name', () => {
     const m = sec(buildAnalysisView(input()), 'metrics');
-    expect(m.rows.map((r) => r.id)).toEqual(Array.from({ length: 15 }, (_, i) => `m${i + 1}`));
+    expect(m.rows.map((r) => r.id)).toEqual(Array.from({ length: 16 }, (_, i) => `m${i + 1}`));
     expect(m.columns).toHaveLength(5);
     for (const r of m.rows) expect(r.cells).toHaveLength(5);
     expect(sec(buildAnalysisView(input()), 'metrics').rows.find((r) => r.id === 'm3')!.cells[0]).toContain('decaído');
@@ -135,6 +135,18 @@ describe('buildAnalysisView', () => {
     expect(hist('items', 'usos desperdiçados')).toBe('1 n=1');
     for (const s of [st, sec(v, 'items')]) for (const r of s.rows) expect(r.cells).toHaveLength(5);
     for (const t of allText(v)) expect(t).not.toMatch(/NaN|undefined|Infinity/);
+  });
+
+  it('has an enemy attacks by kind row in every window column', () => {
+    const agg = new MetricsAggregator();
+    agg.applyAll([
+      mk('enemy.attack_start', 1, { kind: 'swing' }), mk('enemy.attack_start', 2, { kind: 'combo', hit: 1 }),
+      mk('enemy.attack_start', 3, { kind: 'combo', hit: 2 }), mk('enemy.attack_start', 4),
+    ]);
+    const row = sec(buildAnalysisView(input({ metrics: agg.snapshot() })), 'metrics')
+      .rows.find((r) => r.cells[0] === 'ataques do inimigo por tipo')!;
+    expect(row.cells).toHaveLength(5);
+    expect(row.cells[4]).toMatch(/^golpe:2 avanço:0 combo:2 queda:0 H=.* n=4$/);
   });
 
   it('predictor section says não implementado (5b)', () => {

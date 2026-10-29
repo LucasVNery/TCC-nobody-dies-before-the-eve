@@ -41,6 +41,11 @@ export function summarize(ev: LoggedEvent): string {
         return str(e.kind) ? `sumiu ${e.kind}${str(e.reason) ? ` (${e.reason})` : ''}` : '';
       case 'item.use':
         return str(e.kind) ? `usou ${e.kind}${e.effective === false ? ' (desperdício)' : ''}` : '';
+      case 'enemy.attack_start': {
+        // kind/hit are absent in logs from before 0.0.5.
+        const kind = str(e.kind) ? e.kind : 'swing';
+        return `ataque ${kind}${fin(e.hit) ? ` (golpe ${e.hit})` : ''}`;
+      }
       case 'projectile.hit':
         return fin(e.dmg) ? `projétil acertou dmg=${e.dmg}` : '';
       case 'projectile.expire':

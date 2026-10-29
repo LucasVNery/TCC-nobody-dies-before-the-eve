@@ -73,6 +73,12 @@ describe('summarize', () => {
     expect(summarize(mk('player.stamina_denied', 0, {}))).toBe('');
   });
 
+  it('summarizes enemy.attack_start with kind and hit, and swing for old logs', () => {
+    expect(summarize(mk('enemy.attack_start', 0, { kind: 'slam' }))).toBe('ataque slam');
+    expect(summarize(mk('enemy.attack_start', 0, { kind: 'combo', hit: 2 }))).toBe('ataque combo (golpe 2)');
+    expect(summarize(mk('enemy.attack_start', 0, {}))).toBe('ataque swing');
+  });
+
   it('summarizes pos.sample as pos', () => {
     expect(summarize(mk('pos.sample', 0, { p: [1, 2], e: [3, 4] }))).toBe('pos');
   });

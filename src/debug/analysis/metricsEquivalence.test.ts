@@ -42,9 +42,14 @@ describe('metrics equivalence', () => {
     expect(count((e) => e.type === 'pos.sample' && typeof e.stam === 'number')).toBeGreaterThanOrEqual(10);
     expect(count((e) => e.type === 'pos.sample' && e.spent !== undefined)).toBeGreaterThanOrEqual(10);
 
+    // enemy attack kinds are exercised by this log, so the equality below covers enemyAttacks
+    expect(count((e) => e.type === 'enemy.attack_start')).toBeGreaterThanOrEqual(1);
+
     const live = agg.snapshot();
     expect(live).toEqual(metricsFromLog(log));
     expect(live.malformed).toBe(0);
+    expect(live.windows.history.enemyAttacks.count).toBe(count((e) => e.type === 'enemy.attack_start'));
+    expect(live.windows.history.enemyAttacks.count).toBeGreaterThanOrEqual(1);
     expect(live.windows.history.stamina.meanLevel).not.toBeNull();
     expect(live.windows.history.stamina.spentPerMinute).not.toBeNull();
     // elapsedMs spans both sessions: history skips the t_ms reset jump at session.start
