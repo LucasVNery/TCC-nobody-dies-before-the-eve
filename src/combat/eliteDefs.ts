@@ -14,7 +14,7 @@ export const ELITE = {
   swingDamage: 20,
   patternPauseMs: 700,
   firstAttackDelayMs: 2000,
-  slamMaxDistance: 140,
+  slamMaxDistance: 60, // melee range (= ATTACK_RANGE): the elite closes in instead of slamming from afar
   chargedStaggerMs: 400,
 } as const;
 

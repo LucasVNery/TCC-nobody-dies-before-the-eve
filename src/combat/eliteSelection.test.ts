@@ -7,7 +7,7 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { Encounter } from './encounter';
 import { ELITE } from './eliteDefs';
-import { primeElite } from './eliteTestKit';
+import { primeElite } from './testing/eliteTestKit';
 import { LUNGE } from './movementDefs';
 
 const STEP_MS = 16;
@@ -64,15 +64,15 @@ describe('elite pattern choice by distance', () => {
     return starts[0]?.kind ?? null;
   }
 
-  it('at 100 u only the slam is eligible', () => {
-    expect(startedAt(100)).toBe('slam');
+  it('at 100 u nothing is eligible (the slam is melee only): the elite chases', () => {
+    expect(startedAt(100)).toBeNull();
   });
 
   it('at 200 u only the lunge is eligible', () => {
     expect(startedAt(200)).toBe('lunge');
   });
 
-  it('from 141 to 149 u and past 260 u nothing is eligible: the elite chases', () => {
+  it('from 61 to 149 u and past 260 u nothing is eligible: the elite chases', () => {
     expect(startedAt(145)).toBeNull();
     expect(startedAt(300)).toBeNull();
   });

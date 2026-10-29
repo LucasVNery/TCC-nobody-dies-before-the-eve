@@ -1,7 +1,7 @@
 // src/combat/encounter.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { Encounter as BaseEncounter } from './encounter';
-import { primeElite } from './eliteTestKit';
+import { primeElite } from './testing/eliteTestKit';
 import { DODGE } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { resolveAction, totalCommitmentMs } from './actionRegistry';

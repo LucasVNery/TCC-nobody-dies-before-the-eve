@@ -4,7 +4,7 @@ import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
 import { GAME_VERSION, CONFIG_VERSION, windowsMs, sessionStartPayload, type LoggedEvent } from './schema';
 import { PLAYER_START } from '../game/runDirector';
-import { primeElite } from '../combat/eliteTestKit';
+import { primeElite } from '../combat/testing/eliteTestKit';
 import { TelemetryRecorder } from './telemetryRecorder';
 
 function makeStack(onRunEnd?: () => void) {

@@ -6,7 +6,7 @@ import type { ProfileSink } from '../profile/profileSink';
 import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, MIN_SPAWN_DISTANCE, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
 import { AssaltanteController } from '../combat/assaltanteController';
 import { OpportunitySystem } from '../opportunity/opportunitySystem';
-import { primeElite } from '../combat/eliteTestKit';
+import { primeElite } from '../combat/testing/eliteTestKit';
 import { RunDirector, PLAYER_START, pickSpawn } from './runDirector';
 import { createPrng } from '../core/prng';
 import { ItemSystem } from './items';

@@ -30,11 +30,10 @@ describe('ASSALTANTE_RULES', () => {
     }
   });
 
-  it('swing and combo need d <= 60; the slam d <= 140; the lunge a ready cooldown and d in [150, 260]', () => {
+  it('swing and combo need d <= 60; the slam d <= 60 (melee only); the lunge a ready cooldown and d in [150, 260]', () => {
     expect(eligible(bb(60))).toEqual(['assaltante.attack', 'assaltante.combo', 'assaltante.slam', 'assaltante.chase']);
-    expect(eligible(bb(61))).toEqual(['assaltante.slam', 'assaltante.chase']);
-    expect(eligible(bb(140))).toEqual(['assaltante.slam', 'assaltante.chase']);
-    expect(eligible(bb(141))).toEqual(['assaltante.chase']);
+    expect(eligible(bb(61))).toEqual(['assaltante.chase']);
+    expect(eligible(bb(140))).toEqual(['assaltante.chase']);
     expect(eligible(bb(149, true))).toEqual(['assaltante.chase']);
     expect(eligible(bb(150, true))).toEqual(['assaltante.lunge', 'assaltante.chase']);
     expect(eligible(bb(260, true))).toEqual(['assaltante.lunge', 'assaltante.chase']);
@@ -58,7 +57,7 @@ describe('choosePatternRule', () => {
   it('a single eligible pattern is always the one chosen', () => {
     const prng = createPrng(9);
     for (let i = 0; i < 50; i++) {
-      expect(choosePatternRule(bb(100), prng).id).toBe('assaltante.slam');
+      expect(choosePatternRule(bb(100), prng).id).toBe('assaltante.chase');
       expect(choosePatternRule(bb(200, true), prng).id).toBe('assaltante.lunge');
     }
   });

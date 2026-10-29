@@ -6,7 +6,7 @@ import { OpportunitySystem } from '../opportunity/opportunitySystem';
 import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
-import { primeElite } from './eliteTestKit';
+import { primeElite } from './testing/eliteTestKit';
 import { ASSALTANTE_MAX_HP, ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, LUNGE } from './movementDefs';
 
 function makeAssaltante() {
@@ -390,7 +390,7 @@ describe('AssaltanteController lunge', () => {
 
   it('lunges only in [150, 260] once ready (120, 149, 261 do not)', () => {
     for (const [d, expected] of [
-      [120, 'attacking'], // within 140 u only the slam is eligible
+      [120, 'chasing'],
       [149, 'chasing'],
       [150, 'lunging'],
       [260, 'lunging'],
