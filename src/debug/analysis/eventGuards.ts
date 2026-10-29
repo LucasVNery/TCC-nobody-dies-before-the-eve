@@ -6,8 +6,6 @@ const OUTCOMES = new Set(['taken', 'missed', 'expired', 'invalid']);
 const CANCEL_BY = new Set(['move', 'dash', 'attack']);
 const DEFENSE_LABELS = new Set(['dodge', 'block', 'parry', 'retreat']);
 
-const ATTACK_KINDS = new Set(['swing', 'lunge', 'combo', 'slam']);
-
 const ITEM_KINDS = new Set(['heal', 'power', 'bomb']);
 
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -56,9 +54,9 @@ export function isWellFormed(ev: LoggedEvent): boolean {
         fin(e.held_ms) && typeof e.effective === 'boolean'
       );
     case 'enemy.attack_start':
-      // kind/hit are absent in logs from before 0.0.5: optional, but valid when present.
+      // kind/hit are absent in logs from before 0.0.5: optional; any string kind is accepted (forward compatible), hit is strict.
       return (
-        (e.kind === undefined || (str(e.kind) && ATTACK_KINDS.has(e.kind))) &&
+        (e.kind === undefined || str(e.kind)) &&
         (e.hit === undefined || e.hit === 1 || e.hit === 2)
       );
     case 'projectile.hit':

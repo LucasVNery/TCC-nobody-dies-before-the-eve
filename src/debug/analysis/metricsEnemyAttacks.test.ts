@@ -34,13 +34,24 @@ describe('enemy attack kind metrics', () => {
     expect(s.windows.history.enemyAttacks.byKind.counts).toEqual({ swing: 2, lunge: 1 });
   });
 
-  it('malformed kind/hit (kind: 5, hit: 3, unknown string) are counted malformed and change nothing', () => {
+  it('malformed kind/hit (kind: 5, hit: 3) are counted malformed and change nothing', () => {
     const agg = new MetricsAggregator();
-    agg.applyAll([atk(1, 5 as unknown as string), atk(2, 'combo', 3), atk(3, 'laser')]);
+    agg.applyAll([atk(1, 5 as unknown as string), atk(2, 'combo', 3)]);
     const s = agg.snapshot();
-    expect(s.malformed).toBe(3);
+    expect(s.malformed).toBe(2);
     expect(s.windows.history.enemyAttacks.count).toBe(0);
     expect(s.windows.history.enemyAttacks.byKind.counts).toEqual({});
+  });
+
+  it('an unknown string kind is counted under its own key, not malformed', () => {
+    const agg = new MetricsAggregator();
+    agg.applyAll([atk(1, 'laser'), atk(2, 'swing')]);
+    const s = agg.snapshot();
+    expect(s.malformed).toBe(0);
+    expect(s.windows.history.enemyAttacks.count).toBe(2);
+    expect(s.windows.history.enemyAttacks.byKind.counts).toEqual({ laser: 1, swing: 1 });
+    const only = metricsFromLog([atk(1, 'laser')]).windows.history.enemyAttacks;
+    expect(only.byKind.counts).toEqual({ laser: 1 });
   });
 
   it('isolates the four windows', () => {

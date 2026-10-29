@@ -62,8 +62,12 @@ describe('isWellFormed', () => {
     expect(isWellFormed(mk('enemy.attack_start', 0, {}))).toBe(true); // pre-0.0.5 log
   });
 
-  it('enemy.attack_start rejects an unknown kind or a hit other than 1 or 2', () => {
-    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'laser' }))).toBe(false);
+  it('enemy.attack_start accepts an unknown string kind (forward compatible)', () => {
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'laser' }))).toBe(true);
+  });
+
+  it('enemy.attack_start accepts any string kind but rejects a non-string kind or a hit other than 1 or 2', () => {
+    expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 5 }))).toBe(false);
     expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 7 }))).toBe(false);
     expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: 3 }))).toBe(false);
     expect(isWellFormed(mk('enemy.attack_start', 0, { kind: 'combo', hit: '1' }))).toBe(false);

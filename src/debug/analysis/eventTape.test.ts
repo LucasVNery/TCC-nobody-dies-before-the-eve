@@ -77,6 +77,7 @@ describe('summarize', () => {
     expect(summarize(mk('enemy.attack_start', 0, { kind: 'slam' }))).toBe('ataque slam');
     expect(summarize(mk('enemy.attack_start', 0, { kind: 'combo', hit: 2 }))).toBe('ataque combo (golpe 2)');
     expect(summarize(mk('enemy.attack_start', 0, {}))).toBe('ataque swing');
+    expect(summarize(mk('enemy.attack_start', 0, { kind: 'laser' }))).toBe('ataque laser');
   });
 
   it('summarizes pos.sample as pos', () => {

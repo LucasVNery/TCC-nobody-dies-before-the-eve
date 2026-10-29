@@ -54,6 +54,15 @@ const oppN = (o: OppStats): number => o.taken + o.missed + o.expired;
 const oppBoth = (w: WindowMetrics): number => oppN(w.opportunities.dodge) + oppN(w.opportunities.punish);
 const sum = (r: Record<string, number>): number => Object.values(r).reduce((a, b) => a + b, 0);
 
+const ATTACK_LABEL: [string, string][] = [['golpe', 'swing'], ['avanço', 'lunge'], ['combo', 'combo'], ['queda', 'slam']];
+function attackCell(w: WindowMetrics): string {
+  const a = w.enemyAttacks;
+  const known = ATTACK_LABEL.map(([l, k]) => `${l}:${a.byKind.counts[k] ?? 0}`);
+  const other = a.count - ATTACK_LABEL.reduce((n, [, k]) => n + (a.byKind.counts[k] ?? 0), 0);
+  if (other > 0) known.push(`outros:${other}`);
+  return `${known.join(' ')} H=${fmtNum(a.byKind.entropy)} ${fmtSample(a.count)}`;
+}
+
 const METRIC_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [
   { id: 'm1', name: 'M1 velocidade méd/mov (u/s, 4 Hz)', cell: (w) => `${fmtNum(w.speed.avg)}/${fmtNum(w.speed.moving)} ${fmtSample(w.samples)}` },
   { id: 'm2', name: 'M2 distância média (u, 4 Hz)', cell: (w) => `${fmtNum(w.meanDistance)} ${fmtSample(w.samples)}` },
@@ -67,8 +76,8 @@ const METRIC_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => strin
   { id: 'm11', name: 'M11 dano causado/sofrido (razão)', cell: (w) => `${fmtNum(w.damage.dealt, 0)}/${fmtNum(w.damage.taken, 0)} (${fmtNum(w.damage.ratio)}) ${DASH}` },
   { id: 'm12', name: 'M12 ciclo encontro/run', cell: (w) => `${fmtMs(w.cycle.meanEncounterMs)}/${fmtMs(w.cycle.meanRunMs)} ${fmtSample(w.cycle.encounters)}` },
   { id: 'm14', name: 'M14 ociosidade (4 Hz)', cell: (w) => `${fmtPercent(w.idleFraction)} ${fmtSample(w.samples)}` },
-  { id: 'm16', name: 'ataques do inimigo por tipo', cell: (w) => `${ATTACK_LABEL.map(([l, k]) => `${l}:${w.enemyAttacks.byKind.counts[k] ?? 0}`).join(' ')} H=${fmtNum(w.enemyAttacks.byKind.entropy)} ${fmtSample(w.enemyAttacks.count)}` },
   { id: 'm15', name: 'M15 cobertura (4 Hz)', cell: (w) => `${fmtPercent(w.coverage)} ${fmtSample(w.samples)}` },
+  { id: 'm16', name: 'ataques do inimigo por tipo', cell: attackCell },
 ];
 
 // The profile clocks are not the metric windows (state decays per encounter, trait per room), so each
@@ -94,7 +103,6 @@ const SPEND_LABEL: [string, 'attack' | 'sprint' | 'dodge' | 'block'][] = [
   ['atq', 'attack'], ['corr', 'sprint'], ['esq', 'dodge'], ['def', 'block'],
 ];
 const USE_LABEL: [string, 'heal' | 'power' | 'bomb'][] = [['cura', 'heal'], ['poder', 'power'], ['bomba', 'bomb']];
-const ATTACK_LABEL: [string, string][] = [['golpe', 'swing'], ['avanço', 'lunge'], ['combo', 'combo'], ['queda', 'slam']];
 const SAMPLE_OF = (w: WindowMetrics): string => fmtSample(w.samples);
 
 const STAMINA_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => string }[] = [

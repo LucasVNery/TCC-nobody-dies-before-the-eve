@@ -149,6 +149,18 @@ describe('buildAnalysisView', () => {
     expect(row.cells[4]).toMatch(/^golpe:2 avanço:0 combo:2 queda:0 H=.* n=4$/);
   });
 
+  it('enemy attacks row adds outros:N only when unknown kinds exist', () => {
+    const row = (evs: ReturnType<typeof mk>[]) => {
+      const agg = new MetricsAggregator();
+      agg.applyAll(evs);
+      return sec(buildAnalysisView(input({ metrics: agg.snapshot() })), 'metrics')
+        .rows.find((r) => r.cells[0] === 'ataques do inimigo por tipo')!.cells[4];
+    };
+    expect(row([mk('enemy.attack_start', 1, { kind: 'swing' })])).not.toContain('outros');
+    expect(row([mk('enemy.attack_start', 1, { kind: 'swing' }), mk('enemy.attack_start', 2, { kind: 'laser' }), mk('enemy.attack_start', 3, { kind: 'x' })]))
+      .toMatch(/^golpe:1 avanço:0 combo:0 queda:0 outros:2 H=.* n=3$/);
+  });
+
   it('predictor section says não implementado (5b)', () => {
     expect(sec(buildAnalysisView(input()), 'predictor').rows[0].cells[0]).toBe('não implementado (5b)');
   });
