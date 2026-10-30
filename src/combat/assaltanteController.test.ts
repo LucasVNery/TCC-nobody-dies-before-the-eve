@@ -738,3 +738,14 @@ describe('AssaltanteController long charge (kite counter)', () => {
     expect(enemy.telegraph?.travel).toBeCloseTo(400 + LONG_LUNGE.overshoot, 5);
   });
 });
+
+describe('AssaltanteController threat prediction with the opening delay', () => {
+  it('a fresh elite next to the player threatens only after the 2 s delay plus the telegraph', () => {
+    const bus = new EventBus<GameEvents>();
+    const opp = new OpportunitySystem(bus);
+    const enemy = new AssaltanteController(bus, opp, { x: 100, y: 0, width: 20, height: 20 });
+    const target = { x: 130, y: 0, width: 20, height: 20 };
+    expect(enemy.msUntilThreatens(target, 2300)).toBeNull();
+    expect(enemy.msUntilThreatens(target, 2600)).toBe(2000 + 450);
+  });
+});

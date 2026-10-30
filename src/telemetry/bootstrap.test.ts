@@ -5,7 +5,7 @@ import { MemoryEventStore, type EventStore } from './eventStore';
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import { createTelemetryStack } from './stack';
 import { rebuildProfile } from './replay';
-import type { LoggedEvent } from './schema';
+import { GAME_VERSION, type LoggedEvent } from './schema';
 
 describe('loadProfileState', () => {
   it('first launch: creates and saves a player_id, starts at run 0 with an empty profile', async () => {
@@ -27,7 +27,7 @@ describe('loadProfileState', () => {
       accumulator: live, playerId: 'me', sessionId: 's1', firstRunIdx: 0,
       nextSeed: () => seed++, entitySize: 20,
     });
-    stack.recorder.log('session.start', { wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: 'test', schema_v: 2 });
+    stack.recorder.log('session.start', { wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: GAME_VERSION, schema_v: 2 });
     stack.director.start();
     stack.encounter.player.tryAction('sword_shield.light');
     stack.encounter.player.takeDamage(999);
@@ -51,10 +51,11 @@ describe('loadProfileState', () => {
     await store.setMeta('player_id', 'me');
     const base = { v: 2 as const, t_ms: 0, room_idx: 0, enc_idx: 0 };
     await store.append([
-      { ...base, seq: 0, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.start' },
-      { ...base, seq: 1, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.action', actionType: 'light', weaponId: 'bow' },
-      { ...base, seq: 2, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.boundary', kind: 'room' },
-      { ...base, seq: 3, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.end', cause: 'death' },
+      { ...base, seq: 0, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'session.start', game_version: GAME_VERSION },
+      { ...base, seq: 1, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.start' },
+      { ...base, seq: 2, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.action', actionType: 'light', weaponId: 'bow' },
+      { ...base, seq: 3, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'obs.boundary', kind: 'room' },
+      { ...base, seq: 4, player_id: 'me', session_id: 's-me', run_idx: 1, type: 'run.end', cause: 'death' },
       { ...base, seq: 0, player_id: 'other', session_id: 's-other', run_idx: 7, type: 'run.start' },
       { ...base, seq: 1, player_id: 'other', session_id: 's-other', run_idx: 7, type: 'obs.reset' },
     ]);
@@ -72,13 +73,33 @@ describe('loadProfileState', () => {
     await store.setMeta('player_id', 'me');
     const base = { v: 2 as const, t_ms: 0, player_id: 'me', session_id: 's', run_idx: 0, room_idx: 0, enc_idx: 0 };
     await store.append([
-      { ...base, seq: 0, type: 'obs.record', skill: 'distance', num: '1', den: 1 },
-      { ...base, seq: 1, type: 'obs.defense', label: 'teleport' },
+      { ...base, seq: 0, type: 'session.start', game_version: GAME_VERSION },
+      { ...base, seq: 1, type: 'obs.record', skill: 'distance', num: '1', den: 1 },
+      { ...base, seq: 2, type: 'obs.defense', label: 'teleport' },
     ]);
     await loadProfileState(store, () => 'unused');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('2');
     warn.mockRestore();
+  });
+
+  it('leaves sessions from another game version out of the profile but keeps them in the history', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const store = new MemoryEventStore();
+    await store.setMeta('player_id', 'me');
+    const base = { v: 2 as const, t_ms: 0, player_id: 'me', run_idx: 0, room_idx: 0, enc_idx: 0 };
+    await store.append([
+      { ...base, seq: 0, session_id: 'old', type: 'session.start', game_version: '0.0.4', wall_clock_iso: '2026-10-01T00:00:00.000Z' },
+      { ...base, seq: 1, session_id: 'old', type: 'obs.action', actionType: 'light', weaponId: 'bow' },
+      { ...base, seq: 0, session_id: 'cur', type: 'session.start', game_version: GAME_VERSION, wall_clock_iso: '2026-10-29T00:00:00.000Z' },
+      { ...base, seq: 1, session_id: 'cur', type: 'obs.action', actionType: 'heavy' },
+      { ...base, seq: 2, session_id: 'cur', type: 'obs.boundary', kind: 'room' },
+    ]);
+    const boot = await loadProfileState(store, () => 'unused');
+    expect(boot.accumulator.snapshot('room.exit').counts.action_repertoire).toEqual([1, 1]);
+    expect(boot.history).toHaveLength(5);
+    expect(info).toHaveBeenCalledTimes(1);
+    info.mockRestore();
   });
 
   it('closes a run left open by closing the tab, with its old indices, before the next run starts', async () => {
@@ -90,7 +111,7 @@ describe('loadProfileState', () => {
       accumulator: new ProfileAccumulator(), playerId: 'me', sessionId: 's1', firstRunIdx: 0,
       nextSeed: () => seed++, entitySize: 20,
     });
-    s1.startSession({ wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: 'test', schema_v: 2 }, null);
+    s1.startSession({ wall_clock_iso: '2026-09-30T00:00:00.000Z', game_version: GAME_VERSION, schema_v: 2 }, null);
     s1.encounter.player.takeDamage(999);
     s1.step(16); // run 0 ends, run 1 starts
     s1.encounter.player.tryAction('sword_shield.light');
@@ -111,7 +132,7 @@ describe('loadProfileState', () => {
       accumulator: live, playerId: 'me', sessionId: 's2', firstRunIdx: boot.firstRunIdx,
       nextSeed: () => seed++, entitySize: 20,
     });
-    s2.startSession({ wall_clock_iso: '2026-09-30T01:00:00.000Z', game_version: 'test', schema_v: 2 }, boot.abandonedRun);
+    s2.startSession({ wall_clock_iso: '2026-09-30T01:00:00.000Z', game_version: GAME_VERSION, schema_v: 2 }, boot.abandonedRun);
     s2.encounter.player.tryAction('sword_shield.light');
     for (let i = 0; i < 30; i++) s2.step(16);
     s2.recording.flushPending();

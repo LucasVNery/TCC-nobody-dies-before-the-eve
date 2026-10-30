@@ -2,7 +2,7 @@
 import { ProfileAccumulator } from '../profile/profileAccumulator';
 import type { EventStore } from './eventStore';
 import { rebuildProfileWithStats, nextRunIdx } from './replay';
-import type { LoggedEvent } from './schema';
+import { GAME_VERSION, type LoggedEvent } from './schema';
 import { findAbandonedRun, type AbandonedRun } from './abandonedRun';
 
 export interface BootState {
@@ -34,7 +34,11 @@ export async function loadProfileState(store: EventStore, newId: () => string): 
     const events = await store.readAll();
     // Only the current player's events count: an import can leave other
     // players' history in the store (spec §5.3).
-    const { accumulator, skipped } = rebuildProfileWithStats(events, playerId);
+    // Sessions from another game_version (different balance) stay in the log but do not feed the profile.
+    const { accumulator, skipped, excludedSessions } = rebuildProfileWithStats(events, playerId, { gameVersion: GAME_VERSION });
+    if (excludedSessions > 0) {
+      console.info(`[telemetry] ${excludedSessions} session(s) from another game version left out of the profile`);
+    }
     if (skipped > 0) {
       console.warn(`[telemetry] skipped ${skipped} malformed observation(s) while rebuilding the profile`);
     }

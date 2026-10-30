@@ -71,7 +71,17 @@ describe('action metrics', () => {
     expect(r.n).toBe(3);
     expect(r.meanMs).toBe((300 + 500 + 100) / 3);
     expect(r.medianMs).toBe(300);
-    expect(H([]).reaction).toEqual({ n: 0, meanMs: null, medianMs: null });
+    expect(H([]).reaction).toEqual({ n: 0, meanMs: null, medianMs: null, byKind: {} });
+  });
+
+  it('M9 also reports the mean reaction per attack kind (telegraphs differ per kind)', () => {
+    const open = (t: number, id: string) => mk('opp.open', t, { opp_id: id, opp_type: 'dodge', window_ms: 400 });
+    const log = [
+      mk('enemy.attack_start', 0, { kind: 'swing' }), open(0, 'a'), mk('player.dodge', 300),
+      mk('enemy.attack_start', 2000, { kind: 'slam' }), open(2000, 'b'), mk('player.dodge', 2600),
+      mk('enemy.attack_start', 4000, { kind: 'swing' }), open(4000, 'c'), mk('player.dodge', 4500),
+    ];
+    expect(H(log).reaction.byKind).toEqual({ swing: { n: 2, meanMs: 400 }, slam: { n: 1, meanMs: 600 } });
   });
 
   it('M9 median stays correct as reactions arrive after a snapshot (cache invalidation)', () => {

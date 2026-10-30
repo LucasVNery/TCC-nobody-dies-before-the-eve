@@ -340,6 +340,10 @@ export class AssaltanteController implements ThreatAssessor {
       width: this.width,
       height: this.height,
       attackDirection: this._attackDirection,
+      readyInMs:
+        this.state === 'idle' || this.state === 'chasing'
+          ? Math.max(0, ELITE.firstAttackDelayMs - this.ageMs, ELITE.patternPauseMs - this.sincePatternMs)
+          : 0,
     };
     const config: ChaseTelegraphConfig = {
       attackRange: ATTACK_RANGE,
@@ -349,6 +353,7 @@ export class AssaltanteController implements ThreatAssessor {
       recoveryMs: this.state === 'recovering' ? this.recoveryDurationMs : RECOVERY_MS,
       reach: ATTACK_REACH + this.width / 2,
       halfAngleRad: ATTACK_HALF_ANGLE_RAD,
+      patternPauseMs: ELITE.patternPauseMs,
     };
     if (this.state === 'attacking' && this.patternKind !== 'swing') {
       return this.patternThreatMs(config, snapshot, target, horizonMs);

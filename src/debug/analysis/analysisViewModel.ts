@@ -71,7 +71,10 @@ const METRIC_ROWS: { id: string; name: string; cell: (w: WindowMetrics) => strin
   { id: 'm6', name: 'M6 defesas (cru)', cell: (w) => `${dist(w.defenses)} ${fmtSample(sum(w.defenses.counts))}` },
   { id: 'm7', name: 'M7 aproveitamento esq/pun', cell: (w) => `${fmtPercent(w.opportunities.dodge.rate)}/${fmtPercent(w.opportunities.punish.rate)} ${fmtSample(oppBoth(w))}` },
   { id: 'm8', name: 'M8 omissão esq/pun', cell: (w) => `${fmtPercent(w.opportunities.dodge.omission)}/${fmtPercent(w.opportunities.punish.omission)} ${fmtSample(oppBoth(w))}` },
-  { id: 'm9', name: 'M9 reação à esquiva méd/med (ms)', cell: (w) => `${fmtMs(w.reaction.meanMs)}/${fmtMs(w.reaction.medianMs)} ${fmtSample(w.reaction.n)}` },
+  { id: 'm9', name: 'M9 reação à esquiva méd/med (ms)', cell: (w) => {
+      const kinds = Object.entries(w.reaction.byKind).map(([kind, k]) => `${kind} ${fmtMs(k.meanMs)}`).join(' · ');
+      return `${fmtMs(w.reaction.meanMs)}/${fmtMs(w.reaction.medianMs)} ${fmtSample(w.reaction.n)}${kinds ? ` (${kinds})` : ''}`;
+    } },
   { id: 'm10', name: 'M10 cancelamentos (por ação)', cell: (w) => `${w.cancels.total} (${fmtNum(w.cancels.perAction)}) ${fmtSample(w.actions.count)}` },
   { id: 'm11', name: 'M11 dano causado/sofrido (razão)', cell: (w) => `${fmtNum(w.damage.dealt, 0)}/${fmtNum(w.damage.taken, 0)} (${fmtNum(w.damage.ratio)}) ${DASH}` },
   { id: 'm12', name: 'M12 ciclo encontro/run', cell: (w) => `${fmtMs(w.cycle.meanEncounterMs)}/${fmtMs(w.cycle.meanRunMs)} ${fmtSample(w.cycle.encounters)}` },

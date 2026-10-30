@@ -79,6 +79,7 @@ export class WindowAccumulator {
   private opps: { dodge: OppStats; punish: OppStats } = { dodge: neutralOpp(), punish: neutralOpp() };
   private reactions: number[] = [];
   private reactionSum = 0;
+  private reactionByKind: Record<string, { n: number; sumMs: number }> = {};
   private cachedMedian: number | null = null;
   private medianFresh = true;
   private cancelTotal = 0;
@@ -202,6 +203,11 @@ export class WindowAccumulator {
         if (d.reactionMs !== null) {
           this.reactions.push(d.reactionMs);
           this.reactionSum += d.reactionMs;
+          if (d.reactionKind !== null) {
+            const k = (this.reactionByKind[d.reactionKind] ??= { n: 0, sumMs: 0 });
+            k.n += 1;
+            k.sumMs += d.reactionMs;
+          }
           this.medianFresh = false;
         }
         break;
@@ -260,6 +266,7 @@ export class WindowAccumulator {
     this.opps = { dodge: neutralOpp(), punish: neutralOpp() };
     this.reactions = [];
     this.reactionSum = 0;
+    this.reactionByKind = {};
     this.cachedMedian = null;
     this.medianFresh = true;
     this.cancelTotal = 0;
@@ -326,7 +333,14 @@ export class WindowAccumulator {
       },
       defenses: distribution(this.defenseCounts, N_DEFENSE_LABELS),
       opportunities: { dodge: this.oppSnapshot(this.opps.dodge), punish: this.oppSnapshot(this.opps.punish) },
-      reaction: { n: this.reactions.length, meanMs: div(this.reactionSum, this.reactions.length), medianMs: this.median() },
+      reaction: {
+        n: this.reactions.length,
+        meanMs: div(this.reactionSum, this.reactions.length),
+        medianMs: this.median(),
+        byKind: Object.fromEntries(
+          Object.entries(this.reactionByKind).map(([kind, k]) => [kind, { n: k.n, meanMs: k.sumMs / k.n }]),
+        ),
+      },
       cancels: {
         total: this.cancelTotal,
         perAction: div(this.cancelTotal, this.actionCount),

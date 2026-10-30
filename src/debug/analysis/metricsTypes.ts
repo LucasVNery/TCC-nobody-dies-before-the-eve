@@ -79,7 +79,8 @@ export interface WindowMetrics {
   };
   defenses: Distribution;
   opportunities: { dodge: OppStats; punish: OppStats };
-  reaction: { n: number; meanMs: number | null; medianMs: number | null };
+  /** `byKind`: mean per attack kind; the overall mean mixes telegraphs of 320-700 ms, so compare within a kind. */
+  reaction: { n: number; meanMs: number | null; medianMs: number | null; byKind: Record<string, { n: number; meanMs: number }> };
   /** perAction = total / actions; null when there are no actions. */
   cancels: { total: number; perAction: number | null; byCause: Record<string, number> };
   damage: {

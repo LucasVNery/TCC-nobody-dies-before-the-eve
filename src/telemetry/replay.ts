@@ -38,6 +38,32 @@ export interface ReplayResult {
   accumulator: ProfileAccumulator;
   /** Malformed obs.* events that were skipped (hand-edited or corrupted imports). */
   skipped: number;
+  /** Sessions left out of the profile because their game_version differs from `gameVersion` (always 0 without it). */
+  excludedSessions: number;
+}
+
+export interface ReplayOptions {
+  /**
+   * Only sessions logged under this game_version feed the profile; older balance regimes stay in the log (for
+   * analysis) but are not mixed into the trait/state estimates. A session without a session.start, or one with no
+   * game_version, counts as another version.
+   */
+  gameVersion?: string;
+}
+
+/** The events of the sessions whose session.start carries `gameVersion`; the count of sessions left out. */
+function ofGameVersion(
+  events: readonly LoggedEvent[],
+  gameVersion: string,
+): { kept: LoggedEvent[]; excluded: number } {
+  const versionOf = new Map<string, unknown>();
+  const sessions = new Set<string>();
+  for (const e of events) {
+    sessions.add(e.session_id);
+    if (e.type === 'session.start') versionOf.set(e.session_id, e.game_version);
+  }
+  const excludedIds = new Set([...sessions].filter((id) => versionOf.get(id) !== gameVersion));
+  return { kept: events.filter((e) => !excludedIds.has(e.session_id)), excluded: excludedIds.size };
 }
 
 /**
@@ -48,8 +74,19 @@ export interface ReplayResult {
  * `obs.reset` is the last one — so an imported history of another player
  * never mixes into the profile. Malformed obs.* are skipped and counted.
  */
-export function rebuildProfileWithStats(events: readonly LoggedEvent[], playerId?: string): ReplayResult {
-  const ordered = orderEvents(ofPlayer(events, playerId));
+export function rebuildProfileWithStats(
+  events: readonly LoggedEvent[],
+  playerId?: string,
+  options: ReplayOptions = {},
+): ReplayResult {
+  let scoped = ofPlayer(events, playerId);
+  let excludedSessions = 0;
+  if (options.gameVersion !== undefined) {
+    const filtered = ofGameVersion(scoped, options.gameVersion);
+    scoped = filtered.kept;
+    excludedSessions = filtered.excluded;
+  }
+  const ordered = orderEvents(scoped);
   let start = 0;
   for (let i = ordered.length - 1; i >= 0; i--) {
     if (ordered[i].type === 'obs.reset') {
@@ -62,7 +99,7 @@ export function rebuildProfileWithStats(events: readonly LoggedEvent[], playerId
   for (let i = start; i < ordered.length; i++) {
     if (!applyObservation(accumulator, ordered[i])) skipped += 1;
   }
-  return { accumulator, skipped };
+  return { accumulator, skipped, excludedSessions };
 }
 
 export function rebuildProfile(events: readonly LoggedEvent[], playerId?: string): ProfileAccumulator {

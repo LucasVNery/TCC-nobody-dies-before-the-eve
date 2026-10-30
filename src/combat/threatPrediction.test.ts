@@ -109,3 +109,39 @@ describe('predictThreatMs', () => {
     expect(predictThreatMs(CONFIG, snapshot, target, 900)).toBe(800);
   });
 });
+
+describe('predictThreatMs with a start delay and a pattern pause', () => {
+  const snap = (over: Partial<ChaseTelegraphSnapshot> = {}): ChaseTelegraphSnapshot => ({
+    state: 'idle',
+    phaseElapsedMs: 0,
+    position: { x: 0, y: 0 },
+    width: 20,
+    height: 20,
+    attackDirection: { x: 1, y: 0 },
+    ...over,
+  });
+  const near = { x: 50, y: 0, width: 20, height: 20 }; // already in attack range
+
+  it('an enemy in range still waits out readyInMs before the telegraph starts', () => {
+    expect(predictThreatMs(CONFIG, snap({ readyInMs: 1200 }), near, 3000)).toBe(1200 + 400);
+    expect(predictThreatMs(CONFIG, snap({ readyInMs: 1200 }), near, 1500)).toBeNull();
+  });
+
+  it('the delay overlaps with the chase: the later of arrival and readiness counts', () => {
+    const far = { x: 150, y: 0, width: 20, height: 20 }; // 1000 ms to arrive
+    expect(predictThreatMs(CONFIG, snap({ readyInMs: 300 }), far, 3000)).toBe(1000 + 400);
+    expect(predictThreatMs(CONFIG, snap({ readyInMs: 2000 }), far, 3000)).toBe(2000 + 400);
+  });
+
+  it('after a recovery the pattern pause delays the next attack', () => {
+    const paused = { ...CONFIG, patternPauseMs: 700 };
+    const recovering = snap({ state: 'recovering', phaseElapsedMs: 100, attackDirection: { x: 1, y: 0 } });
+    const noThreatNow = { x: 0, y: 400, width: 20, height: 20 }; // outside the sector of the old swing
+    // the old swing misses (target below), recovery ends in 400, the pause adds 700, then 400 telegraph.
+    expect(predictThreatMs(paused, recovering, near, 5000)).not.toBeNull();
+    expect(predictThreatMs(paused, recovering, noThreatNow, 1000)).toBeNull();
+    const withPause = predictThreatMs(paused, recovering, near, 5000)!;
+    const withoutPause = predictThreatMs(CONFIG, recovering, near, 5000)!;
+    expect(withPause - withoutPause).toBe(700);
+  });
+});

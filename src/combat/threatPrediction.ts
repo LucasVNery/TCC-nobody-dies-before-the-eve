@@ -11,6 +11,8 @@ export interface ChaseTelegraphConfig {
   recoveryMs: number;
   reach: number; // alcance efetivo do leque (já inclui a metade da largura do atacante)
   halfAngleRad: number;
+  /** Mandatory idle time after a recovery before the next attack may start (0 when the enemy has none). */
+  patternPauseMs?: number;
 }
 
 export interface ChaseTelegraphSnapshot {
@@ -20,6 +22,8 @@ export interface ChaseTelegraphSnapshot {
   width: number;
   height: number;
   attackDirection: Vec2; // só relevante quando state === 'attacking'
+  /** Idle/chasing only: ms until the enemy may start an attack at all (opening delay or pause still running). */
+  readyInMs?: number;
 }
 
 const MAX_ITERATIONS = 8;
@@ -35,6 +39,7 @@ export function predictThreatMs(
   let phaseElapsedMs = snapshot.phaseElapsedMs;
   let position = { ...snapshot.position };
   let attackDirection = snapshot.attackDirection;
+  let readyAt = snapshot.readyInMs ?? 0;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     if (state === 'idle' || state === 'chasing') {
@@ -42,20 +47,15 @@ export function predictThreatMs(
       const dy = target.y - position.y;
       const distance = Math.hypot(dx, dy);
 
-      if (distance <= config.attackRange) {
-        state = 'attacking';
-        phaseElapsedMs = 0;
-        attackDirection = distance > 0 ? normalizeVelocity(dx, dy) : attackDirection;
-        continue;
-      }
+      // The earliest possible attack: the enemy has closed to attack range and its pause is over.
+      const inRange = distance <= config.attackRange;
+      const travel = inRange ? 0 : distance - config.attackRange;
+      const startAt = Math.max(elapsed + (travel / config.chaseSpeedPxPerSec) * 1000, readyAt);
+      if (startAt > horizonMs) return null;
 
-      const closeMs = ((distance - config.attackRange) / config.chaseSpeedPxPerSec) * 1000;
-      if (elapsed + closeMs > horizonMs) return null;
-
-      const direction = normalizeVelocity(dx, dy);
-      const travel = distance - config.attackRange;
+      const direction = distance > 0 ? normalizeVelocity(dx, dy) : attackDirection;
       position = { x: position.x + direction.x * travel, y: position.y + direction.y * travel };
-      elapsed += closeMs;
+      elapsed = startAt;
       state = 'attacking';
       phaseElapsedMs = 0;
       attackDirection = direction;
@@ -86,6 +86,7 @@ export function predictThreatMs(
     const timeToIdle = config.recoveryMs - phaseElapsedMs;
     if (elapsed + timeToIdle > horizonMs) return null;
     elapsed += timeToIdle;
+    readyAt = elapsed + (config.patternPauseMs ?? 0);
     state = 'idle';
     phaseElapsedMs = 0;
   }

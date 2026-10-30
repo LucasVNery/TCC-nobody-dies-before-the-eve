@@ -179,3 +179,37 @@ describe('replay', () => {
     expect(nextRunIdx(log)).toBe(5);
   });
 });
+
+describe('replay game-version filter', () => {
+  const ev = (session: string, seq: number, type: string, extra: Record<string, unknown> = {}): LoggedEvent => ({
+    v: 2, seq, t_ms: 0, player_id: 'p', session_id: session, run_idx: 0, room_idx: 0, enc_idx: 0, type, ...extra,
+  });
+  const log: LoggedEvent[] = [
+    ev('old', 0, 'session.start', { wall_clock_iso: '2026-10-01T00:00:00.000Z', game_version: '0.0.4' }),
+    ev('old', 1, 'obs.outcome', { skill: 'punish', outcome: 'missed' }),
+    ev('old', 2, 'obs.outcome', { skill: 'punish', outcome: 'missed' }),
+    ev('new', 0, 'session.start', { wall_clock_iso: '2026-10-29T00:00:00.000Z', game_version: '0.0.5' }),
+    ev('new', 1, 'obs.outcome', { skill: 'punish', outcome: 'taken' }),
+    ev('bare', 0, 'obs.outcome', { skill: 'punish', outcome: 'missed' }), // no session.start at all
+  ];
+
+  it('without the option every session feeds the profile (unchanged behaviour)', () => {
+    const r = rebuildProfileWithStats(log, 'p');
+    expect(r.excludedSessions).toBe(0);
+    expect(r.accumulator.snapshot('room.exit')).toEqual(rebuildProfile(log, 'p').snapshot('room.exit'));
+  });
+
+  it('with the option only the matching sessions count; the others are counted as excluded', () => {
+    const filtered = rebuildProfileWithStats(log, 'p', { gameVersion: '0.0.5' });
+    expect(filtered.excludedSessions).toBe(2); // 0.0.4 and the session with no session.start
+    const onlyNew = rebuildProfile(log.filter((e) => e.session_id === 'new'), 'p');
+    expect(filtered.accumulator.snapshot('room.exit')).toEqual(onlyNew.snapshot('room.exit'));
+  });
+
+  it('an obs.reset in an excluded session does not wipe the compatible history', () => {
+    const withReset = [...log, ev('old', 3, 'obs.reset')];
+    const a = rebuildProfileWithStats(withReset, 'p', { gameVersion: '0.0.5' }).accumulator.snapshot('room.exit');
+    const b = rebuildProfileWithStats(log, 'p', { gameVersion: '0.0.5' }).accumulator.snapshot('room.exit');
+    expect(a).toEqual(b);
+  });
+});

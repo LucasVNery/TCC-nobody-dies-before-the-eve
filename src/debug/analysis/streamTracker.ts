@@ -19,6 +19,8 @@ export interface Derived {
   idle: boolean | null;
   /** player.dodge only: ms since the enemy attack start, when this is the first dodge inside an open dodge window; else null. */
   reactionMs: number | null;
+  /** Attack kind the reaction answered (telegraphs differ per kind, so reactions are only comparable within one). */
+  reactionKind: string | null;
 }
 
 interface Prev {
@@ -34,11 +36,12 @@ export class StreamTracker {
   private lastActivityT: number | null = null;
   /** t of the latest enemy.attack_start not yet answered by a dodge. */
   private attackStartT: number | null = null;
+  private attackStartKind: string | null = null;
   /** ids of the dodge opportunity windows currently open. */
   private readonly dodgeWindows = new Set<string>();
 
   observe(ev: LoggedEvent): Derived {
-    const out: Derived = { encounterMs: null, dtMs: null, stepDistance: null, distance: null, idle: null, reactionMs: null };
+    const out: Derived = { encounterMs: null, dtMs: null, stepDistance: null, distance: null, idle: null, reactionMs: null, reactionKind: null };
     switch (ev.type) {
       case 'session.start':
         this.encounterStartT = null;
@@ -57,6 +60,7 @@ export class StreamTracker {
         break;
       case 'enemy.attack_start':
         this.attackStartT = ev.t_ms;
+        this.attackStartKind = typeof ev.kind === 'string' ? ev.kind : null;
         break;
       case 'opp.open':
         if (ev.opp_type === 'dodge') this.dodgeWindows.add(ev.opp_id as string);
@@ -68,6 +72,7 @@ export class StreamTracker {
         // Only the first dodge inside an open window counts; earlier or later ones do not.
         if (this.attackStartT !== null && this.dodgeWindows.size > 0) {
           out.reactionMs = Math.max(0, ev.t_ms - this.attackStartT);
+          out.reactionKind = this.attackStartKind;
           this.attackStartT = null;
         }
         break;
