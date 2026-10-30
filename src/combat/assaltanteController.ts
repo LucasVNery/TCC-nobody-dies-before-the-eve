@@ -6,7 +6,7 @@ import type { AABB, EnemyState, Vec2 } from './types';
 import type { ActionId, InvalidReason } from '../opportunity/types';
 import { ATTACK_RANGE, choosePatternRule, type Blackboard } from '../ai/rules/assaltanteRules';
 import { createPrng, type Prng } from '../core/prng';
-import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD, ASSALTANTE_MAX_HP, LUNGE } from './movementDefs';
+import { ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, ATTACK_REACH, ATTACK_HALF_ANGLE_RAD, ASSALTANTE_MAX_HP, LUNGE, LONG_LUNGE } from './movementDefs';
 import { normalizeVelocity, applyMovement, clampToArena } from './movement';
 import { directionalSector, sectorOverlapsBox, type AttackSector } from './sector';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
@@ -18,7 +18,15 @@ import type { ThreatAssessor } from './patience';
 export const TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
 export const SWING_MS = 150;
 const RECOVERY_MS = 500; // = punish window
-const LUNGE_DODGE_WINDOW_MS = LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;
+/** Dodge window of a lunge: its telegraph plus the full travel (the window closes early if the charge ends sooner). */
+const lungeWindowMs = (long: boolean): number =>
+  long
+    ? LONG_LUNGE.telegraphMs + (LONG_LUNGE.maxTravel / LUNGE.speed) * 1000
+    : LUNGE.telegraphMs + (LUNGE.maxTravel / LUNGE.speed) * 1000;
+
+/** Travel of a long charge toward a player `distance` away: past them by the overshoot, never below the short lunge's. */
+const longTravelFor = (distance: number): number =>
+  Math.min(LONG_LUNGE.maxTravel, Math.max(LUNGE.maxTravel, distance + LONG_LUNGE.overshoot));
 
 /** Presentation view of the wind-up in progress; progress runs 0..1 across the current telegraph. */
 export interface TelegraphView {
@@ -58,6 +66,11 @@ export class AssaltanteController implements ThreatAssessor {
   private sincePatternMs = 0;
   /** Pattern draw; deterministic (seed 0) until RunDirector reseeds it per run. */
   private prng: Prng = createPrng(0);
+  private chargeCooldownMs: number = Math.max(ELITE.firstAttackDelayMs, LONG_LUNGE.cooldownMs);
+  /** The lunge in progress started beyond LUNGE.maxDistance (long charge): longer telegraph and travel. */
+  private lungeLong = false;
+  private lungeTelegraphMs: number = LUNGE.telegraphMs;
+  private lungeMaxTravel: number = LUNGE.maxTravel;
   private lungeMoving = false;
   private lungeTravelled = 0;
   private lungeLandedThisTick = false;
@@ -120,12 +133,12 @@ export class AssaltanteController implements ThreatAssessor {
       if (this.lungeMoving) return null;
       return {
         kind: 'lunge',
-        progress: Math.min(1, this.phaseElapsedMs / LUNGE.telegraphMs),
+        progress: Math.min(1, this.phaseElapsedMs / this.lungeTelegraphMs),
         origin,
         direction,
         reach: ATTACK_REACH + this.width / 2,
         halfAngleRad: ATTACK_HALF_ANGLE_RAD,
-        travel: LUNGE.maxTravel,
+        travel: this.lungeMaxTravel,
         contactDistance: LUNGE.contactDistance,
       };
     }
@@ -246,6 +259,10 @@ export class AssaltanteController implements ThreatAssessor {
     this._activeRuleId = null;
     this.playerWasInRangeDuringPunish = false;
     this.lungeCooldownMs = Math.max(ELITE.firstAttackDelayMs, LUNGE.cooldownMs);
+    this.chargeCooldownMs = Math.max(ELITE.firstAttackDelayMs, LONG_LUNGE.cooldownMs);
+    this.lungeLong = false;
+    this.lungeTelegraphMs = LUNGE.telegraphMs;
+    this.lungeMaxTravel = LUNGE.maxTravel;
     this.ageMs = 0;
     this.sincePatternMs = 0;
     this.lungeMoving = false;
@@ -311,9 +328,9 @@ export class AssaltanteController implements ThreatAssessor {
     if (this.state === 'lunging') {
       const cx = this._position.x + this.width / 2 - (target.x + target.width / 2);
       const cy = this._position.y + this.height / 2 - (target.y + target.height / 2);
-      if (Math.hypot(cx, cy) > LUNGE.maxTravel + LUNGE.contactDistance) return null;
+      if (Math.hypot(cx, cy) > this.lungeMaxTravel + LUNGE.contactDistance) return null;
       if (this.lungeMoving) return 0;
-      const remaining = Math.max(0, LUNGE.telegraphMs - this.phaseElapsedMs);
+      const remaining = Math.max(0, this.lungeTelegraphMs - this.phaseElapsedMs);
       return remaining <= horizonMs ? remaining : null;
     }
     const snapshot: ChaseTelegraphSnapshot = {
@@ -385,6 +402,7 @@ export class AssaltanteController implements ThreatAssessor {
     this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
     this.lungeLandedThisTick = false;
     this.lungeCooldownMs = Math.max(0, this.lungeCooldownMs - stepMs);
+    this.chargeCooldownMs = Math.max(0, this.chargeCooldownMs - stepMs);
     this.ageMs += stepMs;
     // The pause clock only runs while the elite is free (idle/chasing): any pattern, stagger or parry restarts it.
     if (this.state === 'idle' || this.state === 'chasing') this.sincePatternMs += stepMs;
@@ -403,6 +421,7 @@ export class AssaltanteController implements ThreatAssessor {
         distanceToPlayer,
         state: this.state,
         lungeReady: this.lungeCooldownMs <= 0,
+        chargeReady: this.chargeCooldownMs <= 0,
         patternReady: this.patternReady,
       };
       const rule = choosePatternRule(bb, this.prng);
@@ -414,10 +433,14 @@ export class AssaltanteController implements ThreatAssessor {
         this.phaseElapsedMs = 0;
         this.lungeMoving = false;
         this.lungeTravelled = 0;
-        this.lungeCooldownMs = LUNGE.cooldownMs;
+        this.lungeLong = distanceToPlayer > LUNGE.maxDistance;
+        this.lungeTelegraphMs = this.lungeLong ? LONG_LUNGE.telegraphMs : LUNGE.telegraphMs;
+        this.lungeMaxTravel = this.lungeLong ? longTravelFor(distanceToPlayer) : LUNGE.maxTravel;
+        if (this.lungeLong) this.chargeCooldownMs = LONG_LUNGE.cooldownMs;
+        else this.lungeCooldownMs = LUNGE.cooldownMs;
         this._attackDirection = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : this._attackDirection;
         this.bus.emit('enemy.attack_start', { kind: 'lunge' });
-        this.activeOppId = this.opp.open('dodge', 'assaltante.lunge', LUNGE_DODGE_WINDOW_MS);
+        this.activeOppId = this.opp.open('dodge', 'assaltante.lunge', lungeWindowMs(this.lungeLong));
         this.lungeDodgeOppId = this.activeOppId;
       } else {
         this.state = 'chasing';
@@ -477,7 +500,8 @@ export class AssaltanteController implements ThreatAssessor {
   private stepLunge(stepMs: number, dx: number, dy: number, distanceToPlayer: number): void {
     if (!this.lungeMoving) {
       if (distanceToPlayer > 0) this._attackDirection = normalizeVelocity(dx, dy);
-      if (this.phaseElapsedMs >= LUNGE.telegraphMs) {
+      if (this.lungeLong) this.lungeMaxTravel = longTravelFor(distanceToPlayer);
+      if (this.phaseElapsedMs >= this.lungeTelegraphMs) {
         this.lungeMoving = true;
         this.lungeLockPlayerPosition = { x: this.playerPosition.x, y: this.playerPosition.y };
         this.lungeTravelled = 0;
@@ -485,7 +509,7 @@ export class AssaltanteController implements ThreatAssessor {
       return;
     }
 
-    const intended = Math.min((LUNGE.speed * stepMs) / 1000, LUNGE.maxTravel - this.lungeTravelled);
+    const intended = Math.min((LUNGE.speed * stepMs) / 1000, this.lungeMaxTravel - this.lungeTravelled);
     const before = this._position;
     this._position = clampToArena(
       { x: before.x + this._attackDirection.x * intended, y: before.y + this._attackDirection.y * intended },
@@ -503,7 +527,7 @@ export class AssaltanteController implements ThreatAssessor {
       Math.hypot(px, py) <= LUNGE.contactDistance || Math.hypot(lx, ly) <= LUNGE.contactDistance;
 
     const hitWall = moved < intended - 1e-6;
-    if (hitWall || this.lungeTravelled >= LUNGE.maxTravel - 1e-6) {
+    if (hitWall || this.lungeTravelled >= this.lungeMaxTravel - 1e-6) {
       this.endLunge(LUNGE.recoveryMs);
     }
   }

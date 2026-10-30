@@ -3,10 +3,11 @@ import { createPrng } from '../../core/prng';
 import { ELITE_PATTERN_WEIGHTS } from '../../combat/eliteDefs';
 import { ASSALTANTE_RULES, choosePatternRule, type Blackboard } from './assaltanteRules';
 
-const bb = (distanceToPlayer: number, lungeReady = false, patternReady = true): Blackboard => ({
+const bb = (distanceToPlayer: number, lungeReady = false, patternReady = true, chargeReady = false): Blackboard => ({
   distanceToPlayer,
   state: 'idle',
   lungeReady,
+  chargeReady,
   patternReady,
 });
 
@@ -39,6 +40,15 @@ describe('ASSALTANTE_RULES', () => {
     expect(eligible(bb(260, true))).toEqual(['assaltante.lunge', 'assaltante.chase']);
     expect(eligible(bb(261, true))).toEqual(['assaltante.chase']);
     expect(eligible(bb(200, false))).toEqual(['assaltante.chase']);
+  });
+
+  it('the long charge needs its own ready cooldown and d in (260, 520]', () => {
+    expect(eligible(bb(261, false, true, true))).toEqual(['assaltante.lunge', 'assaltante.chase']);
+    expect(eligible(bb(520, false, true, true))).toEqual(['assaltante.lunge', 'assaltante.chase']);
+    expect(eligible(bb(521, false, true, true))).toEqual(['assaltante.chase']);
+    expect(eligible(bb(400, true, true, false))).toEqual(['assaltante.chase']);
+    expect(eligible(bb(200, false, true, true))).toEqual(['assaltante.chase']);
+    expect(eligible(bb(400, false, false, true))).toEqual(['assaltante.chase']);
   });
 
   it('nothing but chase while the pause or the opening delay is running', () => {

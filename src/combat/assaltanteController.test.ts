@@ -7,7 +7,7 @@ import { AssaltanteController } from './assaltanteController';
 import { PARRY_BONUS_RECOVERY_MS } from './actionDefs';
 import { sectorOverlapsBox } from './sector';
 import { primeElite } from './testing/eliteTestKit';
-import { ASSALTANTE_MAX_HP, ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, LUNGE } from './movementDefs';
+import { ASSALTANTE_MAX_HP, ASSALTANTE_CHASE_SPEED, ARENA_BOUNDS, LUNGE, LONG_LUNGE } from './movementDefs';
 
 function makeAssaltante() {
   const bus = new EventBus<GameEvents>();
@@ -662,5 +662,79 @@ describe('AssaltanteController telegraph view', () => {
     expect(enemy.telegraph?.progress).toBeCloseTo(0.5, 6);
     enemy.step(250, player);
     expect(enemy.telegraph).toBeNull();
+  });
+});
+
+describe('AssaltanteController long charge (kite counter)', () => {
+  const FAR_LEFT = { x: -5000, y: 600 };
+  const spawn = { x: 0, y: 600 };
+
+  function readyAt(d: number, ageMs = LONG_LUNGE.cooldownMs) {
+    const ctx = makeAssaltante();
+    ctx.enemy.respawn(spawn, 'source_interrupted');
+    for (let t = 0; t < ageMs; t += 16) ctx.enemy.step(16, FAR_LEFT);
+    return { ...ctx, player: { x: spawn.x + d, y: spawn.y } };
+  }
+  function runUntil(enemy: AssaltanteController, player: { x: number; y: number }, pred: () => boolean) {
+    for (let t = 0; t < 8000 && !pred(); t += 16) enemy.step(16, player);
+  }
+
+  it('starts a lunge from beyond 260 u, with the 650 ms telegraph', () => {
+    const { enemy, player } = readyAt(400);
+    enemy.step(16, player);
+    expect(enemy.state).toBe('lunging');
+    expect(enemy.telegraph?.kind).toBe('lunge');
+    let t = 16;
+    for (; t < LONG_LUNGE.telegraphMs - 16; t += 16) enemy.step(16, player);
+    expect(enemy.lungePhase).toBe('telegraph');
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    expect(enemy.lungePhase).toBe('charge');
+  });
+
+  it('travels the distance plus the overshoot (a 400 u player: 460 u) and ends in recovery', () => {
+    const { enemy, player } = readyAt(400);
+    enemy.step(16, player);
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    const x0 = enemy.position.x;
+    while (enemy.state === 'lunging') enemy.step(16, player);
+    expect(enemy.position.x - x0).toBeCloseTo(400 + LONG_LUNGE.overshoot, 5);
+    expect(enemy.state).toBe('recovering');
+  });
+
+  it('caps the travel at 580 u for a player at 520 u', () => {
+    const { enemy, player } = readyAt(520);
+    enemy.step(16, player);
+    runUntil(enemy, player, () => enemy.lungePhase === 'charge');
+    const x0 = enemy.position.x;
+    while (enemy.state === 'lunging') enemy.step(16, player);
+    expect(enemy.position.x - x0).toBeCloseTo(LONG_LUNGE.maxTravel, 5);
+  });
+
+  it('repeats only after its own 8 s cooldown, and does not use up the short lunge cooldown', () => {
+    const { enemy, player, bus } = readyAt(400);
+    const kinds: string[] = [];
+    bus.on('enemy.attack_start', (e) => kinds.push(e.kind));
+    enemy.step(16, player);
+    while (enemy.state === 'lunging') enemy.step(16, player);
+    // short lunge is still ready (6 s elapsed at spawn), so a player at 200 u is lunged at right away after the pause
+    const startsBefore = kinds.length;
+    for (let t = 0; t < 8000 && kinds.length === startsBefore; t += 16) {
+      enemy.step(16, { x: enemy.position.x + 200, y: enemy.position.y }); // the player keeps 200 u away
+    }
+    expect(kinds).toEqual(['lunge', 'lunge']); // the short lunge was still ready after the long charge
+  });
+
+  it('opens one dodge window sized for the long travel', () => {
+    const { enemy, player, opp } = readyAt(400);
+    enemy.step(16, player);
+    const w = opp.activeOfType('dodge');
+    expect(w).toHaveLength(1);
+    expect(w[0].remainingMs).toBeGreaterThan(LONG_LUNGE.telegraphMs + 1000);
+  });
+
+  it('exposes the live travel in the telegraph view', () => {
+    const { enemy, player } = readyAt(400);
+    enemy.step(16, player);
+    expect(enemy.telegraph?.travel).toBeCloseTo(400 + LONG_LUNGE.overshoot, 5);
   });
 });

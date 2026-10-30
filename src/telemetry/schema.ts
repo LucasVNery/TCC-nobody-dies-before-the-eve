@@ -2,7 +2,7 @@
 // Event-log schema v2 (spec 2026-09-30 §4). One LoggedEvent per NDJSON line.
 
 import { DODGE, PERFECT_DODGE_MS, PARRY_WINDOW_MS, INPUT_BUFFER_MS } from '../combat/actionDefs';
-import { LUNGE } from '../combat/movementDefs';
+import { LUNGE, LONG_LUNGE } from '../combat/movementDefs';
 import { ELITE_TELEGRAPH_MS } from '../combat/eliteDefs';
 
 export const SCHEMA_VERSION = 2 as const;
@@ -14,7 +14,7 @@ export const SCHEMA_VERSION = 2 as const;
 export const GAME_VERSION = '0.0.5';
 
 /** Window/timing configuration revision, written into every session.start next to windows_ms. */
-export const CONFIG_VERSION = '0.0.5-c1';
+export const CONFIG_VERSION = '0.0.5-c2';
 
 /** The timing windows (ms) in force, logged so analyses can tell configurations apart. */
 export interface WindowsMs {
@@ -25,6 +25,7 @@ export interface WindowsMs {
   telegraph_swing: number;
   telegraph_combo: number;
   telegraph_lunge: number;
+  telegraph_charge: number;
   telegraph_slam: number;
 }
 
@@ -37,6 +38,7 @@ export function windowsMs(): WindowsMs {
     telegraph_swing: ELITE_TELEGRAPH_MS.swing,
     telegraph_combo: ELITE_TELEGRAPH_MS.combo,
     telegraph_lunge: LUNGE.telegraphMs,
+    telegraph_charge: LONG_LUNGE.telegraphMs,
     telegraph_slam: ELITE_TELEGRAPH_MS.slam,
   };
 }

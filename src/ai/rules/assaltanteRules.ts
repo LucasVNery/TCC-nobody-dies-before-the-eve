@@ -1,6 +1,6 @@
 // src/ai/rules/assaltanteRules.ts
 import type { EnemyState } from '../../combat/types';
-import { LUNGE } from '../../combat/movementDefs';
+import { LUNGE, LONG_LUNGE } from '../../combat/movementDefs';
 import { ELITE, ELITE_PATTERN_WEIGHTS, type AttackKind } from '../../combat/eliteDefs';
 import type { Prng } from '../../core/prng';
 
@@ -10,6 +10,8 @@ export interface Blackboard {
   distanceToPlayer: number;
   state: EnemyState;
   lungeReady: boolean;
+  /** Long-charge cooldown is over (separate from the short lunge's). */
+  chargeReady: boolean;
   /** Mandatory pause since the last pattern is over and the first-attack delay since birth has passed. */
   patternReady: boolean;
 }
@@ -52,9 +54,10 @@ export const ASSALTANTE_RULES: Rule[] = [
     pattern: 'lunge',
     precond: (bb) =>
       bb.patternReady &&
-      bb.lungeReady &&
-      bb.distanceToPlayer >= LUNGE.minDistance &&
-      bb.distanceToPlayer <= LUNGE.maxDistance,
+      ((bb.lungeReady && bb.distanceToPlayer >= LUNGE.minDistance && bb.distanceToPlayer <= LUNGE.maxDistance) ||
+        (bb.chargeReady &&
+          bb.distanceToPlayer > LUNGE.maxDistance &&
+          bb.distanceToPlayer <= LONG_LUNGE.maxDistance)),
   },
   {
     id: 'assaltante.chase',

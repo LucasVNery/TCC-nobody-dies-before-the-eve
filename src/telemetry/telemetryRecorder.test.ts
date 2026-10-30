@@ -259,19 +259,19 @@ describe('TelemetryRecorder', () => {
 describe('game version', () => {
   it('declares the current game version', () => {
     expect(GAME_VERSION).toBe('0.0.5');
-    expect(CONFIG_VERSION).toBe('0.0.5-c1');
+    expect(CONFIG_VERSION).toBe('0.0.5-c2');
   });
 
   it('windowsMs carries the eight window values (swing telegraph from ELITE_TELEGRAPH_MS)', () => {
     expect(windowsMs()).toEqual({
       iframes: 200, perfect: 110, parry: 150, buffer: 170,
-      telegraph_swing: 450, telegraph_combo: 320, telegraph_lunge: 500, telegraph_slam: 700,
+      telegraph_swing: 450, telegraph_combo: 320, telegraph_lunge: 500, telegraph_charge: 650, telegraph_slam: 700,
     });
   });
 
   it('the shared session.start payload has config_version and windows_ms', () => {
     const p = sessionStartPayload('2026-10-29T00:00:00.000Z', true);
-    expect(p.config_version).toBe('0.0.5-c1');
+    expect(p.config_version).toBe('0.0.5-c2');
     expect(p.game_version).toBe('0.0.5');
     expect(p.windows_ms).toEqual(windowsMs());
     expect(p.persistent).toBe(true);

@@ -40,3 +40,16 @@ export const LUNGE = {
   recoveryMs: 500,
   contactDistance: 60,
 } as const;
+
+/**
+ * Long charge (combat v2 §10 kite counter): the same lunge, started from beyond LUNGE.maxDistance so a player
+ * circling at range cannot stay out of reach. Travel is fixed when the aim locks (distance + overshoot, at least
+ * LUNGE.maxTravel, at most maxTravel); speed, contact and recovery are the lunge's.
+ */
+export const LONG_LUNGE = {
+  maxDistance: 520,
+  cooldownMs: 8000,
+  telegraphMs: 650,
+  overshoot: 60,
+  maxTravel: 580,
+} as const;

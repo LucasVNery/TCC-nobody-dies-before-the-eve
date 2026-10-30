@@ -31,6 +31,8 @@ export function makeBotStack(opts: BotStackOptions = {}) {
 /** The bot dodges non-lunge strikes this long before they land (i-frames cover the hit). */
 const SWING_DODGE_LEAD_MS = 100;
 /** Ticks into a lunge at which the bot dodges: the end of its telegraph (the charge starts). */
+/** Distance at which the bot dodges a long charge (i-frames cover the 60 u contact at 450 u/s). */
+const LONG_CHARGE_DODGE_DISTANCE = 90;
 const LUNGE_DODGE_TICK = Math.round(LUNGE.telegraphMs / (1000 / 60));
 
 /**
@@ -43,6 +45,8 @@ const LUNGE_DODGE_TICK = Math.round(LUNGE.telegraphMs / (1000 / 60));
 export function runBot(stack: TelemetryStack, ticks: number) {
   const { encounter } = stack;
   let threatTicks = 0;
+  let longChargeSeenDistance: number | null = null;
+  let longChargeDodged = false;
   for (let i = 0; i < ticks; i++) {
     // Hit-stop freezes the simulation: the bot has nothing to react to, and tick-indexed cadences/threat timers
     // would drift against a frozen world. It waits the frozen step out.
@@ -76,7 +80,17 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     // Lunge: dodge when the charge starts. Other patterns (swing, combo strikes, slam): dodge when the strike is
     // SWING_DODGE_LEAD_MS away, so the i-frames cover it whatever the pattern's telegraph is (combat v2).
     const strikeInMs = lunging || !threat ? null : encounter.assaltante.msUntilThreatens(encounter.player.hurtbox(), SWING_DODGE_LEAD_MS);
-    const dodgeNow = lunging ? threatTicks === LUNGE_DODGE_TICK : strikeInMs !== null;
+    // Long charge (started beyond the short lunge's reach): the charge takes about a second to arrive, so the bot
+    // dodges once, when the body is LONG_CHARGE_DODGE_DISTANCE away, instead of at the start of the charge.
+    const charging = encounter.assaltante.lungePhase === 'charge';
+    if (!charging) longChargeSeenDistance = null;
+    else if (longChargeSeenDistance === null) longChargeSeenDistance = Math.hypot(dx, dy);
+    const longCharge = charging && (longChargeSeenDistance ?? 0) > LUNGE.maxDistance;
+    const dodgeNow = longCharge
+      ? Math.hypot(dx, dy) <= LONG_CHARGE_DODGE_DISTANCE && !longChargeDodged
+      : lunging ? threatTicks === LUNGE_DODGE_TICK : strikeInMs !== null;
+    if (!longCharge) longChargeDodged = false;
+    if (dodgeNow && longCharge) longChargeDodged = true;
     if (dodgeNow && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
     if (i % 12 === 0 && encounter.assaltante.state === 'recovering' && encounter.player.stamina.value > 0) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
