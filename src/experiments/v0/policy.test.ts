@@ -883,3 +883,77 @@ describe('AgentPolicy own-body reset (run index, not HP)', () => {
     expect(p.wantBlock).toBe(true);
   });
 });
+
+describe('AGENT_STYLES sprint, stamina reserve and item parameters (V0.1 Task 3)', () => {
+  const expected: Record<StyleId, [number, number, number]> = {
+    agressivo: [1, 0, 0.3],
+    evasivo: [0.2, 45, 0.9],
+    bloqueador: [0.5, 30, 0.5],
+    paciente: [0.3, 45, 0.7],
+    variado: [0.6, 15, 0.6],
+    repetitivo: [0.5, 0, 0.2],
+    aleatorio: [0.5, 0, 0.5],
+  };
+  it.each(STYLE_IDS)('%s has the spec values', (id) => {
+    const s = AGENT_STYLES[id];
+    expect([s.sprintApproach, s.staminaReserve, s.itemSeeking]).toEqual(expected[id]);
+    expect(s.itemUse).toEqual({ healBelowHpFraction: 0.5, bombWithinPx: 110, powerOnAttackStart: true, random: id === 'aleatorio' });
+  });
+});
+
+describe('AgentPolicy sprint while approaching (V0.1 Task 3)', () => {
+  const far = (d: number) => (): World => ({ enemyState: 'chasing', offset: { x: d, y: 0 } });
+  const sprints = (log: Step[]) => log.filter((l) => l.intent.sprint === true).length;
+  const STEPS = Math.round(5000 / STEP);
+
+  it('sprintApproach 1: sprints while closing in on an enemy beyond 200 u with stamina above 75', () => {
+    const log = drive(makePolicy('agressivo', 3), STEPS, far(400), 'sword_shield', undefined, 150);
+    expect(sprints(log)).toBeGreaterThan(0);
+    expect(log.every((l) => l.intent.sprint !== true || (l.intent.move.x > 0))).toBe(true);
+  });
+
+  it('sprintApproach 0: never sprints', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, sprintApproach: 0 };
+    const log = drive(makePolicy('agressivo', 3, NO_LAPSE, style), STEPS, far(400), 'sword_shield', undefined, 150);
+    expect(sprints(log)).toBe(0);
+  });
+
+  it('does not sprint with stamina at 75 or less, nor within 200 u of the enemy', () => {
+    expect(sprints(drive(makePolicy('agressivo', 3), STEPS, far(400), 'sword_shield', undefined, 75))).toBe(0);
+    const near = drive(makePolicy('agressivo', 3), STEPS, far(190), 'sword_shield', undefined, 150);
+    expect(near.some((l) => l.intent.move.x > 0)).toBe(true);
+    expect(sprints(near)).toBe(0);
+  });
+
+  it('the draw is made once per approach stretch: a 0.5 style is all-sprint or no-sprint within a stretch', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, sprintApproach: 0.5 };
+    for (let seed = 1; seed <= 12; seed++) {
+      const log = drive(makePolicy('agressivo', seed, NO_LAPSE, style), STEPS, far(5000), 'sword_shield', undefined, 150);
+      const moving = log.filter((l) => l.intent.move.x > 0);
+      expect(moving.length).toBeGreaterThan(0);
+      expect(new Set(moving.map((l) => l.intent.sprint === true)).size, `seed ${seed}`).toBe(1);
+    }
+  });
+});
+
+describe('AgentPolicy stamina reserve (V0.1 Task 3)', () => {
+  const stand = (): World => ({ enemyState: 'chasing', offset: { x: 30, y: 0 } });
+  const STEPS = Math.round(30_000 / STEP);
+  const startTimes = (log: Step[]) => log.filter((l) => l.intent.startAction).map((l) => l.t);
+
+  it('only an opening attack (>= 1 s after the last) is started when stamina - cost falls under the reserve', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, staminaReserve: 60 };
+    const log = drive(makePolicy('agressivo', 5, NO_LAPSE, style), STEPS, stand, 'sword_shield', undefined, 70);
+    const t = startTimes(log);
+    expect(t.length).toBeGreaterThan(1);
+    for (let i = 1; i < t.length; i++) expect(t[i] - t[i - 1]).toBeGreaterThanOrEqual(1000);
+    // the very first attack ignores the reserve
+    expect(t[0]).toBeLessThan(1000);
+  });
+
+  it('with no reserve the same agent chains attacks closer than 1 s', () => {
+    const log = drive(makePolicy('agressivo', 5), STEPS, stand, 'sword_shield', undefined, 70);
+    const t = startTimes(log);
+    expect(t.some((x, i) => i > 0 && x - t[i - 1] < 1000)).toBe(true);
+  });
+});

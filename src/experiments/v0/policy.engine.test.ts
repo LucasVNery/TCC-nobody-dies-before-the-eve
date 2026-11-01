@@ -6,7 +6,8 @@ import { Encounter } from '../../combat/encounter';
 import { primeElite } from '../../combat/testing/eliteTestKit';
 import { DEFAULT_HUMANIZER, Humanizer } from './humanizer';
 import { PerceptionBuffer, observe } from './perception';
-import { AGENT_STYLES, type AgentStyle, type StyleId } from './styles';
+import { AGENT_STYLES, STYLE_IDS, type AgentStyle, type StyleId } from './styles';
+import { applyIntent } from './agentRunner';
 import { AgentPolicy, PERCEPTION_LAG_MS } from './policy';
 
 const STEP = 1000 / 60;
@@ -195,4 +196,59 @@ describe('AgentPolicy on the real engine', () => {
     expect(r.earlyRelease).toBe(0);
     expect(r.rejected / r.chargedStarts).toBeLessThanOrEqual(0.1);
   });
+});
+
+describe('sprint and stamina on the real engine (V0.1 Task 3)', () => {
+  const run = (id: StyleId, seed: number, ms: number, style: AgentStyle = AGENT_STYLES[id]) => {
+    const { stack } = makeBotStack({ sessionId: `sprint-${id}` });
+    const { encounter } = stack;
+    let denied = 0;
+    let actions = 0;
+    encounter.bus.on('player.stamina_denied', () => denied++);
+    encounter.bus.on('player.action', () => actions++);
+    stack.startSession(INFO, null);
+    const policy = new AgentPolicy(style, new Humanizer(DEFAULT_HUMANIZER, createPrng(seed).next), createPrng(seed + 1).next);
+    const buffer = new PerceptionBuffer();
+    let approachMs = 0;
+    let approachPx = 0;
+    let sprintTicks = 0;
+    for (let i = 0; i < Math.round(ms / STEP); i++) {
+      const t = stack.recorder.nowMs;
+      if (encounter.hitStop.active) {
+        stack.step(STEP);
+        continue;
+      }
+      const now = observe(encounter, t, stack.director.runIdx);
+      buffer.push(now);
+      const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
+      const before = { ...now.playerPos };
+      const far = Math.hypot(now.enemyPos.x - now.playerPos.x, now.enemyPos.y - now.playerPos.y) > 200;
+      applyIntent(encounter, intent);
+      stack.step(STEP);
+      if (intent.sprint === true) sprintTicks++;
+      if (far && (intent.move.x !== 0 || intent.move.y !== 0) && !encounter.hitStop.active) {
+        const after = encounter.player.position;
+        approachMs += STEP;
+        approachPx += Math.hypot(after.x - before.x, after.y - before.y);
+      }
+    }
+    return { denied, actions, sprintTicks, approachSpeed: approachMs > 0 ? approachPx / (approachMs / 1000) : 0 };
+  };
+
+  it('agressivo (sprintApproach 1) approaches faster than walking speed', () => {
+    const r = run('agressivo', 4242, 30_000);
+    expect(r.sprintTicks).toBeGreaterThan(0);
+    expect(r.approachSpeed).toBeGreaterThan(175);
+  });
+
+  it('sprintApproach 0 never sprints on the engine', () => {
+    expect(run('agressivo', 4242, 30_000, { ...AGENT_STYLES.agressivo, sprintApproach: 0 }).sprintTicks).toBe(0);
+  });
+
+  // spec 4.2(a): 600 simulated seconds per style without a denied press
+  it.each(STYLE_IDS)('%s: 600 s with no player.stamina_denied', (id) => {
+    const r = run(id, 4242, 600_000);
+    expect(r.actions).toBeGreaterThan(50); // the agent really played
+    expect(r.denied).toBe(0);
+  }, 120_000);
 });

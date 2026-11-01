@@ -46,7 +46,25 @@ export interface AgentStyle {
   defenseWeights: DefenseWeights;
   /** Attacks only in an opening: enemy seen recovering, or far away with a ranged action that reaches. */
   waitForOpening: boolean;
+  /** Chance (0..1) that an approach stretch is run (sprint) instead of walked; drawn once per stretch. */
+  sprintApproach: number;
+  /** Stamina (0..60, of 150) kept for defence: a non-opening attack is not started if it would leave less. */
+  staminaReserve: number;
+  /** How much the agent goes after items on the floor (0..1); used by the item behaviour (Task 4). */
+  itemSeeking: number;
+  /** Item use rules (Task 4). */
+  itemUse: ItemUse;
 }
+
+export interface ItemUse {
+  healBelowHpFraction: number;
+  bombWithinPx: number;
+  powerOnAttackStart: boolean;
+  /** Control style: uses items at random instead of by rule. */
+  random: boolean;
+}
+
+const ITEM_USE: ItemUse = { healBelowHpFraction: 0.5, bombWithinPx: 110, powerOnAttackStart: true, random: false };
 
 const ALL_ACTIONS_EQUAL: Record<string, number> = {
   'sword_shield.light': 1,
@@ -81,6 +99,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 10,
     defenseWeights: { dodge: 0.1, block: 0.05, parry: 0, none: 0.85 },
     waitForOpening: false,
+    sprintApproach: 1,
+    staminaReserve: 0,
+    itemSeeking: 0.3,
+    itemUse: ITEM_USE,
   },
   // keeps distance, prefers the bow, dodges
   evasivo: {
@@ -93,6 +115,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 30,
     defenseWeights: { dodge: 0.85, block: 0.05, parry: 0, none: 0.1 },
     waitForOpening: false,
+    sprintApproach: 0.2,
+    staminaReserve: 45,
+    itemSeeking: 0.9,
+    itemUse: ITEM_USE,
   },
   // holds the guard, times parries on the telegraph, counter-attacks
   bloqueador: {
@@ -105,6 +131,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 15,
     defenseWeights: { dodge: 0.05, block: 0.55, parry: 0.35, none: 0.05 },
     waitForOpening: true,
+    sprintApproach: 0.5,
+    staminaReserve: 30,
+    itemSeeking: 0.5,
+    itemUse: ITEM_USE,
   },
   // waits: attacks only after the enemy's swing (recovery) or from safe range
   paciente: {
@@ -117,6 +147,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 15,
     defenseWeights: { dodge: 0.5, block: 0.3, parry: 0.1, none: 0.1 },
     waitForOpening: true,
+    sprintApproach: 0.3,
+    staminaReserve: 45,
+    itemSeeking: 0.7,
+    itemUse: ITEM_USE,
   },
   // switches weapons often, uses every action
   variado: {
@@ -129,6 +163,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 20,
     defenseWeights: { dodge: 0.35, block: 0.3, parry: 0.25, none: 0.1 },
     waitForOpening: false,
+    sprintApproach: 0.6,
+    staminaReserve: 15,
+    itemSeeking: 0.6,
+    itemUse: ITEM_USE,
   },
   // one weapon, one move
   repetitivo: {
@@ -141,6 +179,10 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 10,
     defenseWeights: { dodge: 0.35, block: 0.35, parry: 0, none: 0.3 },
     waitForOpening: false,
+    sprintApproach: 0.5,
+    staminaReserve: 0,
+    itemSeeking: 0.2,
+    itemUse: ITEM_USE,
   },
   // control: uniform over the 7 registered actions (weapon weights 3:3:1 x
   // uniform within the weapon, weapon re-drawn every attack) and uniform defence
@@ -154,5 +196,9 @@ export const AGENT_STYLES: Record<StyleId, AgentStyle> = {
     distanceTolerance: 30,
     defenseWeights: { dodge: 0.25, block: 0.25, parry: 0.25, none: 0.25 },
     waitForOpening: false,
+    sprintApproach: 0.5,
+    staminaReserve: 0,
+    itemSeeking: 0.5,
+    itemUse: { ...ITEM_USE, random: true },
   },
 };

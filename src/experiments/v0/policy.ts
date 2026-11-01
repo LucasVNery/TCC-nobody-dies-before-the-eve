@@ -39,6 +39,11 @@ const PLAN_STALE_MS = 4000;
 const STAGGER_MARGIN_MS = 34;
 /** Retreat stops pushing into a wall closer than this. */
 const WALL_MARGIN_PX = 60;
+/** Sprinting needs more stamina than this and an enemy farther than SPRINT_MIN_DIST_PX. */
+const SPRINT_MIN_STAMINA = 75;
+const SPRINT_MIN_DIST_PX = 200;
+/** An attack this long after the previous one opens a sequence and ignores the stamina reserve. */
+const OPENING_GAP_MS = 1000;
 
 export type DefenseKind = keyof DefenseWeights;
 
@@ -130,6 +135,8 @@ export class AgentPolicy {
   private weaponReadyAt = 0;
   private aim: Vec2 = { x: 1, y: 0 };
   private _lastPlannedDefense: DefenseKind | null = null;
+  /** Drawn once when an approach stretch begins (null between stretches): run it or walk it. */
+  private approachSprint: boolean | null = null;
 
   constructor(
     private readonly style: AgentStyle,
@@ -159,6 +166,7 @@ export class AgentPolicy {
       this.pending = [];
       this.wantBlock = false;
       this.openingAt = null;
+      this.approachSprint = null;
       if (now.isBlocking) intent.block = 'stop';
       return intent;
     }
@@ -255,6 +263,8 @@ export class AgentPolicy {
         if (!reachOk) approach = true;
         else if (now.playerStamina <= 0) {
           // exhausted: an attack press would be denied; wait for the bar to refill
+        } else if (this.belowReserve(plan.action, now.playerStamina, nowMs)) {
+          // keep the reserve for defence: only the opening attack of a sequence spends into it
         } else if (this.humanizer.lapses()) this.lastAttackAt = nowMs;
         else this.startAttack(intent, plan, nowMs);
       }
@@ -263,10 +273,23 @@ export class AgentPolicy {
     // movement. A lunge on screen (aiming or charging) is not walked into: the press was timed on the
     // distance at which its corridor appeared, and closing in would bring the strike forward.
     const holdGround = st === 'lunging';
+    let closing = false;
     if (dodgeNow) intent.move = this.retreat(now.playerPos, dir);
-    else if (approach && !holdGround) intent.move = dir;
-    else if (!holdGround && dist > this.style.preferredDistance + this.style.distanceTolerance) intent.move = dir;
-    else if (dist < this.style.preferredDistance - this.style.distanceTolerance) intent.move = this.retreat(now.playerPos, dir);
+    else if (approach && !holdGround) {
+      intent.move = dir;
+      closing = true;
+    } else if (!holdGround && dist > this.style.preferredDistance + this.style.distanceTolerance) {
+      intent.move = dir;
+      closing = true;
+    } else if (dist < this.style.preferredDistance - this.style.distanceTolerance) intent.move = this.retreat(now.playerPos, dir);
+
+    // sprint: the choice is made once per approach stretch (not per tick, so it does not flicker); inside a
+    // run-chosen stretch it still needs stamina above the floor and an enemy still far away
+    if (!closing) this.approachSprint = null;
+    else {
+      if (this.approachSprint === null) this.approachSprint = this.rng() < this.style.sprintApproach;
+      if (this.approachSprint && now.playerStamina > SPRINT_MIN_STAMINA && dist > SPRINT_MIN_DIST_PX) intent.sprint = true;
+    }
     return intent;
   }
 
@@ -325,6 +348,12 @@ export class AgentPolicy {
     }
     this.pending.push({ kind, at });
     this.pending.sort((a, b) => a.at - b.at);
+  }
+
+  /** True when a non-opening attack would leave the bar under the style's reserve. */
+  private belowReserve(action: ActionDef, stamina: number, nowMs: number): boolean {
+    if (nowMs - this.lastAttackAt >= OPENING_GAP_MS) return false;
+    return stamina - STAMINA_COST[action.actionType] < this.style.staminaReserve;
   }
 
   private startAttack(intent: AgentIntent, plan: Plan, nowMs: number): void {
