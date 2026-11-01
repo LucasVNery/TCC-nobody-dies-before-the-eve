@@ -3,10 +3,17 @@ import { rebuildProfileWithStats, orderEvents } from '../../telemetry/replay';
 import { WEAPON_IDS } from '../../combat/actionRegistry';
 import type { LoggedEvent } from '../../telemetry/schema';
 import { GAME_VERSION, SCHEMA_VERSION, CONFIG_VERSION, windowsMs } from '../../telemetry/schema';
-import { DEFAULT_HUMANIZER } from './humanizer';
+import { DEFAULT_HUMANIZER, Humanizer } from './humanizer';
+import { AgentPolicy, PERCEPTION_LAG_MS } from './policy';
+import { PerceptionBuffer, observe } from './perception';
+import { AGENT_STYLES } from './styles';
+import { createPrng } from '../../core/prng';
 import { STYLE_IDS } from './styles';
 import { REPORT_SKILLS } from './windowValues';
-import { DEFAULT_EXPERIMENT, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
+import { DEFAULT_EXPERIMENT, applyIntent, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
+import { createTelemetryStack } from '../../telemetry/stack';
+import { sessionStartPayload } from '../../telemetry/schema';
+import { ProfileAccumulator } from '../../profile/profileAccumulator';
 
 const tiny = (over: Partial<ExperimentConfig> = {}): ExperimentConfig => ({
   ...DEFAULT_EXPERIMENT,
@@ -22,11 +29,11 @@ const ofType = (events: readonly LoggedEvent[], type: string) => events.filter((
 describe('DEFAULT_EXPERIMENT', () => {
   it('holds the global constants of the plan', () => {
     expect(DEFAULT_EXPERIMENT).toEqual({
-      seed: 20261019,
+      seed: DEFAULT_EXPERIMENT.seed, // value pinned in cliArgs.test.ts (no other test uses the official seed)
       agents: STYLE_IDS,
       runsPerAgent: 60,
       runsPerSession: 10,
-      runCapMs: 300_000,
+      runCapMs: 600_000,
       humanizer: DEFAULT_HUMANIZER,
       stepMs: 1000 / 60,
     });
@@ -34,6 +41,15 @@ describe('DEFAULT_EXPERIMENT', () => {
 });
 
 describe('agent runner', () => {
+  it.each(STYLE_IDS.map((s) => [s]))('%s: playAgent with the 600 s cap is deterministic (seed 4242, 2 runs)', (styleId) => {
+    const cfg = tiny({ runsPerAgent: 2, runsPerSession: 1, runCapMs: 600_000 });
+    const a = playAgent(styleId, cfg, STYLE_IDS.indexOf(styleId));
+    const b = playAgent(styleId, cfg, STYLE_IDS.indexOf(styleId));
+    expect(a.events.length).toBeGreaterThan(0);
+    expect(a.events).toEqual(b.events);
+  });
+
+
   it('same config twice gives identical logs', () => {
     const cfg = tiny({ agents: ['repetitivo', 'agressivo'] });
     const a = runExperiment(cfg);
@@ -238,3 +254,92 @@ describe('agent runner', () => {
     expect(gameSeed(cfg.seed, 2, 0)).not.toBe(gameSeed(cfg.seed, 2, 1));
   });
 });
+
+describe('applyIntent: sprint and item', () => {
+  const stack = () =>
+    createTelemetryStack({
+      accumulator: new ProfileAccumulator(),
+      playerId: 'agent-test',
+      sessionId: 's0',
+      firstRunIdx: 0,
+      nextSeed: () => 4242,
+      entitySize: 20,
+      onRunEnd: () => {},
+    });
+  const aim = { x: 1, y: 0 };
+
+  it('sprint with movement leaves the player sprinting', () => {
+    const s = stack();
+    s.startSession(sessionStartPayload('2026-01-01T00:00:00.000Z', true), null);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim, sprint: true });
+    for (let i = 0; i < 10; i++) s.step(1000 / 60);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim, sprint: true });
+    expect(s.encounter.player.isSprinting).toBe(true);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim });
+    s.step(1000 / 60);
+    expect(s.encounter.player.isSprinting).toBe(false);
+  });
+
+  it('useItem with an item in the slot emits item.use', () => {
+    const s = stack();
+    s.startSession(sessionStartPayload('2026-01-01T00:00:00.000Z', true), null);
+    const items = s.encounter.items as unknown as { slot: unknown };
+    items.slot = { id: 'i1', kind: 'heal', heldMs: 0 };
+    applyIntent(s.encounter, { move: { x: 0, y: 0 }, aim, useItem: true });
+    s.step(1000 / 60);
+    expect(s.encounter.items.held).toBeNull();
+    expect(ofType(s.recorder.drain(), 'item.use')).toHaveLength(1);
+  });
+});
+
+describe('agents and items, end to end (V0.1 Task 4)', () => {
+  const cfg = tiny({ runsPerAgent: 10, runsPerSession: 10, runCapMs: 120_000 });
+  const itemEvents = (events: readonly LoggedEvent[]) => events.filter((e) => e.type === 'item.pickup' || e.type === 'item.use');
+
+  it('an agent that seeks items picks them up and uses them in the real game, deterministically by seed', () => {
+    const a = playAgent('evasivo', cfg, 1);
+    expect(ofType(a.events, 'item.pickup').length).toBeGreaterThan(0);
+    expect(ofType(a.events, 'item.use').length).toBeGreaterThan(0);
+    expect(itemEvents(playAgent('evasivo', cfg, 1).events)).toEqual(itemEvents(a.events));
+  }, 120_000);
+
+  it('a heal in the middle of a run is not read as a restart (real stack and policy)', () => {
+    const s = createTelemetryStack({
+      accumulator: new ProfileAccumulator(),
+      playerId: 'agent-test',
+      sessionId: 's0',
+      firstRunIdx: 0,
+      nextSeed: () => 4242,
+      entitySize: 20,
+      onRunEnd: () => {},
+    });
+    s.startSession(sessionStartPayload('2026-01-01T00:00:00.000Z', true), null);
+    const policy = new AgentPolicy(AGENT_STYLES.evasivo, new Humanizer({ ...DEFAULT_HUMANIZER, lapseProb: 0 }, createPrng(1).next), createPrng(2).next);
+    const buffer = new PerceptionBuffer();
+    const priv = policy as unknown as { lockedUntil: number; pending: unknown[] };
+    (s.encounter.items as unknown as { slot: unknown }).slot = { id: 'i1', kind: 'heal', heldMs: 0 };
+    s.encounter.player.hp = 40;
+    let used = false;
+    for (let i = 0; i < 240 && !used; i++) {
+      const t = s.recorder.nowMs;
+      const now = observe(s.encounter, t, s.director.runIdx);
+      buffer.push(now);
+      const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
+      used = intent.useItem === true;
+      applyIntent(s.encounter, intent);
+      s.step(1000 / 60);
+    }
+    expect(used).toBe(true);
+    expect(s.encounter.player.hp).toBeGreaterThan(40);
+    expect(s.director.runIdx).toBe(0);
+    priv.lockedUntil = 1e9; // a marker a restart would clear (set now: it would block the use itself)
+    // one more tick with the raised HP: the policy sees a heal, not a new run
+    const t = s.recorder.nowMs;
+    policy.decide({ now: observe(s.encounter, t, s.director.runIdx), seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
+    expect(priv.lockedUntil).toBe(1e9);
+    const events = s.recorder.drain();
+    expect(ofType(events, 'run.start')).toHaveLength(1);
+    expect(ofType(events, 'item.use')).toHaveLength(1);
+  });
+});
+

@@ -427,3 +427,180 @@ changes spec §4.3, so it is the author's call before the first full run.
 ## Revisão das hipóteses (2026-10-20)
 
 Added after the pilot and before the first full run; the pilot results above are unchanged. The author reviewed the pre-registered set and approved two changes: H1 (weapon_repertoire, variado > agressivo) gained the "or lower undefined" clause, because agressivo almost always uses a single weapon per run and its per-run weapon_repertoire is mostly undefined; H12 (action_repertoire, aleatorio > repetitivo) was retired, because it could only confirm through repetitivo's undefinedness and is redundant with H2u. The final set has 13 items (H1 to H11, H1u, H2u). The earlier worry that H5 would confirm by undefinedness is corrected: the pilot shows agressivo undefined in 30 to 60% of runs, below the 95% threshold; the real risk for H5 and H6 is a selection bias, since only runs with at least 2 defence labels count.
+
+## 0.0.5 (V0.1 pilot, 2026-10-31)
+
+- **Branch / HEAD:** `v01-agentes` at `1008acf`. `GAME_VERSION` 0.0.5.
+- **Tool:** `tools/calibrate-v0.ts` (raw behaviour only; refuses the official seed).
+- **Commands run** (test seeds only; the 0.0.3 seed `20261019` and the official V0.1 seed `20261105`
+  were never used):
+  - `npx vite-node tools/calibrate-v0.ts --seed 4242 --runs 10`
+  - `npx vite-node tools/calibrate-v0.ts --seed 4243 --runs 10`
+  - `npx vite-node tools/calibrate-v0.ts --seed 4244 --runs 10`
+  - `npx vite-node tools/calibrate-v0.ts --seed 4242 --runs 30`
+  - `npx vite-node tools/calibrate-v0.ts --seed 4243 --runs 30`
+  - `npx vite-node tools/calibrate-v0.ts --seed 4244 --runs 30`
+- **Pilot config:** `DEFAULT_EXPERIMENT` except seed and runs: 10 runs per session, run cap 600 s
+  simulated (spec §9.1), step 1000/60 ms, default humanizer. Wall time 1–3.5 s per sweep.
+- Two throw-away diagnostic scripts (deleted after use, not committed) read the same pilot logs:
+  one for the item geometry (distance from the agent to each item at spawn, item fate), one for
+  the magnitude and the definedness (null count) of the per-run M metrics. Neither computed a
+  Cliff's delta, an interval or a verdict.
+
+### Criteria (spec §4.2) and result
+
+| style | (a) stamina_denied (all sweeps) | (b) completed per session of 10 (min over sessions) | (c) truncated (30-run sweeps 4242/4243/4244) | behaviour (does what its name says) | data sufficiency (V0) |
+| --- | --- | --- | --- | --- | --- |
+| agressivo | 0 | 10 | 0 / 0 / 0 | met (highest cadence, narrowly; see observations) | **partial**: `itemPickRate` null in 30/30 runs (seed 4242), 16–23 defence labels per 30 runs, 0.37–0.47 kills per death |
+| evasivo | 0 | 8 | 3 / 1 / 2 of 30 (10%, 3%, 7%; worst session 2 of 10) | met (bow 77–81% of actions, dodge 57–59% of defence labels) | met |
+| bloqueador | 0 | 10 | 0 / 0 / 0 | met (block+parry 93–94% of labels, 0% attacks into the swing) | met (`itemPickRate` null in 5/30 runs) |
+| paciente | 0 | 10 | 0 / 0 / 0 | met (0% attacks into the swing) | **partial**: `itemPickRate` null in 14/30 runs |
+| variado | 0 | 10 | 0 / 0 / 0 | met (3 weapons, 7/7 ids, max share 19–20%) | **partial**: `itemPickRate` null in 27/30 runs |
+| repetitivo | 0 | 10 | 0 / 0 / 0 | met (100% `sword_shield.light`, 0 switches) | **partial**: `itemPickRate` null in 30/30 runs, 0.07–0.17 kills per death |
+| aleatorio | 0 | 10 | 0 / 0 / 0 | met (each id 10–18%) | **partial**: `itemPickRate` null in 29/30 runs |
+
+The null counts are from seed 4242 (30 runs); the other columns cover all sweeps named.
+
+Criteria (a), (b) and (c) of §4.2 hold for every style on every sweep, and every style does what
+its name says, so **no parameter was changed**: `sprintApproach`, `staminaReserve`, `itemSeeking`
+and `itemUse` keep the initial values of spec §4.1 / §9.5 (table below). Data sufficiency (the V0
+criterion) is **partial** for agressivo, repetitivo, aleatorio, variado and paciente, mainly
+because the item metric is undefined in many of their runs (and, for agressivo and repetitivo,
+because their runs are short); this goes to the author (see observations). The known case of spec
+§4.2 (`evasivo` truncating) is gone: 6 of 90 runs truncated over the three 30-run sweeps (0.0.4:
+36 of 60).
+
+### Parameters used (unchanged from Task 4)
+
+| style | sprintApproach | staminaReserve | itemSeeking | itemUse |
+| --- | --- | --- | --- | --- |
+| agressivo | 1.0 | 0 | 0.3 | heal < 50% HP, bomb ≤ 110 px, power on attack start |
+| evasivo | 0.2 | 45 | 0.9 | same |
+| bloqueador | 0.5 | 30 | 0.5 | same |
+| paciente | 0.3 | 45 | 0.7 | same |
+| variado | 0.6 | 15 | 0.6 | same |
+| repetitivo | 0.5 | 0 | 0.2 | same |
+| aleatorio | 0.5 | 0 | 0.5 | random use (control) |
+
+### Final table — run outcome, stamina, sprint, items, protection (30 runs per style)
+
+Same definitions as the tool's output (compl = runs ended by death; trunc = runs that hit the
+600 s cap; empty = the run the director opens after the death that ends a session, which has no
+evidence and is not counted, one per session of 10, so compl + trunc = 30; protected = 1 − `player.hit_unmitigated` / `enemy.attack_start`;
+sprint share = share of `pos.sample` windows that spent sprint stamina; "far" = enemy > 180 px).
+
+Seed 4242:
+
+| style | compl | trunc | empty | stamina denied | sprint share | sprint share (far) | items spawned | picked | used | enemy attacks | unmitigated hits | protected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| agressivo | 30 | 0 | 3 | 0 | 14% | 67% | 0 | 0 | 0 | 191 | 147 | 23% |
+| evasivo | 27 | 3 | 3 | 0 | 1% | 6% | 343 | 31 | 23 | 1721 | 151 | 91% |
+| bloqueador | 30 | 0 | 3 | 0 | 4% | 34% | 59 | 4 | 3 | 832 | 149 | 82% |
+| paciente | 30 | 0 | 3 | 0 | 3% | 22% | 37 | 4 | 1 | 611 | 150 | 75% |
+| variado | 30 | 0 | 3 | 0 | 5% | 23% | 21 | 1 | 1 | 373 | 144 | 61% |
+| repetitivo | 30 | 0 | 3 | 0 | 6% | 39% | 2 | 0 | 0 | 252 | 144 | 43% |
+| aleatorio | 30 | 0 | 3 | 0 | 6% | 30% | 9 | 1 | 1 | 289 | 149 | 48% |
+
+Seed 4243:
+
+| style | compl | trunc | empty | stamina denied | sprint share | sprint share (far) | items spawned | picked | used | enemy attacks | unmitigated hits | protected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| agressivo | 30 | 0 | 3 | 0 | 14% | 63% | 0 | 0 | 0 | 199 | 149 | 25% |
+| evasivo | 29 | 1 | 3 | 0 | 1% | 6% | 278 | 24 | 17 | 1517 | 147 | 90% |
+| bloqueador | 30 | 0 | 3 | 0 | 5% | 45% | 60 | 2 | 0 | 856 | 145 | 83% |
+| paciente | 30 | 0 | 3 | 0 | 3% | 28% | 35 | 1 | 0 | 590 | 146 | 75% |
+| variado | 30 | 0 | 3 | 0 | 5% | 24% | 19 | 3 | 1 | 347 | 148 | 57% |
+| repetitivo | 30 | 0 | 3 | 0 | 6% | 41% | 5 | 0 | 0 | 284 | 146 | 49% |
+| aleatorio | 30 | 0 | 3 | 0 | 5% | 20% | 12 | 0 | 0 | 286 | 147 | 49% |
+
+Seed 4244:
+
+| style | compl | trunc | empty | stamina denied | sprint share | sprint share (far) | items spawned | picked | used | enemy attacks | unmitigated hits | protected |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| agressivo | 30 | 0 | 3 | 0 | 14% | 63% | 0 | 0 | 0 | 189 | 144 | 24% |
+| evasivo | 28 | 2 | 3 | 0 | 2% | 6% | 337 | 32 | 21 | 1614 | 146 | 91% |
+| bloqueador | 30 | 0 | 3 | 0 | 4% | 37% | 59 | 3 | 3 | 820 | 149 | 82% |
+| paciente | 30 | 0 | 3 | 0 | 4% | 43% | 40 | 3 | 3 | 615 | 148 | 76% |
+| variado | 30 | 0 | 3 | 0 | 6% | 30% | 16 | 1 | 1 | 339 | 147 | 57% |
+| repetitivo | 30 | 0 | 3 | 0 | 6% | 44% | 3 | 0 | 0 | 258 | 147 | 43% |
+| aleatorio | 30 | 0 | 3 | 0 | 6% | 30% | 9 | 0 | 0 | 287 | 145 | 49% |
+
+The 10-run sweeps (4242/4243/4244) agree: 0 denied everywhere; evasivo 10/9/8 completed with
+0/1/2 truncated; every other style 10 completed, 0 truncated.
+
+### Runs, cadence, space (seed 4242, 30 runs)
+
+| style | mean run s | median run s | min run s | actions/min | weapon changes/min | median dist px | dist while enemy attacks/recovers px | in melee | attacks w/ enemy attacking | rooms/run | kills/death | max action gap s (median of runs) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| agressivo | 11.8 | 10.9 | 7.3 | 56.1 | 0.2 | 15.9 | 19.5 | 76% | 34% | 1.0 | 0.37 | 3.7 (2.3) |
+| evasivo | 236.5 | 189.7 | 37.1 | 51.3 | 1.2 | 119.7 | 129.6 | 11% | 5% | 7.1 | 14.11 | 7.1 (4.6) |
+| bloqueador | 49.3 | 45.8 | 20.8 | 26.2 | 0.0 | 26.1 | 30.4 | 86% | 0% | 1.3 | 1.20 | 6.4 (4.9) |
+| paciente | 35.1 | 32.9 | 11.9 | 24.6 | 0.5 | 41.7 | 66.6 | 71% | 0% | 1.0 | 0.50 | 12.7 (4.3) |
+| variado | 25.0 | 23.8 | 14.9 | 39.8 | 6.8 | 31.0 | 37.5 | 73% | 23% | 1.4 | 1.33 | 6.7 (3.2) |
+| repetitivo | 15.3 | 14.8 | 10.4 | 55.3 | 0.0 | 25.8 | 32.6 | 81% | 20% | 1.0 | 0.07 | 4.2 (2.4) |
+| aleatorio | 18.1 | 17.4 | 9.3 | 40.7 | 22.4 | 31.0 | 33.9 | 77% | 24% | 1.0 | 0.73 | 5.5 (3.0) |
+
+### Observations for the author (not tuned)
+
+- **Short-lived styles never meet an item, so M5 is undefined for agressivo.** Items spawn every
+  20 s (the first one 20 s into the run), anywhere in the arena at ≥ 120 px from both bodies, and
+  live 15 s. Agressivo's median run is 10.9 / 11.9 / 12.0 s (30-run sweeps, seeds 4242 / 4243 /
+  4244): 0 items spawned in 90 runs, so its per-run
+  `itemPickRate` is `null` in 30 of 30 runs (seed 4242); repetitivo 30/30, aleatorio 29/30,
+  variado 27/30, paciente 14/30, bloqueador 5/30, evasivo 0/30. M5 (`evasivo` > `agressivo`) has
+  no defined value in its lower group as worded. No allowed parameter changes this (the item clock
+  is a game rule; `itemSeeking` acts only after a spawn). The author should decide on M5 before
+  the full run (for example compare evasivo with a style that does see items, or add an "or lower
+  undefined" clause as H1 and H5 have).
+- **Pickups are rare even for the item-seeking styles.** Evasivo picks 31 of 343 (9.0%, seed
+  4242), 24 of 278 (8.6%, 4243) and 32 of 337 (9.5%, 4244) spawned items; 83% of its items expire
+  by timeout on each seed. Only 13–15 of those spawns appear within the policy's seek radius
+  (250 px) of the agent's last position sample at spawn time, and 6–7 of those are picked; the
+  other 18–25 pickups are of items that spawned farther away. The diagnostic did not separate how
+  those happened (an item can come within 250 px later during its 15 s life as the agent moves, or
+  be walked over without seeking, since pickup is plain overlap), so this is not explained here.
+  Bloqueador and paciente: 2–5 of 35–60 spawns within 250 px at spawn time. The pilot never varied
+  `itemSeeking`, so its effect on the pickup rate is not known. From the tables: items are picked
+  (> 0) on all three 30-run sweeps by evasivo (31 / 24 / 32), bloqueador (4 / 2 / 3), paciente
+  (4 / 1 / 3) and variado (1 / 3 / 1), and on one sweep by aleatorio (1 / 0 / 0); agressivo and
+  repetitivo pick none. Items are used (> 0) on 3 of 3 sweeps by evasivo (23 / 17 / 21) and
+  variado (1 / 1 / 1), on 2 of 3 by bloqueador (3 / 0 / 3) and paciente (1 / 0 / 3), on 1 of 3 by
+  aleatorio (1 / 0 / 0) and never by agressivo and repetitivo. So pickup and use do occur in the
+  full engine, but at low counts outside evasivo.
+- **Stamina spent per minute is large next to the 150 maximum.** Per-run `staminaSpentPerMinute`
+  medians (seed 4242) lie between about 700 and 910 for every style (range over single runs about
+  430–1230), so the bar turns over about 5–6 times a minute. No `null` and no `NaN` in this metric
+  or in the other three stamina M metrics in any run. Per-style medians and the definedness were
+  looked at (which reveals M1's ordering: agressivo highest, bloqueador lowest); no delta, interval
+  or verdict was computed.
+- **Agressivo's cadence lead is narrow.** 56.1 vs repetitivo 55.3 (seed 4242), 57.1 vs 53.1
+  (4243), 56.0 vs 55.0 (4244). As in the 0.0.3 pilot, the walk-in is in the denominator, and
+  session-level weapon draws move it (heavy weapon 100% of agressivo's actions in the seed-4242
+  10-run session, 0% on seed 4244).
+- **Per-style protect rate** (1 − unmitigated / enemy attacks): evasivo 90–91%, bloqueador 82–83%,
+  paciente 75–76%, variado 57–61%, aleatorio 48–49%, repetitivo 43–49%, agressivo 23–25%. Every
+  style dies after about 5 unmitigated hits (144–151 per 30 runs), so run length tracks the protect
+  rate and the enemy's attack rate.
+- **Per-run data is thin for the short-lived styles.** Agressivo and repetitivo kill fewer than
+  one elite per death (0.07–0.47) and play 1.0 room per run; agressivo has 16–23 defence labels in
+  30 runs. Per-run entropy dimensions (8-event rule) and the M shares will be noisy or undefined
+  for them, as noted for 0.0.3.
+- **Evasivo labels 40–42% of its defences as `retreat`** (same base as the 57–59% dodge share
+  above: all its `obs.defense` labels of the sweep; per seed dodge + retreat = 99%, the rest is
+  block/parry), and its punish windows are mostly
+  invalid (out of range: 979–1125 of 1149–1321), as in 0.0.3. Its dodge windows are now mostly
+  `taken` (631–732) rather than `missed`, a change from 0.0.3 that comes with the telegraph-timed
+  dodge.
+- **Paciente's longest action gap reaches 10–13 s** (median of runs 4–5 s): it waits for an
+  opening. Not a stall; every run ends in death or at the cap.
+- **Behavioural criteria and hypotheses are not independent** (as the 0.0.3 pilot noted): the
+  §4.2 criteria and the "does what its name says" checks push in the same direction as several
+  P and M hypotheses. Nothing was tuned here, so this pilot adds no new coupling, but the report's
+  limitations must keep saying it.
+
+### Pending the author's review (spec §4.4 step 3, §9 items 1–2)
+
+The family M (M1–M5, especially M5 above), the final parameters (the unchanged initial values)
+and the order to run the full experiment (`--full`, 7 agents × 60 runs, seed `20261105`) await the
+author. The full run was **not** executed; its `--reviewed-before yes|no` flag records whether this
+review happened before it.

@@ -22,6 +22,8 @@ export interface CliOptions {
   out: string | null;
   /** null: not informed. */
   reviewedBefore: boolean | null;
+  /** Path of the 0.0.3 pilot hipoteses.csv; null: look for the default. */
+  pilot: string | null;
   smoke: boolean;
   full: boolean;
   force: boolean;
@@ -32,7 +34,7 @@ export type CliParse = { ok: true; options: CliOptions } | { ok: false; errors: 
 /** Smoke preset: tiny, with a seed that is never the experiment's. */
 export const SMOKE_PRESET = { agents: ['agressivo', 'repetitivo'] as StyleId[], runs: 3, capMs: 60_000, seed: 4242 };
 
-const VALUE_FLAGS = ['agents', 'runs', 'runs-per-session', 'cap-ms', 'seed', 'out', 'reviewed-before'] as const;
+const VALUE_FLAGS = ['agents', 'runs', 'runs-per-session', 'cap-ms', 'seed', 'out', 'reviewed-before', 'pilot'] as const;
 const BOOL_FLAGS = ['smoke', 'full', 'force'] as const;
 
 export function parseCliArgs(argv: readonly string[], defaults: CliDefaults): CliParse {
@@ -115,11 +117,13 @@ export function parseCliArgs(argv: readonly string[], defaults: CliDefaults): Cl
     seed,
     out: values.get('out') ?? null,
     reviewedBefore,
+    pilot: values.get('pilot') ?? null,
     smoke,
     full,
     force,
   };
   if (values.has('out') && values.get('out') === '') errors.push('--out must not be empty');
+  if (values.has('pilot') && values.get('pilot') === '') errors.push('--pilot must not be empty');
 
   const isFullSeed = seed === defaults.seed;
   if (isFullSeed && smoke) {
@@ -149,4 +153,27 @@ export function defaultOutName(seed: number, smoke: boolean, now: Date): string 
   const p = (n: number): string => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
   return `${stamp}-seed${seed}${smoke ? '-smoke' : ''}`;
+}
+
+
+export type PilotVerdict = 'confirmada' | 'refutada' | 'indefinida';
+
+/**
+ * Maps hypothesis id -> verdict from the text of a hipoteses.csv (header with `id` and `verdict`
+ * columns). Null when the header lacks them or no row has a valid verdict. Pure.
+ */
+export function parsePilotVerdicts(csv: string): Record<string, PilotVerdict> | null {
+  const lines = csv.split(/\r?\n/).filter((l) => l.trim() !== '');
+  if (lines.length < 2) return null;
+  const head = lines[0].split(',');
+  const iId = head.indexOf('id');
+  const iVerdict = head.indexOf('verdict');
+  if (iId < 0 || iVerdict < 0) return null;
+  const out: Record<string, PilotVerdict> = {};
+  for (const line of lines.slice(1)) {
+    const cells = line.split(',');
+    const v = cells[iVerdict]?.trim();
+    if (cells[iId] && (v === 'confirmada' || v === 'refutada' || v === 'indefinida')) out[cells[iId].trim()] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }

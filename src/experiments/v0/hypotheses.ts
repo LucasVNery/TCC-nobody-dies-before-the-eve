@@ -5,6 +5,7 @@
 // H1 got `orLowerUndefined`; H12 was retired (redundant with H2u).
 import type { SkillId } from '../../profile/types';
 import type { StyleId } from './styles';
+import type { RunMetricId } from './runMetrics';
 
 /**
  * - 'greater': the per-run values of `higher` exceed those of `lower` (Cliff's
@@ -50,4 +51,26 @@ export const HYPOTHESES: readonly Hypothesis[] = [
   { id: 'H9', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'agressivo' },
   { id: 'H10', skill: 'patience', kind: 'greater', higher: 'evasivo', lower: 'agressivo' },
   { id: 'H11', skill: 'patience', kind: 'greater', higher: 'paciente', lower: 'aleatorio' },
+];
+
+/**
+ * M family (V0.1 spec 2026-10-21 §4.3): per-RUN values of the panel metrics
+ * (runMetrics.ts); the per-run values of `higher` exceed those of `lower`, same
+ * criterion as the P family 'greater' rule (Cliff's delta, bootstrap 95% CI
+ * above 0 and delta >= 0.33). Claude's guesses, reviewed by the author before
+ * the full run. Pinned by a test, like HYPOTHESES.
+ */
+export interface MHypothesis {
+  id: string;
+  metric: RunMetricId;
+  higher: StyleId;
+  lower: StyleId;
+}
+
+export const M_HYPOTHESES: readonly MHypothesis[] = [
+  { id: 'M1', metric: 'staminaSpentPerMinute', higher: 'agressivo', lower: 'bloqueador' },
+  { id: 'M2', metric: 'staminaHighFraction', higher: 'bloqueador', lower: 'agressivo' },
+  { id: 'M3', metric: 'dodgeSpendShare', higher: 'evasivo', lower: 'agressivo' },
+  { id: 'M4', metric: 'blockSpendShare', higher: 'bloqueador', lower: 'evasivo' },
+  { id: 'M5', metric: 'itemPickRate', higher: 'evasivo', lower: 'agressivo' },
 ];

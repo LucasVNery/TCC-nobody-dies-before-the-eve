@@ -1,12 +1,15 @@
 // src/experiments/v0/report.ts
 // The V0 report as Markdown + CSV (spec §4.6). PURE: no clock, no I/O; the date
 // and the elapsed time come from the caller.
-import { HYPOTHESES } from './hypotheses';
-import type { HypothesisResult, IccResult } from './evaluate';
+import { HYPOTHESES, M_HYPOTHESES } from './hypotheses';
+import type { HypothesisResult, IccResult, MHypothesisResult, Verdict } from './evaluate';
+import { RUN_METRIC_IDS, type RunMetricId, type RunMetrics, type RunReactions } from './runMetrics';
 import { ICC_CRITERION, MIN_DELTA, MIN_VALUES, dropEmptyRuns } from './evaluate';
 import type { AgentLog, ExperimentConfig } from './agentRunner';
 import type { PipelineCheck } from './pipelineChecks';
-import { AGENT_STYLES, type StyleId } from './styles';
+import { AGENT_STYLES, type ItemUse, type StyleId } from './styles';
+import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
+import { LONG_LUNGE, LUNGE } from '../../combat/movementDefs';
 import { REPORT_SKILLS, type WindowValue } from './windowValues';
 
 export interface ReportInput {
@@ -25,6 +28,14 @@ export interface ReportInput {
   hypothesesReviewedBeforeFullRun?: boolean | null;
   /** Changes made to the hypotheses after the first full run (spec §2); none when omitted or empty. */
   hypothesisChanges?: readonly string[];
+  /** Per-run M family values (prepareRunMetrics(logs).metrics); empty runs are dropped again here, defensively. */
+  runMetrics: Record<StyleId, readonly RunMetrics[]>;
+  /** evaluateMHypotheses results. */
+  mHypotheses: MHypothesisResult[];
+  /** Per-run reaction by attack kind (prepareRunMetrics(logs).reactions); descriptive only. */
+  reactions: Record<StyleId, readonly RunReactions[]>;
+  /** Verdicts of H1-H11/H1u/H2u in the 0.0.3 pilot, by id; absent/null: the appendix is omitted with a warning. */
+  pilotVerdicts?: Record<string, Verdict> | null;
 }
 
 export interface ReportFiles {
@@ -35,6 +46,9 @@ export interface ReportFiles {
   'icc.csv': string;
   'perfil_final.csv': string;
   'events_by_type.csv': string;
+  'metricas_run.csv': string;
+  'hipoteses_m.csv': string;
+  'reacao_por_tipo.csv': string;
 }
 
 // ---------------------------------------------------------------- numbers
@@ -95,12 +109,59 @@ function eventCounts(log: AgentLog | undefined): [string, number][] {
   return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
+/** Mean and sample standard deviation (n - 1) of the finite values; sd null with fewer than 2. */
+interface Summary {
+  nRuns: number;
+  nDefined: number;
+  mean: number | null;
+  sd: number | null;
+}
+
+function summarize(values: readonly (number | null)[]): Summary {
+  const xs = values.filter((v): v is number => v !== null && Number.isFinite(v));
+  const n = xs.length;
+  const mean = n === 0 ? null : xs.reduce((a, x) => a + x, 0) / n;
+  const sd = n < 2 || mean === null ? null : Math.sqrt(xs.reduce((a, x) => a + (x - mean) ** 2, 0) / (n - 1));
+  return { nRuns: values.length, nDefined: n, mean, sd };
+}
+
+/** Reaction per attack kind over all runs, weighted by n; kinds in code-unit order. */
+function pooledReactions(runs: readonly RunReactions[]): [kind: string, n: number, meanMs: number | null][] {
+  const m = new Map<string, { n: number; sum: number }>();
+  for (const r of runs) {
+    for (const [kind, k] of Object.entries(r.byKind)) {
+      if (!(k.n > 0) || !Number.isFinite(k.meanMs)) continue;
+      const acc = m.get(kind) ?? { n: 0, sum: 0 };
+      acc.n += k.n;
+      acc.sum += k.n * k.meanMs;
+      m.set(kind, acc);
+    }
+  }
+  return [...m.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([kind, a]) => [kind, a.n, a.n > 0 ? a.sum / a.n : null]);
+}
+
+/** Data of the V0.1 sections, derived once in buildReport (empty runs dropped). */
+interface V01Data {
+  keptMetrics: (s: StyleId) => RunMetrics[];
+  reactionsOf: (s: StyleId) => ReturnType<typeof pooledReactions>;
+}
+
 export function buildReport(input: ReportInput): ReportFiles {
   const styles = input.config.agents;
   const logOf = (s: StyleId): AgentLog | undefined => input.logs.find((l) => l.styleId === s);
   const agentName = (s: StyleId): string => logOf(s)?.playerId ?? s;
   const kept = (values: Record<StyleId, WindowValue[]>, s: StyleId | undefined): WindowValue[] =>
     s === undefined ? [] : dropEmptyRuns(values[s] ?? [], logOf(s)?.emptyRuns ?? []);
+  const notEmpty = (s: StyleId) => {
+    const drop = new Set(logOf(s)?.emptyRuns ?? []);
+    return (r: { runIdx: number }): boolean => !drop.has(r.runIdx);
+  };
+  const v01: V01Data = {
+    keptMetrics: (s) => (input.runMetrics[s] ?? []).filter(notEmpty(s)),
+    reactionsOf: (s) => pooledReactions((input.reactions[s] ?? []).filter(notEmpty(s))),
+  };
 
   const windowRows = (values: Record<StyleId, WindowValue[]>, withRoom: boolean): CsvCell[][] =>
     styles.flatMap((s) =>
@@ -142,8 +203,26 @@ export function buildReport(input: ReportInput): ReportFiles {
     ] satisfies CsvCell[];
   });
 
+  const mHypRows = input.mHypotheses.map((r) => {
+    const h = M_HYPOTHESES.find((x) => x.id === r.id);
+    return [
+      r.id,
+      r.metric,
+      h?.higher ?? null,
+      h?.lower ?? null,
+      r.delta,
+      r.lo,
+      r.hi,
+      int(r.nHigher),
+      int(r.nLower),
+      r.undefinedRateHigher,
+      r.undefinedRateLower,
+      r.verdict,
+    ] satisfies CsvCell[];
+  });
+
   return {
-    'relatorio.md': markdown(input, logOf, kept),
+    'relatorio.md': markdown(input, logOf, kept, v01),
     'runs.csv': csv(['agent', 'style', 'runIdx', ...tail], windowRows(input.runValues, false)),
     'rooms.csv': csv(['agent', 'style', 'runIdx', 'roomIdx', ...tail], windowRows(input.roomValues, true)),
     'hipoteses.csv': csv(
@@ -179,6 +258,23 @@ export function buildReport(input: ReportInput): ReportFiles {
         });
       }),
     ),
+    'metricas_run.csv': csv(
+      ['agent', 'style', 'run', 'metric', 'value'],
+      styles.flatMap((s) =>
+        v01.keptMetrics(s).flatMap((r) => RUN_METRIC_IDS.map((k) => [agentName(s), s, int(r.runIdx), k, r[k]])),
+      ),
+    ),
+    'hipoteses_m.csv': csv(
+      [
+        'id', 'metric', 'higher', 'lower', 'delta', 'ci_lo', 'ci_hi',
+        'n_higher', 'n_lower', 'undefined_rate_higher', 'undefined_rate_lower', 'verdict',
+      ],
+      mHypRows,
+    ),
+    'reacao_por_tipo.csv': csv(
+      ['agent', 'style', 'kind', 'n', 'mean_ms'],
+      styles.flatMap((s) => v01.reactionsOf(s).map(([kind, n, mean]) => [agentName(s), s, kind, int(n), mean])),
+    ),
   };
 }
 
@@ -197,10 +293,17 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** Compact item-use rule for the configuration table. */
+function itemUseText(u: ItemUse): string {
+  if (u.random) return 'aleatório';
+  return `cura abaixo de ${short(u.healBelowHpFraction)} da vida; bomba a ${short(u.bombWithinPx)} px; poder ao iniciar ataque: ${u.powerOnAttackStart ? 'sim' : 'não'}`;
+}
+
 function markdown(
   input: ReportInput,
   logOf: (s: StyleId) => AgentLog | undefined,
   kept: (v: Record<StyleId, WindowValue[]>, s: StyleId | undefined) => WindowValue[],
+  v01: V01Data,
 ): string {
   const { config } = input;
   const styles = config.agents;
@@ -230,15 +333,29 @@ function markdown(
     `- Runs por agente: ${config.runsPerAgent}; runs por sessão: ${config.runsPerSession}`,
     `- Gerado em: ${input.generatedAtIso}`,
     `- Tempo decorrido: ${Math.round(input.elapsedMs)} ms`,
-    `- Hipóteses H1–H11 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
-    '- Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
-    '- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.',
+    `- Hipóteses da família P (H1–H11 e H1u, H2u; ${HYPOTHESES.length} itens) pré-registradas na 0.0.3; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
+    '- Versão final do pré-registro da família P (revisão do autor em 2026-10-20, depois do piloto da 0.0.3 e antes da execução completa dela): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
+    `- Hipóteses da família M (M1–M5; ${M_HYPOTHESES.length} itens) e parâmetros finais dos estilos (tabela abaixo) revisados pelo autor ANTES da execução completa da V0.1: ${reviewed} (opção \`--reviewed-before\`, spec §4.4.3)`,
+    '- Divulgação: a revisão da família M e dos parâmetros veio DEPOIS de um piloto de calibração da V0.1 (seeds 4242–4244; a seed 20261105 não foi usada), no qual foram vistas as medianas descritivas por estilo e a definição (indefinido ou não) das métricas M; nenhum delta, intervalo ou veredito foi calculado. Ver `experiments/v0/calibration.md`.',
     `- Alterações nas hipóteses depois da primeira execução completa: ${changes.length === 0 ? 'nenhuma registrada' : changes.join('; ')}`,
     '',
     'Parâmetros dos estilos (pesos relativos; distâncias em px):',
     '',
     table(
-      ['Agente', 'Armas', 'Trocas/min', 'Ações', 'Cooldown (ms)', 'Distância ± tolerância', 'Defesa', 'Espera abertura'],
+      [
+        'Agente',
+        'Armas',
+        'Trocas/min',
+        'Ações',
+        'Cooldown (ms)',
+        'Distância ± tolerância',
+        'Defesa',
+        'Espera abertura',
+        'sprintApproach',
+        'staminaReserve',
+        'itemSeeking',
+        'Uso de item',
+      ],
       styles.map((s) => {
         const p = AGENT_STYLES[s];
         const d = p.defenseWeights;
@@ -251,9 +368,29 @@ function markdown(
           `${short(p.preferredDistance)} ± ${short(p.distanceTolerance)}`,
           `esquiva ${short(d.dodge)}; bloqueio ${short(d.block)}; parry ${short(d.parry)}; nada ${short(d.none)}`,
           p.waitForOpening ? 'sim' : 'não',
+          short(p.sprintApproach),
+          short(p.staminaReserve),
+          short(p.itemSeeking),
+          itemUseText(p.itemUse),
         ];
       }),
     ),
+    '',
+    '`sprintApproach` é a chance sorteada a cada trecho de aproximação (não a cada aproximação inteira); como os trechos se interrompem com frequência, a chance efetiva por aproximação inteira é maior que o parâmetro.',
+    '',
+    'Duração da telegraph por tipo de ataque (lida das definições de combate, em ms):',
+    '',
+    table(
+      ['Tipo no log', 'Telegraph (ms)', 'Observação'],
+      [
+        ['swing', md(ELITE_TELEGRAPH_MS.swing, 0), 'golpe'],
+        ['combo', `${md(ELITE_TELEGRAPH_MS.swing, 0)} (golpe 1); ${md(ELITE_TELEGRAPH_MS.combo, 0)} (golpe 2)`, 'o tipo `combo` do log mistura os golpes 1 e 2'],
+        ['lunge', `${md(LUNGE.telegraphMs, 0)} (curto); ${md(LONG_LUNGE.telegraphMs, 0)} (investida longa) + avanço`, 'o tipo `lunge` do log mistura o lunge curto e a investida longa'],
+        ['slam', md(ELITE_TELEGRAPH_MS.slam, 0), 'pancada'],
+      ],
+    ),
+    '',
+    'Como `combo` e `lunge` misturam duas durações de telegraph, a razão reação/telegraph por tipo (spec §9.4) não é exatamente derivável para esses dois tipos; para `swing` e `slam` ela é a reação média da seção 9 dividida pela telegraph da tabela.',
     '',
   );
 
@@ -410,9 +547,111 @@ function markdown(
     '- Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.',
     '- Runs vazias são descartadas (contadas só na seção 2).',
     '- Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.',
-    `- As ${HYPOTHESES.length} hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length}).`,
+    `- As ${HYPOTHESES.length + M_HYPOTHESES.length} hipóteses (${HYPOTHESES.length} da família P e ${M_HYPOTHESES.length} da família M) são testadas sem correção para comparações múltiplas (exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length + M_HYPOTHESES.length}).`,
+    '- A família M é palpite do Claude revisado pelo autor.',
+    '- `sprintApproach` é a chance por trecho de aproximação e os trechos se interrompem com frequência: a chance efetiva por aproximação inteira excede o parâmetro.',
+    '- A elite não adapta (peso fixo).',
+    '- Humanizador igual para todos os estilos: o mesmo atraso de reação, os mesmos lapsos e o mesmo ruído de mira.',
+    '- O *perfect dodge* depende do ruído do humanizador, não de habilidade.',
+    `- As hipóteses da família P (H1…H11, H1u, H2u; ${HYPOTHESES.length} itens) já foram vistas na 0.0.3; a V0.1 não as trata como novas (o registro não muda).`,
+    '- A dimensão de itens (aproveitamento de itens, candidata à sétima dimensão) fica fora do perfil; só depois destes dados.',
     '',
   );
 
+  // 7
+  out.push(
+    '## 7. Métricas de estamina e de itens por estilo',
+    '',
+    'Valores por run calculados com o mesmo acumulador do painel de análise (`WindowAccumulator`), sobre os eventos de cada run (runs vazias descartadas). Média e desvio-padrão amostral dos valores definidos; — marca o indefinido (sem amostra, ou total de gasto 0 nas participações).',
+    '',
+    ...RUN_METRIC_IDS.map((k) => `- \`${k}\`: ${METRIC_LABELS[k]}`),
+    '',
+    table(
+      ['Estilo', 'Métrica', 'N runs', 'N definidos', 'Média', 'Desvio'],
+      styles.flatMap((s) => {
+        const runs = v01.keptMetrics(s);
+        return RUN_METRIC_IDS.map((k) => {
+          const sm = summarize(runs.map((r) => r[k]));
+          return [s, k, `${sm.nRuns}`, `${sm.nDefined}`, md(sm.mean), md(sm.sd)];
+        });
+      }),
+    ),
+    '',
+  );
+
+  // 8
+  out.push(
+    '## 8. Família M (métricas novas)',
+    '',
+    `Unidade: valor da métrica por run (seção 7). Critério igual ao da família P: confirmada se o IC 95% bootstrap do delta de Cliff (maior vs menor) fica acima de 0 e delta ≥ ${md(MIN_DELTA, 2)}; indefinida com menos de ${MIN_VALUES} valores definidos em algum grupo (valor indefinido = métrica sem amostra na run); refutada nos demais casos. A família M é palpite do Claude revisado pelo autor; hipótese refutada ou indefinida é resultado, não defeito.`,
+    '',
+    table(
+      ['Id', 'Métrica', 'Maior', 'Menor', 'Delta', 'IC 95%', 'N definidos (maior)', 'N definidos (menor)', 'Indef. maior', 'Indef. menor', 'Veredito'],
+      input.mHypotheses.map((r) => {
+        const h = M_HYPOTHESES.find((x) => x.id === r.id);
+        return [
+          r.id,
+          r.metric,
+          h?.higher ?? '—',
+          h?.lower ?? '—',
+          md(r.delta),
+          r.lo === null && r.hi === null ? '—' : `[${md(r.lo)}; ${md(r.hi)}]`,
+          `${r.nHigher}`,
+          `${r.nLower}`,
+          mdPct(r.undefinedRateHigher),
+          mdPct(r.undefinedRateLower),
+          r.verdict,
+        ];
+      }),
+    ),
+    '',
+  );
+
+  // 9
+  out.push(
+    '## 9. Reação por tipo de ataque (descritiva)',
+    '',
+    'Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes (tabela da seção 1), então só se compara dentro de um mesmo tipo; `combo` e `lunge` do log misturam duas durações cada (ver seção 1).',
+    '',
+    table(
+      ['Estilo', 'Tipo de ataque', 'N reações', 'Média (ms)'],
+      styles.flatMap((s) => {
+        const rows = v01.reactionsOf(s);
+        return rows.length === 0 ? [[s, '—', '0', '—']] : rows.map(([kind, n, mean]) => [s, kind, `${n}`, md(mean, 1)]);
+      }),
+    ),
+    '',
+  );
+
+  // appendix
+  out.push('## Apêndice A. Comparação com o piloto 0.0.3 (descritiva)', '');
+  const pilot = input.pilotVerdicts;
+  if (pilot === undefined || pilot === null) {
+    out.push('Aviso: piloto 0.0.3 não encontrado; a comparação foi omitida.', '');
+  } else {
+    out.push(
+      'Veredito de cada hipótese da família P no piloto 0.0.3 e nesta execução, lado a lado. Apenas descritivo (versões não comparáveis: as mecânicas e os agentes mudaram); as hipóteses da família P já tinham sido vistas na 0.0.3.',
+      '',
+      table(
+        ['Id', 'Dimensão', 'Veredito 0.0.3 (piloto)', 'Veredito atual'],
+        HYPOTHESES.map((h) => [
+          h.id,
+          h.skill,
+          pilot[h.id] ?? '—',
+          input.hypotheses.find((r) => r.id === h.id)?.verdict ?? '—',
+        ]),
+      ),
+      '',
+    );
+  }
+
   return out.join('\n');
 }
+
+const METRIC_LABELS: Record<RunMetricId, string> = {
+  staminaSpentPerMinute: 'gasto de estamina por minuto',
+  staminaHighFraction: 'fração do tempo com estamina ≥ 80% (120 de 150)',
+  dodgeSpendShare: 'participação da esquiva no gasto de estamina (dodge / total)',
+  blockSpendShare: 'participação do bloqueio no gasto de estamina (block / total)',
+  itemPickRate: 'taxa de coleta de itens (coletados / (coletados + expirados por tempo))',
+};

@@ -10,7 +10,8 @@ import { STAGGER_MS } from '../../combat/actionDefs';
 import { STAMINA_COST } from '../../combat/stamina';
 import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
 import { SWING_MS } from '../../combat/assaltanteController';
-import { AgentPolicy, PERCEPTION_LAG_MS, type AgentIntent } from './policy';
+import { AgentPolicy, PERCEPTION_LAG_MS, PRESS_JITTER_SCALE, PRESS_LEAD_MS, type AgentIntent } from './policy';
+import { strikeDelayMs } from './threatTiming';
 
 const STEP = 1000 / 60;
 const NO_LAPSE: HumanizerConfig = { ...DEFAULT_HUMANIZER, lapseProb: 0 };
@@ -24,6 +25,8 @@ interface World {
   enemyState: EnemyState;
   /** enemy offset from the player */
   offset: Vec2;
+  /** the wind-up on screen (null/absent outside any telegraph) */
+  telegraph?: Observation['telegraph'];
 }
 
 const PLAYER_POS = { x: 800, y: 600 };
@@ -39,6 +42,11 @@ function obsOf(tMs: number, w: World, body: { weapon: string; blocking: boolean;
     isBlocking: body.blocking,
     equippedWeaponId: body.weapon,
     enemyDead: false,
+    runIdx: 0,
+    telegraph: w.telegraph ?? null,
+    heldItem: null,
+    groundItems: [],
+    isSprinting: false,
   };
 }
 
@@ -85,7 +93,42 @@ function cycleWorld(dist: number): (t: number) => World {
   return (t) => {
     const p = ((t % CYCLE_MS) + CYCLE_MS) % CYCLE_MS;
     const enemyState: EnemyState = p < 300 ? 'chasing' : p < 300 + ATTACK_MS ? 'attacking' : 'recovering';
-    return { enemyState, offset: { x: dist, y: 0 } };
+    const a = p - 300;
+    const telegraph = enemyState === 'attacking' && a < ELITE_TELEGRAPH_MS.swing ? { kind: 'swing' as const, progress: a / ELITE_TELEGRAPH_MS.swing } : null;
+    return { enemyState, offset: { x: dist, y: 0 }, telegraph };
+  };
+}
+
+/**
+ * One elite pattern starting at `t0`, as the screen shows it: chasing before, the telegraph(s) and strike(s)
+ * while attacking/lunging, recovering after. Combo: strike 1 (450 + 150), then strike 2 (320 + 150).
+ * Lunge: telegraph `teleMs`, then `chargeMs` of charge (no telegraph), then recovering.
+ */
+type PatternSpec =
+  | { kind: 'swing' | 'slam' | 'combo' }
+  | { kind: 'lunge'; teleMs: number; chargeMs: number };
+function patternWorld(spec: PatternSpec, t0: number, dist: number): (t: number) => World {
+  const offset = { x: dist, y: 0 };
+  return (t) => {
+    const a = t - t0;
+    if (a < 0) return { enemyState: 'chasing', offset };
+    if (spec.kind === 'lunge') {
+      if (a < spec.teleMs) return { enemyState: 'lunging', offset, telegraph: { kind: 'lunge', progress: a / spec.teleMs } };
+      if (a < spec.teleMs + spec.chargeMs) return { enemyState: 'lunging', offset };
+      return { enemyState: 'recovering', offset };
+    }
+    const tele = spec.kind === 'slam' ? ELITE_TELEGRAPH_MS.slam : ELITE_TELEGRAPH_MS.swing;
+    if (a < tele) {
+      const telegraph = spec.kind === 'combo' ? { kind: 'combo' as const, progress: a / tele, hit: 1 as const } : { kind: spec.kind, progress: a / tele };
+      return { enemyState: 'attacking', offset, telegraph };
+    }
+    if (a < tele + SWING_MS) return { enemyState: 'attacking', offset };
+    if (spec.kind === 'combo') {
+      const b = a - tele - SWING_MS;
+      if (b < ELITE_TELEGRAPH_MS.combo) return { enemyState: 'attacking', offset, telegraph: { kind: 'combo', progress: b / ELITE_TELEGRAPH_MS.combo, hit: 2 } };
+      if (b < ELITE_TELEGRAPH_MS.combo + SWING_MS) return { enemyState: 'attacking', offset };
+    }
+    return { enemyState: 'recovering', offset };
   };
 }
 const still = (enemyState: EnemyState, dist: number) => (): World => ({ enemyState, offset: { x: dist, y: 0 } });
@@ -271,9 +314,10 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
           const seenT = t - PERCEPTION_LAG_MS;
           // only the first swing's plan is under test; past one swing cycle the policy plans the combo follow-up
           if (seenT - threatAt > ATTACK_MS) break;
-          const seenState: EnemyState = seenT >= threatAt ? 'attacking' : 'chasing';
-          const seen = obsOf(seenT, { enemyState: seenState, offset: { x: 30, y: 0 } }, body);
-          const now = obsOf(t, { enemyState: t >= threatAt ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }, body);
+          const world = patternWorld({ kind: 'swing' }, threatAt, 30);
+          const seenState: EnemyState = world(seenT).enemyState;
+          const seen = obsOf(seenT, world(seenT), body);
+          const now = obsOf(t, world(t), body);
           const intent = p.decide({ now, seen, nowMs: t });
           if (firstSeenThreat === null && seenState === 'attacking') firstSeenThreat = seenT;
           if (isDefense(intent)) {
@@ -309,13 +353,13 @@ describe('AgentPolicy perception and humanizer (Review Focus 2)', () => {
   });
 
   it('policy files do not read internals', () => {
-    const files = import.meta.glob(['./perception.ts', './styles.ts', './policy.ts'], {
+    const files = import.meta.glob(['./perception.ts', './styles.ts', './policy.ts', './threatTiming.ts'], {
       query: '?raw',
       import: 'default',
       eager: true,
     }) as Record<string, string>;
-    expect(Object.keys(files).sort()).toEqual(['./perception.ts', './policy.ts', './styles.ts']);
-    const forbidden = ['phaseElapsedMs', 'activeRuleId', 'predictThreatMs', 'threatPrediction', 'blackboard', 'accumulator', 'ProfileView', 'ProfileAccumulator'];
+    expect(Object.keys(files).sort()).toEqual(['./perception.ts', './policy.ts', './styles.ts', './threatTiming.ts']);
+    const forbidden = ['phaseElapsedMs', 'activeRuleId', 'predictThreatMs', 'threatPrediction', 'blackboard', 'accumulator', 'ProfileView', 'ProfileAccumulator', 'assaltanteController'];
     for (const [f, src] of Object.entries(files)) {
       for (const word of forbidden) expect(src.includes(word), `${f} contains ${word}`).toBe(false);
     }
@@ -570,7 +614,7 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
     /** Time (after the telegraph became visible) of the first defence press; the enemy starts attacking at 1000 ms. */
     const pressAfterSeen = (kind: 'dodge' | 'block' | 'parry', seed: number, cfg = exact): number | null => {
       const policy = makePolicy('agressivo', seed, cfg, only(kind));
-      const log = drive(policy, 150, (t) => ({ enemyState: t >= 1000 ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }));
+      const log = drive(policy, 150, patternWorld({ kind: 'swing' }, 1000, 30));
       const hit = log.find((l) => isDefense(l.intent) && l.t > 1000);
       return hit ? hit.t - 1000 : null;
     };
@@ -610,19 +654,164 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
       expect(block).toBeLessThan(parry - 50);
     });
 
-    it('the second strike of a combo (attacking for longer than a swing) is a fresh threat: a second press', () => {
-      const policy = makePolicy('agressivo', 4, exact, only('dodge'));
-      const log = drive(policy, 120, (t) => ({ enemyState: t >= 1000 && t < 1000 + 1070 ? 'attacking' : 'recovering', offset: { x: 30, y: 0 } }));
-      const presses = log.filter((l) => l.intent.dodge);
-      expect(presses).toHaveLength(2);
-      // the second press aims 75 ms before the second strike (swing cycle 600 + combo telegraph 320 - 75)
-      expect(presses[1].t - 1000).toBeGreaterThan(ELITE_TELEGRAPH_MS.swing + SWING_MS);
-    });
-
     it('a plain swing (attacking for one swing cycle only) plans no second press', () => {
       const policy = makePolicy('agressivo', 4, exact, only('dodge'));
-      const log = drive(policy, 120, (t) => ({ enemyState: t >= 1000 && t < 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS ? 'attacking' : 'recovering', offset: { x: 30, y: 0 } }));
+      const log = drive(policy, 120, patternWorld({ kind: 'swing' }, 1000, 30));
       expect(log.filter((l) => l.intent.dodge)).toHaveLength(1);
+    });
+
+    it('an enemy attacking with no telegraph on screen plans nothing (the trigger is the telegraph, not the state)', () => {
+      const policy = makePolicy('agressivo', 4, exact, only('dodge'));
+      const log = drive(policy, 200, (t) => ({ enemyState: t >= 1000 ? 'attacking' : 'chasing', offset: { x: 30, y: 0 } }));
+      expect(log.some((l) => isDefense(l.intent))).toBe(false);
+    });
+  });
+
+  describe('defence per elite pattern, read from the telegraph (Task 2, seed 4242)', () => {
+    const SEED = 4242;
+    /**
+     * Waits for an opening (none comes while chasing at 30 u or out of reach), so it never attacks before the
+     * threat: the only humanizer draws are the ones of the defence plan, and a twin can replay them.
+     */
+    const only = (kind: 'dodge' | 'block' | 'parry'): AgentStyle => ({
+      ...AGENT_STYLES.agressivo,
+      id: 'agressivo',
+      defenseWeights: { dodge: 0, block: 0, parry: 0, none: 0, [kind]: 1 },
+      actionWeights: { 'sword_shield.light': 1 },
+      weaponWeights: { sword_shield: 1 },
+      waitForOpening: true,
+    });
+    /** The humanizer draws planDefense makes, replayed on a twin with the policy's seed: lapse, reaction, jitter. */
+    const expectedPress = (seenAt: number, delayMs: number, twin: Humanizer): number => {
+      twin.lapses();
+      const reaction = twin.sampleReactionMs();
+      const jitter = (twin.sampleReactionMs() - twin.sampleReactionMs()) * PRESS_JITTER_SCALE;
+      return seenAt + Math.max(reaction, delayMs - PRESS_LEAD_MS + jitter);
+    };
+    const twinOf = (cfg: HumanizerConfig = NO_LAPSE) => new Humanizer(cfg, createPrng(SEED * 2 + 1).next);
+    /** First seen tMs at which the drive's lagged view shows the telegraph starting at t0 (ticks are i * STEP). */
+    const firstSeen = (t0: number) => Math.ceil((t0 + PERCEPTION_LAG_MS) / STEP) * STEP - PERCEPTION_LAG_MS;
+
+    it('(a) a new swing telegraph schedules the defence', () => {
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const log = drive(policy, 120, patternWorld({ kind: 'swing' }, 1000, 30));
+      const presses = log.filter((l) => l.intent.dodge);
+      expect(presses).toHaveLength(1);
+      const at = expectedPress(firstSeen(1000), ELITE_TELEGRAPH_MS.swing, twinOf());
+      expect(presses[0].t).toBeGreaterThanOrEqual(at - 1e-6);
+      expect(presses[0].t).toBeLessThan(at + STEP);
+    });
+
+    it('(b) a lunge telegraph schedules the dodge at seenAt + max(reaction, strikeDelay - 75 + jitter)', () => {
+      for (const dist of [200, 400]) {
+        const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+        const tele = dist > 260 ? 650 : ELITE_TELEGRAPH_MS.lunge;
+        const log = drive(policy, 200, patternWorld({ kind: 'lunge', teleMs: tele, chargeMs: 1500 }, 1000, dist));
+        const presses = log.filter((l) => l.intent.dodge);
+        expect(presses, `${dist}`).toHaveLength(1);
+        const at = expectedPress(firstSeen(1000), strikeDelayMs({ kind: 'lunge' }, dist), twinOf());
+        expect(presses[0].t, `${dist}`).toBeGreaterThanOrEqual(at - 1e-6);
+        expect(presses[0].t, `${dist}`).toBeLessThan(at + STEP);
+        // the travel matters: pressed well after the 500/650 ms telegraph ended
+        expect(presses[0].t - 1000, `${dist}`).toBeGreaterThan(tele);
+      }
+    });
+
+    it('(c) combo: hit 1 then hit 2 schedule two defences, one per strike, none fired twice', () => {
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const log = drive(policy, 160, patternWorld({ kind: 'combo' }, 1000, 30));
+      const presses = log.filter((l) => l.intent.dodge);
+      expect(presses).toHaveLength(2);
+      const twin = twinOf();
+      const first = expectedPress(firstSeen(1000), ELITE_TELEGRAPH_MS.swing, twin);
+      const hit2At = 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS;
+      const second = expectedPress(firstSeen(hit2At), ELITE_TELEGRAPH_MS.combo, twin);
+      expect(presses[0].t).toBeGreaterThanOrEqual(first - 1e-6);
+      expect(presses[0].t).toBeLessThan(first + STEP);
+      expect(presses[1].t).toBeGreaterThanOrEqual(second - 1e-6);
+      expect(presses[1].t).toBeLessThan(second + STEP);
+    });
+
+    it('(c) combo: a hit-1 press still pending when hit 2 shows is kept, and hit 2 gets its own (Review Focus 2)', () => {
+      // a hit-1 press can still be due when hit 2 is seen (late jitter, or postponed behind a valid charge);
+      // white-box: push that press past the instant hit 2 becomes visible to the agent
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const internals = policy as unknown as { pending: { kind: string; at: number }[] };
+      const world = patternWorld({ kind: 'combo' }, 1000, 30);
+      const hit2At = 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS;
+      const lateHit1 = hit2At + PERCEPTION_LAG_MS + 3 * STEP;
+      const body = { weapon: 'sword_shield', blocking: false };
+      const presses: number[] = [];
+      let delayed = false;
+      let maxPending = 0;
+      for (let i = 0; i < 160; i++) {
+        const t = i * STEP;
+        const seenT = t - PERCEPTION_LAG_MS;
+        const seen = seenT >= 0 ? obsOf(seenT, world(seenT), body) : null;
+        const intent = policy.decide({ now: obsOf(t, world(t), body), seen, nowMs: t });
+        if (intent.dodge) presses.push(t);
+        if (!delayed && internals.pending.length === 1) {
+          internals.pending[0].at = lateHit1;
+          delayed = true;
+        }
+        maxPending = Math.max(maxPending, internals.pending.length);
+      }
+      expect(delayed).toBe(true);
+      expect(maxPending).toBe(2);
+      expect(presses).toHaveLength(2);
+      expect(presses[0]).toBeGreaterThanOrEqual(lateHit1 - 1e-6);
+      expect(presses[0]).toBeLessThan(lateHit1 + STEP);
+      // hit 2's own press, timed on its 320 ms telegraph
+      expect(presses[1] - hit2At).toBeGreaterThan(ELITE_TELEGRAPH_MS.combo - PRESS_LEAD_MS - 150);
+    });
+
+    it('(d) a slam schedules the defence like the others (700 ms telegraph)', () => {
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const log = drive(policy, 160, patternWorld({ kind: 'slam' }, 1000, 30));
+      const presses = log.filter((l) => l.intent.dodge);
+      expect(presses).toHaveLength(1);
+      const at = expectedPress(firstSeen(1000), ELITE_TELEGRAPH_MS.slam, twinOf());
+      expect(presses[0].t).toBeGreaterThanOrEqual(at - 1e-6);
+      expect(presses[0].t).toBeLessThan(at + STEP);
+    });
+
+    it('(e) a pending defence is dropped when the charge ends at a wall with no strike (Review Focus 3)', () => {
+      // long charge seen at 400 u: press due ~1330 ms after the telegraph; the charge stops at a wall 100 ms in
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const log = drive(policy, 200, patternWorld({ kind: 'lunge', teleMs: 650, chargeMs: 100 }, 1000, 400));
+      expect(log.some((l) => l.intent.dodge)).toBe(false);
+      // nothing stays armed: the agent is free to act again (no pending defence blocking its offence)
+      const internals = policy as unknown as { pending: unknown[] };
+      expect(internals.pending).toEqual([]);
+      // control: the same charge still travelling keeps the defence
+      const control = drive(makePolicy('agressivo', SEED, NO_LAPSE, only('dodge')), 200, patternWorld({ kind: 'lunge', teleMs: 650, chargeMs: 1500 }, 1000, 400));
+      expect(control.filter((l) => l.intent.dodge)).toHaveLength(1);
+    });
+
+    it('(e) a guard raised against a charge comes down when the charge ends at a wall', () => {
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('block'));
+      const log = drive(policy, 200, patternWorld({ kind: 'lunge', teleMs: 650, chargeMs: 100 }, 1000, 400));
+      const up = log.findIndex((l) => l.intent.block === 'start');
+      expect(up).toBeGreaterThan(-1);
+      expect(log.slice(up).some((l) => l.intent.block === 'stop')).toBe(true);
+    });
+
+    it('(f) two observations with the same tMs do not count a new telegraph (Review Focus 4)', () => {
+      const policy = makePolicy('agressivo', SEED, NO_LAPSE, only('dodge'));
+      const body = { weapon: 'sword_shield', blocking: false };
+      const swing: World = { enemyState: 'attacking', offset: { x: 30, y: 0 }, telegraph: { kind: 'swing', progress: 0.1 } };
+      const blank: World = { enemyState: 'attacking', offset: { x: 30, y: 0 } };
+      let presses = 0;
+      const decide = (t: number, seenT: number, w: World) => {
+        const i = policy.decide({ now: obsOf(t, w, body), seen: obsOf(seenT, w, body), nowMs: t });
+        if (i.dodge) presses++;
+      };
+      // the frozen step repeats seen tMs 1000 with differing content: still one instant, one telegraph
+      decide(1080, 1000, swing);
+      decide(1081, 1000, blank);
+      decide(1082, 1000, swing);
+      for (let t = 1100; t < 2500; t += STEP) decide(t, t - PERCEPTION_LAG_MS, swing);
+      expect(presses).toBe(1);
     });
   });
 
@@ -645,5 +834,267 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
     const after: AgentIntent[] = [];
     for (; t < tBreak + STAGGER_MS + 300; t += STEP) after.push(step(t, STAMINA_COST.dodge, false));
     expect(after.some((i) => i.startAction)).toBe(true);
+  });
+});
+
+describe('AgentPolicy own-body reset (run index, not HP)', () => {
+  type Internals = {
+    readOwnBody(o: Observation, t: number): void;
+    lockedUntil: number;
+    pending: unknown;
+    chargeReleaseAt: number | null;
+    wantBlock: boolean;
+  };
+  const w: World = { enemyState: 'idle', offset: { x: 300, y: 0 } };
+  const body = { weapon: 'sword_shield', blocking: false };
+  const armed = () => {
+    const p = makePolicy('agressivo', 4242) as unknown as Internals;
+    p.readOwnBody(obsOf(0, w, body), 0);
+    p.lockedUntil = 5000;
+    p.pending = [{ kind: 'dodge', at: 900 }];
+    p.chargeReleaseAt = 800;
+    p.wantBlock = true;
+    return p;
+  };
+  const expectCleared = (p: Internals) => {
+    expect(p.lockedUntil).toBe(-Infinity);
+    expect(p.pending).toEqual([]);
+    expect(p.chargeReleaseAt).toBeNull();
+    expect(p.wantBlock).toBe(false);
+  };
+
+  it('a changed runIdx clears the timers', () => {
+    const p = armed();
+    p.readOwnBody({ ...obsOf(16, w, body), runIdx: 1 }, 16);
+    expectCleared(p);
+  });
+
+  it('a heal (HP rises, same runIdx) clears nothing', () => {
+    const p = armed();
+    p.readOwnBody({ ...obsOf(16, w, body), playerHp: 60 }, 16); // drop first: stagger
+    p.lockedUntil = 5000;
+    p.pending = [{ kind: 'dodge', at: 900 }];
+    p.chargeReleaseAt = 800;
+    p.wantBlock = true;
+    p.readOwnBody({ ...obsOf(32, w, body), playerHp: 100 }, 32);
+    expect(p.lockedUntil).toBe(5000);
+    expect(p.pending).toHaveLength(1);
+    expect(p.chargeReleaseAt).toBe(800);
+    expect(p.wantBlock).toBe(true);
+  });
+});
+
+describe('AGENT_STYLES sprint, stamina reserve and item parameters (V0.1 Task 3)', () => {
+  const expected: Record<StyleId, [number, number, number]> = {
+    agressivo: [1, 0, 0.3],
+    evasivo: [0.2, 45, 0.9],
+    bloqueador: [0.5, 30, 0.5],
+    paciente: [0.3, 45, 0.7],
+    variado: [0.6, 15, 0.6],
+    repetitivo: [0.5, 0, 0.2],
+    aleatorio: [0.5, 0, 0.5],
+  };
+  it.each(STYLE_IDS)('%s has the spec values', (id) => {
+    const s = AGENT_STYLES[id];
+    expect([s.sprintApproach, s.staminaReserve, s.itemSeeking]).toEqual(expected[id]);
+    expect(s.itemUse).toEqual({ healBelowHpFraction: 0.5, bombWithinPx: 110, powerOnAttackStart: true, random: id === 'aleatorio' });
+  });
+});
+
+describe('AgentPolicy sprint while approaching (V0.1 Task 3)', () => {
+  const far = (d: number) => (): World => ({ enemyState: 'chasing', offset: { x: d, y: 0 } });
+  const sprints = (log: Step[]) => log.filter((l) => l.intent.sprint === true).length;
+  const STEPS = Math.round(5000 / STEP);
+
+  it('sprintApproach 1: sprints while closing in on an enemy beyond 200 u with stamina above 75', () => {
+    const log = drive(makePolicy('agressivo', 3), STEPS, far(400), 'sword_shield', undefined, 150);
+    expect(sprints(log)).toBeGreaterThan(0);
+    expect(log.every((l) => l.intent.sprint !== true || (l.intent.move.x > 0))).toBe(true);
+  });
+
+  it('sprintApproach 0: never sprints', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, sprintApproach: 0 };
+    const log = drive(makePolicy('agressivo', 3, NO_LAPSE, style), STEPS, far(400), 'sword_shield', undefined, 150);
+    expect(sprints(log)).toBe(0);
+  });
+
+  it('does not sprint with stamina at 75 or less, nor within 200 u of the enemy', () => {
+    expect(sprints(drive(makePolicy('agressivo', 3), STEPS, far(400), 'sword_shield', undefined, 75))).toBe(0);
+    const near = drive(makePolicy('agressivo', 3), STEPS, far(190), 'sword_shield', undefined, 150);
+    expect(near.some((l) => l.intent.move.x > 0)).toBe(true);
+    expect(sprints(near)).toBe(0);
+  });
+
+  it('the draw is made once per approach stretch: a 0.5 style is all-sprint or no-sprint within a stretch', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, sprintApproach: 0.5 };
+    for (let seed = 1; seed <= 12; seed++) {
+      const log = drive(makePolicy('agressivo', seed, NO_LAPSE, style), STEPS, far(5000), 'sword_shield', undefined, 150);
+      const moving = log.filter((l) => l.intent.move.x > 0);
+      expect(moving.length).toBeGreaterThan(0);
+      expect(new Set(moving.map((l) => l.intent.sprint === true)).size, `seed ${seed}`).toBe(1);
+    }
+  });
+});
+
+describe('AgentPolicy stamina reserve (V0.1 Task 3)', () => {
+  const stand = (): World => ({ enemyState: 'chasing', offset: { x: 30, y: 0 } });
+  const STEPS = Math.round(30_000 / STEP);
+  const startTimes = (log: Step[]) => log.filter((l) => l.intent.startAction).map((l) => l.t);
+
+  it('only an opening attack (>= 1 s after the last) is started when stamina - cost falls under the reserve', () => {
+    const style: AgentStyle = { ...AGENT_STYLES.agressivo, staminaReserve: 60 };
+    const log = drive(makePolicy('agressivo', 5, NO_LAPSE, style), STEPS, stand, 'sword_shield', undefined, 70);
+    const t = startTimes(log);
+    expect(t.length).toBeGreaterThan(1);
+    for (let i = 1; i < t.length; i++) expect(t[i] - t[i - 1]).toBeGreaterThanOrEqual(1000);
+    // the very first attack ignores the reserve
+    expect(t[0]).toBeLessThan(1000);
+  });
+
+  it('with no reserve the same agent chains attacks closer than 1 s', () => {
+    const log = drive(makePolicy('agressivo', 5), STEPS, stand, 'sword_shield', undefined, 70);
+    const t = startTimes(log);
+    expect(t.some((x, i) => i > 0 && x - t[i - 1] < 1000)).toBe(true);
+  });
+});
+
+describe('AgentPolicy items: use and seeking (V0.1 Task 4)', () => {
+  type Extra = Partial<Pick<Observation, 'heldItem' | 'groundItems' | 'playerHp'>>;
+  /** Drives a policy against a scripted world; `extra` sets the own-body item/HP fields (on both views). */
+  function driveItems(policy: AgentPolicy, steps: number, world: (t: number) => World, extra: Extra | ((t: number) => Extra)): Step[] {
+    const body = { weapon: 'sword_shield', blocking: false };
+    const log: Step[] = [];
+    for (let i = 0; i < steps; i++) {
+      const t = i * STEP;
+      const seenT = t - PERCEPTION_LAG_MS;
+      const ex = (tt: number) => (typeof extra === 'function' ? extra(tt) : extra);
+      const seen = seenT >= 0 ? { ...obsOf(seenT, world(seenT), body), ...ex(seenT) } : null;
+      const now = { ...obsOf(t, world(t), body), ...ex(t) };
+      const intent = policy.decide({ now, seen, nowMs: t });
+      if (intent.switchTo) body.weapon = intent.switchTo;
+      if (intent.block === 'start') body.blocking = true;
+      if (intent.block === 'stop') body.blocking = false;
+      log.push({ t, seenState: seen ? seen.enemyState : null, intent });
+    }
+    return log;
+  }
+  const uses = (log: Step[]) => log.filter((s) => s.intent.useItem === true);
+  const S3 = Math.round(3000 / STEP);
+
+  it('heal is used below the HP fraction, after the reaction delay, and not above it', () => {
+    const low = driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: 'heal', playerHp: 40 });
+    expect(uses(low).length).toBeGreaterThan(0);
+    expect(uses(low)[0].t).toBeGreaterThanOrEqual(PERCEPTION_LAG_MS);
+    const high = driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: 'heal', playerHp: 80 });
+    expect(uses(high)).toHaveLength(0);
+  });
+
+  it('heal is not used with an empty slot', () => {
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: null, playerHp: 10 }))).toHaveLength(0);
+  });
+
+  it('bomb is used only with the enemy within 110 u', () => {
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 100), { heldItem: 'bomb' })).length).toBeGreaterThan(0);
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 150), { heldItem: 'bomb' }))).toHaveLength(0);
+  });
+
+  it('power goes out in the same intent as the attack start, and only then', () => {
+    const log = driveItems(makePolicy('agressivo', 2), Math.round(6000 / STEP), cycleWorld(30), { heldItem: 'power' });
+    const u = uses(log);
+    expect(u.length).toBeGreaterThan(0);
+    for (const s of u) expect(s.intent.startAction).toBeDefined();
+    const off = { ...AGENT_STYLES.agressivo, itemUse: { ...AGENT_STYLES.agressivo.itemUse, powerOnAttackStart: false } };
+    const log2 = driveItems(makePolicy('agressivo', 2, NO_LAPSE, off), Math.round(6000 / STEP), cycleWorld(30), { heldItem: 'power' });
+    expect(uses(log2)).toHaveLength(0);
+  });
+
+  it('the random control does not use power at attack start (only at random)', () => {
+    const steps = Math.round(6000 / STEP);
+    const log = driveItems(makePolicy('aleatorio', 4242), steps, cycleWorld(30), { heldItem: 'power' });
+    const attacks = log.filter((s) => s.intent.startAction).length;
+    expect(attacks).toBeGreaterThan(4);
+    expect(uses(log).length).toBeLessThan(attacks / 2);
+  });
+
+  it('random uses whatever is in the slot at ~1/180 per tick, deterministically by seed', () => {
+    const style = { ...AGENT_STYLES.aleatorio, itemUse: { ...AGENT_STYLES.aleatorio.itemUse, powerOnAttackStart: false } };
+    const steps = Math.round(60_000 / STEP);
+    const run = () => driveItems(makePolicy('aleatorio', 4242, NO_LAPSE, style), steps, still('chasing', 400), { heldItem: 'power' });
+    const a = uses(run()).map((s) => s.t);
+    const b = uses(run()).map((s) => s.t);
+    expect(a.length).toBeGreaterThan(5);
+    expect(a.length).toBeLessThan(80);
+    expect(a).toEqual(b);
+    const nonRandom = { ...style, itemUse: { ...style.itemUse, random: false } };
+    expect(uses(driveItems(makePolicy('aleatorio', 4242, NO_LAPSE, nonRandom), steps, still('chasing', 400), { heldItem: 'power' }))).toHaveLength(0);
+  });
+
+  describe('seeking', () => {
+    const itemBelow = [{ kind: 'heal' as const, pos: { x: PLAYER_POS.x, y: PLAYER_POS.y + 200 } }];
+    const seeker = (p: number) => ({ ...AGENT_STYLES.evasivo, itemSeeking: p });
+    const walksToItem = (log: Step[]) => log.filter((s) => s.intent.move.y > 0.9);
+
+    it('itemSeeking 1 walks to an item 200 u away while the enemy is idle', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow });
+      expect(walksToItem(log).length).toBeGreaterThan(20);
+    });
+
+    it('itemSeeking 0 never walks to it', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(0)), S3, still('chasing', 400), { groundItems: itemBelow });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+
+    it('does not seek with an item already held, nor beyond 250 u', () => {
+      const held = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow, heldItem: 'power' });
+      expect(walksToItem(held)).toHaveLength(0);
+      const far = [{ kind: 'heal' as const, pos: { x: PLAYER_POS.x, y: PLAYER_POS.y + 300 } }];
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: far });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+
+    it('gives up when a telegraph appears', () => {
+      const world = patternWorld({ kind: 'swing' }, 1000, 400);
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), Math.round(2500 / STEP), world, { groundItems: itemBelow });
+      expect(walksToItem(log.filter((s) => s.t < 1000)).length).toBeGreaterThan(10);
+      const during = log.filter((s) => s.t >= 1000 + PERCEPTION_LAG_MS && s.t < 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS);
+      expect(walksToItem(during)).toHaveLength(0);
+    });
+
+    it('does not seek with HP at or below 30%', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow, playerHp: 30 });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+  });
+});
+
+describe('AgentPolicy run restart (final review)', () => {
+  it('a lagged seen observation from the previous run does not queue a defence in the new run', () => {
+    const cfg: HumanizerConfig = { reactionMeanMs: 50, reactionSdMs: 1, lapseProb: 0, aimNoiseRad: 0 };
+    const base = AGENT_STYLES.bloqueador;
+    const style: AgentStyle = {
+      ...base,
+      actionWeights: Object.fromEntries(Object.entries(base.actionWeights).filter(([k]) => !k.endsWith('.charged'))),
+      defenseWeights: { dodge: 1, block: 0, parry: 0, none: 0 },
+    };
+    const body = { weapon: 'sword_shield', blocking: false };
+    const run = (seenRunIdx: number): boolean => {
+      const p = makePolicy('bloqueador', 4242, cfg, style);
+      const calm = (t: number, runIdx: number): Observation => ({ ...obsOf(t, { enemyState: 'idle', offset: { x: 200, y: 0 } }, body), runIdx });
+      for (let i = 0; i < 5; i++) p.decide({ now: calm(i * STEP, 0), seen: calm(i * STEP, 0), nowMs: i * STEP });
+      let defended = false;
+      for (let i = 5; i < 60; i++) {
+        const t = i * STEP;
+        const tel: Observation['telegraph'] = { kind: 'swing', progress: 0.1 };
+        const seen: Observation = {
+          ...obsOf(t - PERCEPTION_LAG_MS, { enemyState: 'attacking', offset: { x: 60, y: 0 }, telegraph: tel }, body),
+          runIdx: seenRunIdx,
+        };
+        const now: Observation = { ...obsOf(t, { enemyState: 'idle', offset: { x: 200, y: 0 } }, body), runIdx: 1 };
+        if (isDefense(p.decide({ now, seen, nowMs: t }))) defended = true;
+      }
+      return defended;
+    };
+    expect(run(1)).toBe(true); // control: a current-run telegraph is defended
+    expect(run(0)).toBe(false); // ghost from the previous run: ignored
   });
 });

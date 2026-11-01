@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { defaultOutName, parseCliArgs, type CliOptions } from './cliArgs';
+import { defaultOutName, parseCliArgs, parsePilotVerdicts, type CliOptions } from './cliArgs';
 import { DEFAULT_EXPERIMENT } from './agentRunner';
 
-const D = { seed: DEFAULT_EXPERIMENT.seed, runs: 30, runsPerSession: 10, capMs: 300_000 };
+const D = { seed: DEFAULT_EXPERIMENT.seed, runs: 30, runsPerSession: 10, capMs: DEFAULT_EXPERIMENT.runCapMs };
 const parse = (...a: string[]) => parseCliArgs(a, D);
 const errs = (...a: string[]): string[] => {
   const r = parse(...a);
@@ -14,6 +14,13 @@ const opts = (...a: string[]): CliOptions => {
   if (!r.ok) throw new Error(r.errors.join('; '));
   return r.options;
 };
+
+describe('experiment defaults', () => {
+  it('official run: seed 20261105 and a 10 minute cap per run', () => {
+    expect(DEFAULT_EXPERIMENT.seed).toBe(20261105);
+    expect(DEFAULT_EXPERIMENT.runCapMs).toBe(600_000);
+  });
+});
 
 describe('parseCliArgs', () => {
   it('--smoke is the tiny preset on seed 4242 and needs nothing else', () => {
@@ -75,6 +82,13 @@ describe('parseCliArgs', () => {
     });
   });
 
+  it('--pilot takes a path, defaults to null and may not be repeated or empty', () => {
+    expect(opts('--smoke').pilot).toBeNull();
+    expect(opts('--smoke', '--pilot', 'a/b.csv').pilot).toBe('a/b.csv');
+    expect(errs('--smoke', '--pilot').join(' ')).toContain('needs a value');
+    expect(errs('--smoke', '--pilot', 'x', '--pilot', 'y').join(' ')).toContain('given twice');
+  });
+
   it('collects several errors at once', () => {
     expect(errs('--bogus', '--runs', '0').length).toBeGreaterThanOrEqual(2);
   });
@@ -84,5 +98,17 @@ describe('defaultOutName', () => {
   it('uses the local date and time', () => {
     expect(defaultOutName(4242, true, new Date(2026, 9, 19, 9, 5))).toBe('2026-10-19-0905-seed4242-smoke');
     expect(defaultOutName(7, false, new Date(2026, 0, 2, 23, 59))).toBe('2026-01-02-2359-seed7');
+  });
+});
+
+describe('parsePilotVerdicts', () => {
+  it('maps id to verdict from the pilot hipoteses.csv', () => {
+    const csv = 'id,skill,kind,verdict\r\nH1,a,greater,indefinida\r\nH1u,b,undefinedRate,confirmada\nH3,c,greater,refutada\n';
+    expect(parsePilotVerdicts(csv)).toEqual({ H1: 'indefinida', H1u: 'confirmada', H3: 'refutada' });
+  });
+  it('returns null for a missing header, an empty body or unknown verdicts', () => {
+    expect(parsePilotVerdicts('')).toBeNull();
+    expect(parsePilotVerdicts('id,skill\nH1,x')).toBeNull();
+    expect(parsePilotVerdicts('id,verdict\nH1,talvez')).toBeNull();
   });
 });
