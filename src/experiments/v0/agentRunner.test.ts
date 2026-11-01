@@ -278,3 +278,15 @@ describe('applyIntent: sprint and item', () => {
     expect(ofType(s.recorder.drain(), 'item.use')).toHaveLength(1);
   });
 });
+
+describe('agents and items, end to end (V0.1 Task 4)', () => {
+  const cfg = tiny({ runsPerAgent: 10, runsPerSession: 10, runCapMs: 120_000 });
+  const itemEvents = (events: readonly LoggedEvent[]) => events.filter((e) => e.type === 'item.pickup' || e.type === 'item.use');
+
+  it('an agent that seeks items picks them up and uses them in the real game, deterministically by seed', () => {
+    const a = playAgent('evasivo', cfg, 1);
+    expect(ofType(a.events, 'item.pickup').length).toBeGreaterThan(0);
+    expect(ofType(a.events, 'item.use').length).toBeGreaterThan(0);
+    expect(itemEvents(playAgent('evasivo', cfg, 1).events)).toEqual(itemEvents(a.events));
+  }, 120_000);
+});

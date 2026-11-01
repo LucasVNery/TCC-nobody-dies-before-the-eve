@@ -957,3 +957,104 @@ describe('AgentPolicy stamina reserve (V0.1 Task 3)', () => {
     expect(t.some((x, i) => i > 0 && x - t[i - 1] < 1000)).toBe(true);
   });
 });
+
+describe('AgentPolicy items: use and seeking (V0.1 Task 4)', () => {
+  type Extra = Partial<Pick<Observation, 'heldItem' | 'groundItems' | 'playerHp'>>;
+  /** Drives a policy against a scripted world; `extra` sets the own-body item/HP fields (on both views). */
+  function driveItems(policy: AgentPolicy, steps: number, world: (t: number) => World, extra: Extra | ((t: number) => Extra)): Step[] {
+    const body = { weapon: 'sword_shield', blocking: false };
+    const log: Step[] = [];
+    for (let i = 0; i < steps; i++) {
+      const t = i * STEP;
+      const seenT = t - PERCEPTION_LAG_MS;
+      const ex = (tt: number) => (typeof extra === 'function' ? extra(tt) : extra);
+      const seen = seenT >= 0 ? { ...obsOf(seenT, world(seenT), body), ...ex(seenT) } : null;
+      const now = { ...obsOf(t, world(t), body), ...ex(t) };
+      const intent = policy.decide({ now, seen, nowMs: t });
+      if (intent.switchTo) body.weapon = intent.switchTo;
+      if (intent.block === 'start') body.blocking = true;
+      if (intent.block === 'stop') body.blocking = false;
+      log.push({ t, seenState: seen ? seen.enemyState : null, intent });
+    }
+    return log;
+  }
+  const uses = (log: Step[]) => log.filter((s) => s.intent.useItem === true);
+  const S3 = Math.round(3000 / STEP);
+
+  it('heal is used below the HP fraction, after the reaction delay, and not above it', () => {
+    const low = driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: 'heal', playerHp: 40 });
+    expect(uses(low).length).toBeGreaterThan(0);
+    expect(uses(low)[0].t).toBeGreaterThanOrEqual(PERCEPTION_LAG_MS);
+    const high = driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: 'heal', playerHp: 80 });
+    expect(uses(high)).toHaveLength(0);
+  });
+
+  it('heal is not used with an empty slot', () => {
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 300), { heldItem: null, playerHp: 10 }))).toHaveLength(0);
+  });
+
+  it('bomb is used only with the enemy within 110 u', () => {
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 100), { heldItem: 'bomb' })).length).toBeGreaterThan(0);
+    expect(uses(driveItems(makePolicy('evasivo', 1), S3, still('chasing', 150), { heldItem: 'bomb' }))).toHaveLength(0);
+  });
+
+  it('power goes out in the same intent as the attack start, and only then', () => {
+    const log = driveItems(makePolicy('agressivo', 2), Math.round(6000 / STEP), cycleWorld(30), { heldItem: 'power' });
+    const u = uses(log);
+    expect(u.length).toBeGreaterThan(0);
+    for (const s of u) expect(s.intent.startAction).toBeDefined();
+    const off = { ...AGENT_STYLES.agressivo, itemUse: { ...AGENT_STYLES.agressivo.itemUse, powerOnAttackStart: false } };
+    const log2 = driveItems(makePolicy('agressivo', 2, NO_LAPSE, off), Math.round(6000 / STEP), cycleWorld(30), { heldItem: 'power' });
+    expect(uses(log2)).toHaveLength(0);
+  });
+
+  it('random uses whatever is in the slot at ~1/180 per tick, deterministically by seed', () => {
+    const style = { ...AGENT_STYLES.aleatorio, itemUse: { ...AGENT_STYLES.aleatorio.itemUse, powerOnAttackStart: false } };
+    const steps = Math.round(60_000 / STEP);
+    const run = () => driveItems(makePolicy('aleatorio', 4242, NO_LAPSE, style), steps, still('chasing', 400), { heldItem: 'power' });
+    const a = uses(run()).map((s) => s.t);
+    const b = uses(run()).map((s) => s.t);
+    expect(a.length).toBeGreaterThan(5);
+    expect(a.length).toBeLessThan(80);
+    expect(a).toEqual(b);
+    const nonRandom = { ...style, itemUse: { ...style.itemUse, random: false } };
+    expect(uses(driveItems(makePolicy('aleatorio', 4242, NO_LAPSE, nonRandom), steps, still('chasing', 400), { heldItem: 'power' }))).toHaveLength(0);
+  });
+
+  describe('seeking', () => {
+    const itemBelow = [{ kind: 'heal' as const, pos: { x: PLAYER_POS.x, y: PLAYER_POS.y + 200 } }];
+    const seeker = (p: number) => ({ ...AGENT_STYLES.evasivo, itemSeeking: p });
+    const walksToItem = (log: Step[]) => log.filter((s) => s.intent.move.y > 0.9);
+
+    it('itemSeeking 1 walks to an item 200 u away while the enemy is idle', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow });
+      expect(walksToItem(log).length).toBeGreaterThan(20);
+    });
+
+    it('itemSeeking 0 never walks to it', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(0)), S3, still('chasing', 400), { groundItems: itemBelow });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+
+    it('does not seek with an item already held, nor beyond 250 u', () => {
+      const held = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow, heldItem: 'power' });
+      expect(walksToItem(held)).toHaveLength(0);
+      const far = [{ kind: 'heal' as const, pos: { x: PLAYER_POS.x, y: PLAYER_POS.y + 300 } }];
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: far });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+
+    it('gives up when a telegraph appears', () => {
+      const world = patternWorld({ kind: 'swing' }, 1000, 400);
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), Math.round(2500 / STEP), world, { groundItems: itemBelow });
+      expect(walksToItem(log.filter((s) => s.t < 1000)).length).toBeGreaterThan(10);
+      const during = log.filter((s) => s.t >= 1000 + PERCEPTION_LAG_MS && s.t < 1000 + ELITE_TELEGRAPH_MS.swing + SWING_MS);
+      expect(walksToItem(during)).toHaveLength(0);
+    });
+
+    it('does not seek with HP at or below 30%', () => {
+      const log = driveItems(makePolicy('evasivo', 3, NO_LAPSE, seeker(1)), S3, still('chasing', 400), { groundItems: itemBelow, playerHp: 30 });
+      expect(walksToItem(log)).toHaveLength(0);
+    });
+  });
+});

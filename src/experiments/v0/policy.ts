@@ -2,7 +2,7 @@ import type { EnemyState, Vec2 } from '../../combat/types';
 import { ACTION_REGISTRY, lockedMs, type ActionDef } from '../../combat/actionRegistry';
 import { DODGE, PARRY_WINDOW_MS, STAGGER_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
 import type { AttackKind } from '../../combat/eliteDefs';
-import { ARENA_BOUNDS } from '../../combat/movementDefs';
+import { ARENA_BOUNDS, PLAYER_MAX_HP } from '../../combat/movementDefs';
 import { STAMINA_COST } from '../../combat/stamina';
 import { MIN_REACTION_MS, type Humanizer } from './humanizer';
 import type { Observation } from './perception';
@@ -44,6 +44,14 @@ const SPRINT_MIN_STAMINA = 75;
 const SPRINT_MIN_DIST_PX = 200;
 /** An attack this long after the previous one opens a sequence and ignores the stamina reserve. */
 const OPENING_GAP_MS = 1000;
+/** A ground item this close (and no item held) is considered for a detour. */
+const ITEM_SEEK_RADIUS_PX = 250;
+/** No detour for an item with HP at or below this fraction of the maximum. */
+const ITEM_SEEK_MIN_HP_FRACTION = 0.3;
+/** Items on the ground carry no id: kind + position rounded to this grid identifies one. */
+const ITEM_KEY_GRID_PX = 10;
+/** `itemUse.random`: per-tick chance of using the held item (about once every 3 s at 60 Hz). */
+const RANDOM_USE_PER_TICK = 1 / 180;
 
 export type DefenseKind = keyof DefenseWeights;
 
@@ -137,6 +145,10 @@ export class AgentPolicy {
   private _lastPlannedDefense: DefenseKind | null = null;
   /** Drawn once when an approach stretch begins (null between stretches): run it or walk it. */
   private approachSprint: boolean | null = null;
+  /** Seek outcome (true = go) per ground item seen, keyed by kind + rounded position; cleared on a new run. */
+  private seekDecisions = new Map<string, boolean>();
+  /** When a held-item use condition first held, the time the agent will act on it (reaction delay). */
+  private itemUseAt: number | null = null;
 
   constructor(
     private readonly style: AgentStyle,
@@ -168,6 +180,7 @@ export class AgentPolicy {
       this.openingAt = null;
       this.approachSprint = null;
       if (now.isBlocking) intent.block = 'stop';
+      this.useHeldItem(intent, now, null, nowMs, nowMs < this.lockedUntil || this.wantBlock || now.isBlocking);
       return intent;
     }
 
@@ -256,6 +269,7 @@ export class AgentPolicy {
       !this.style.waitForOpening ||
       (st === 'recovering' && this.openingAt !== null && nowMs >= this.openingAt) ||
       (st !== 'attacking' && dist >= SAFE_DISTANCE_PX && reachOk);
+    this.useHeldItem(intent, now, seen, nowMs, busy);
     let approach = false;
     if (!busy) {
       if (plan.action.weaponId !== now.equippedWeaponId) intent.switchTo = plan.action.weaponId;
@@ -266,7 +280,7 @@ export class AgentPolicy {
         } else if (this.belowReserve(plan.action, now.playerStamina, nowMs)) {
           // keep the reserve for defence: only the opening attack of a sequence spends into it
         } else if (this.humanizer.lapses()) this.lastAttackAt = nowMs;
-        else this.startAttack(intent, plan, nowMs);
+        else this.startAttack(intent, plan, nowMs, now.heldItem);
       }
     }
 
@@ -282,6 +296,13 @@ export class AgentPolicy {
       intent.move = dir;
       closing = true;
     } else if (dist < this.style.preferredDistance - this.style.distanceTolerance) intent.move = this.retreat(now.playerPos, dir);
+
+    // a detour for a nearby item replaces the positioning above while the enemy is not attacking
+    const itemDir = dodgeNow || this.wantBlock ? null : this.seekItem(now, seen);
+    if (itemDir) {
+      intent.move = itemDir;
+      closing = false;
+    }
 
     // sprint: the choice is made once per approach stretch (not per tick, so it does not flicker); inside a
     // run-chosen stretch it still needs stamina above the floor and an enemy still far away
@@ -310,6 +331,8 @@ export class AgentPolicy {
         this.pending = [];
         this.lastSeenTMs = -Infinity;
         this.prevTelegraph = null;
+        this.seekDecisions.clear();
+        this.itemUseAt = null;
       } else if (now.playerHp < this.lastHp || (this.lastBlocking && now.playerStamina <= 0 && this.lastStamina > 0)) {
         this.chargeReleaseAt = null;
         this.chargeAction = null;
@@ -321,6 +344,65 @@ export class AgentPolicy {
     this.lastHp = now.playerHp;
     this.lastStamina = now.playerStamina;
     this.lastBlocking = now.isBlocking;
+  }
+
+  /**
+   * Uses the held item. With `itemUse.random` the item goes at a fixed per-tick chance whatever it is;
+   * otherwise heal (HP under the fraction) and bomb (enemy within range) act once their condition has held
+   * for a sampled reaction delay and the policy is not busy. Power goes out with an attack start instead.
+   */
+  private useHeldItem(intent: AgentIntent, now: Observation, seen: Observation | null, nowMs: number, busy: boolean): void {
+    const held = now.heldItem;
+    if (held === null) {
+      this.itemUseAt = null;
+      return;
+    }
+    const use = this.style.itemUse;
+    if (use.random) {
+      if (this.rng() < RANDOM_USE_PER_TICK) intent.useItem = true;
+      return;
+    }
+    let cond = false;
+    if (held === 'heal') cond = now.playerHp / PLAYER_MAX_HP < use.healBelowHpFraction;
+    else if (held === 'bomb' && seen) {
+      cond = Math.hypot(seen.enemyPos.x - now.playerPos.x, seen.enemyPos.y - now.playerPos.y) <= use.bombWithinPx;
+    }
+    if (!cond) {
+      this.itemUseAt = null;
+      return;
+    }
+    if (this.itemUseAt === null) this.itemUseAt = nowMs + this.humanizer.sampleReactionMs();
+    if (nowMs >= this.itemUseAt && !busy) {
+      intent.useItem = true;
+      this.itemUseAt = null;
+    }
+  }
+
+  /**
+   * Direction to walk for a nearby ground item, or null. The go/skip draw is made once per item, the first
+   * tick it is within range with the slot empty. Walking stops the moment the enemy attacks (telegraph or
+   * attacking/lunging seen) or HP is low, and may resume when that passes.
+   */
+  private seekItem(now: Observation, seen: Observation): Vec2 | null {
+    if (now.heldItem !== null) return null;
+    let best: { dist: number; dir: Vec2 } | null = null;
+    for (const g of now.groundItems) {
+      const dx = g.pos.x - now.playerPos.x;
+      const dy = g.pos.y - now.playerPos.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > ITEM_SEEK_RADIUS_PX) continue;
+      const key = `${g.kind}:${Math.round(g.pos.x / ITEM_KEY_GRID_PX) * ITEM_KEY_GRID_PX}:${Math.round(g.pos.y / ITEM_KEY_GRID_PX) * ITEM_KEY_GRID_PX}`;
+      let go = this.seekDecisions.get(key);
+      if (go === undefined) {
+        go = this.rng() < this.style.itemSeeking;
+        this.seekDecisions.set(key, go);
+      }
+      if (go && dist > 0 && (best === null || dist < best.dist)) best = { dist, dir: { x: dx / dist, y: dy / dist } };
+    }
+    if (!best) return null;
+    const enemyActing = seen.telegraph !== null || seen.enemyState === 'attacking' || seen.enemyState === 'lunging';
+    if (enemyActing || now.playerHp / PLAYER_MAX_HP <= ITEM_SEEK_MIN_HP_FRACTION) return null;
+    return best.dir;
   }
 
   private releaseCharge(intent: AgentIntent, nowMs: number): void {
@@ -356,9 +438,10 @@ export class AgentPolicy {
     return stamina - STAMINA_COST[action.actionType] < this.style.staminaReserve;
   }
 
-  private startAttack(intent: AgentIntent, plan: Plan, nowMs: number): void {
+  private startAttack(intent: AgentIntent, plan: Plan, nowMs: number, held: Observation['heldItem']): void {
     intent.startAction = plan.action.id;
     intent.aim = this.humanizer.noisyAim(this.aim);
+    if (held === 'power' && this.style.itemUse.powerOnAttackStart) intent.useItem = true;
     this.lastAttackAt = nowMs;
     const charge = plan.action.charge;
     if (charge) {
