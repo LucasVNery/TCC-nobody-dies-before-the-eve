@@ -2,7 +2,7 @@
 // Command line of the V0 experiment (synthetic agents; spec 2026-10-19-v0-agentes-sinteticos).
 //
 //   npx vite-node tools/run-v0.ts [--agents a,b,...] [--runs N] [--runs-per-session N]
-//                                 [--cap-ms N] [--seed N] [--out DIR] [--reviewed-before yes|no]
+//                                 [--cap-ms N] [--seed N] [--out DIR] [--reviewed-before yes|no] [--pilot hipoteses.csv]
 //                                 [--smoke] [--full] [--force]
 //
 // Argument parsing and validation are pure and tested (src/experiments/v0/cliArgs.ts). This is the
@@ -10,12 +10,12 @@
 // (report.ts and the rest of src/experiments/v0 are pure). tools/ is outside the tsconfig include
 // (src only), so `process` is declared minimally below instead of pulling in @types/node; the
 // node:* imports are resolved by vite-node at run time, not by `tsc`.
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GAME_VERSION } from '../src/telemetry/schema';
 import { createPrng } from '../src/core/prng';
 import { DEFAULT_EXPERIMENT, mixSeed, runExperiment, type ExperimentConfig } from '../src/experiments/v0/agentRunner';
-import { defaultOutName, parseCliArgs } from '../src/experiments/v0/cliArgs';
+import { defaultOutName, parseCliArgs, parsePilotVerdicts } from '../src/experiments/v0/cliArgs';
 import { evaluateHypotheses, evaluateMHypotheses, iccBySkill, prepareValues } from '../src/experiments/v0/evaluate';
 import { checkAgentLog, type PipelineCheck } from '../src/experiments/v0/pipelineChecks';
 import { buildReport } from '../src/experiments/v0/report';
@@ -54,6 +54,31 @@ const cfg: ExperimentConfig = {
   runCapMs: o.capMs,
 };
 
+/** Pilot 0.0.3 verdicts: --pilot <hipoteses.csv>, else the newest experiments/v0/results/* folder archived by 0.0.3. */
+function findPilotCsv(explicit: string | null): string | null {
+  if (explicit !== null) return explicit;
+  const root = join('experiments', 'v0', 'results');
+  if (!existsSync(root)) return null;
+  const dirs = readdirSync(root).sort().reverse();
+  for (const d of dirs) {
+    const csv = join(root, d, 'hipoteses.csv');
+    const note = join(root, d, 'EXECUCAO.md');
+    if (existsSync(csv) && existsSync(note) && readFileSync(note, 'utf8').includes('0.0.3')) return csv;
+  }
+  return null;
+}
+const pilotPath = findPilotCsv(o.pilot);
+let pilotVerdicts: ReturnType<typeof parsePilotVerdicts> = null;
+if (pilotPath !== null) {
+  if (existsSync(pilotPath)) pilotVerdicts = parsePilotVerdicts(readFileSync(pilotPath, 'utf8'));
+  if (pilotVerdicts === null) console.warn(`run-v0: pilot file "${pilotPath}" missing or unreadable; the report will carry a warning`);
+}
+console.log(`game version ${GAME_VERSION}`);
+console.log(
+  `config: seed ${cfg.seed}, agents ${cfg.agents.join(',')}, ${cfg.runsPerAgent} runs/agent, ${cfg.runsPerSession} runs/session, cap ${cfg.runCapMs / 1000} s/run, step ${cfg.stepMs.toFixed(2)} ms`,
+);
+console.log(`pilot 0.0.3 verdicts: ${pilotVerdicts !== null ? pilotPath : 'none'}`);
+
 const started = Date.now();
 const logs = runExperiment(cfg);
 const { runValues, roomValues } = prepareValues(logs);
@@ -83,7 +108,7 @@ const files = buildReport({
   runMetrics,
   mHypotheses,
   reactions,
-  // pilotVerdicts: the 0.0.3 pilot file is wired by the CLI in Task 6; absent, the appendix is omitted with a warning.
+  pilotVerdicts, // null: the appendix is omitted with a warning
 });
 
 mkdirSync(outDir, { recursive: true });

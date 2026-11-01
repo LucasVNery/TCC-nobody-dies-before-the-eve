@@ -1,25 +1,27 @@
 // tools/calibrate-v0.ts
 // Pilot calibration of the V0 agent styles (plan Task 6) against RAW BEHAVIOUR only.
 //
-//   npx vite-node tools/calibrate-v0.ts [--seed 1] [--runs 10] [--agents agressivo,evasivo]
+//   npx vite-node tools/calibrate-v0.ts [--seed 4242] [--runs 10] [--agents agressivo,evasivo] [--cap-ms 600000]
 //
 // Anti-objective (spec §2): this script never computes a profile dimension, Cliff's delta,
 // ICC, bootstrap interval or hypothesis verdict. It only counts what the agents did in the
 // log (player.action, obs.defense, pos.sample, opp.close, enemy.*, run.*), so the styles
 // are tuned on "does what its name says and produces enough data", never on separations.
-// The pilot seed defaults to 1, different from the experiment seed (20261019), so the
-// final experiment is not the calibration data.
+// The pilot seed defaults to 4242 and the official experiment seed is refused, so the
+// final experiment is never the calibration data. The run cap is DEFAULT_EXPERIMENT.runCapMs (10 min).
 import { ACTION_REGISTRY, WEAPON_IDS } from '../src/combat/actionRegistry';
 import { metricsFromLog } from '../src/debug/analysis/metricsAggregator';
 import type { LoggedEvent } from '../src/telemetry/schema';
 import { DEFAULT_EXPERIMENT, playAgent, type AgentLog, type ExperimentConfig } from '../src/experiments/v0/agentRunner';
 import { STYLE_IDS, type StyleId } from '../src/experiments/v0/styles';
 
-declare const process: { argv: string[] };
+declare const process: { argv: string[]; exit(code?: number): never };
 
 /** Distance (px, top-left to top-left = centre to centre) at or below which the pair is "in melee": the enemy's attack range. */
 const MELEE_PX = 60;
 const ACTION_IDS = [...ACTION_REGISTRY.keys()];
+/** Distance (px) above which the agent counts as "far" for the sprint figure (3x the melee range). */
+const FAR_PX = 3 * MELEE_PX;
 const DEFENSE_LABELS = ['dodge', 'block', 'parry', 'retreat'] as const;
 
 function arg(name: string): string | undefined {
@@ -65,6 +67,18 @@ export interface RawBehaviour {
   deaths: number;
   maxActionGapS: number;
   medianMaxActionGapS: number;
+  staminaDenied: number;
+  /** Fraction of pos.samples whose window spent sprint stamina (NaN without samples). */
+  sprintFrac: number;
+  /** Same, among samples with the enemy farther than FAR_PX. */
+  sprintFarFrac: number;
+  itemsSpawned: number;
+  itemsPicked: number;
+  itemsUsed: number;
+  enemyAttackStarts: number;
+  unmitigatedHits: number;
+  /** 1 - unmitigated hits / enemy attack starts (NaN without attacks). */
+  protectedFrac: number;
 }
 
 const median = (xs: number[]): number => {
@@ -118,6 +132,14 @@ export function rawBehaviour(log: AgentLog): RawBehaviour {
   const dists: number[] = [];
   let engagedSum = 0;
   let engagedN = 0;
+  let staminaDenied = 0;
+  let sprintSamples = 0;
+  let farSamples = 0;
+  let sprintFar = 0;
+  let itemsSpawned = 0;
+  let itemsPicked = 0;
+  let itemsUsed = 0;
+  let unmitigated = 0;
 
   for (const e of ev) {
     if (!inRun(e)) continue;
@@ -153,6 +175,21 @@ export function rawBehaviour(log: AgentLog): RawBehaviour {
       case 'enemy.attack_start':
         enemyAttacks++;
         break;
+      case 'player.stamina_denied':
+        staminaDenied++;
+        break;
+      case 'item.spawn':
+        itemsSpawned++;
+        break;
+      case 'item.pickup':
+        itemsPicked++;
+        break;
+      case 'item.use':
+        itemsUsed++;
+        break;
+      case 'player.hit_unmitigated':
+        unmitigated++;
+        break;
       case 'enemy.death':
         kills++;
         break;
@@ -164,6 +201,14 @@ export function rawBehaviour(log: AgentLog): RawBehaviour {
         distSum += d;
         dists.push(d);
         if (d <= MELEE_PX) melee++;
+        {
+          const sprinting = ((e.spent as { sprint?: number } | undefined)?.sprint ?? 0) > 0;
+          if (sprinting) sprintSamples++;
+          if (d > FAR_PX) {
+            farSamples++;
+            if (sprinting) sprintFar++;
+          }
+        }
         if (e.e_state === 'attacking' || e.e_state === 'recovering') {
           engagedSum += d;
           engagedN++;
@@ -214,6 +259,15 @@ export function rawBehaviour(log: AgentLog): RawBehaviour {
     deaths: log.completedRuns,
     maxActionGapS: Math.max(...list.map((x) => x.maxActionGapMs)) / 1000,
     medianMaxActionGapS: median(list.map((x) => x.maxActionGapMs / 1000)),
+    staminaDenied,
+    sprintFrac: samples > 0 ? sprintSamples / samples : NaN,
+    sprintFarFrac: farSamples > 0 ? sprintFar / farSamples : NaN,
+    itemsSpawned,
+    itemsPicked,
+    itemsUsed,
+    enemyAttackStarts: enemyAttacks,
+    unmitigatedHits: unmitigated,
+    protectedFrac: enemyAttacks > 0 ? Math.max(0, 1 - unmitigated / enemyAttacks) : NaN,
   };
 }
 
@@ -224,6 +278,14 @@ const oppCell = (o: Record<string, number>) => `${o.taken + o.missed + o.expired
 const row = (cells: (string | number)[]) => `| ${cells.join(' | ')} |`;
 
 function printTables(rows: RawBehaviour[]): void {
+  console.log('### Run outcome, stamina, sprint, items, protection\n');
+  console.log('Definitions: compl/trunc/empty = runs ended by death / that hit the cap / opened after the last death; denied = player.stamina_denied events; sprint = share of pos.sample windows that spent sprint stamina, overall and with the enemy farther than ' + FAR_PX + ' px; items = item.spawn / item.pickup / item.use events; protected = 1 - player.hit_unmitigated / enemy.attack_start (each combo hit and each lunge counts as one attack; dodge, block, parry and an attack that whiffed all count as protected).\n');
+  console.log(row(['style', 'compl', 'trunc', 'empty', 'stamina denied', 'sprint share', 'sprint share (far)', 'items spawned', 'picked', 'used', 'enemy attacks', 'unmitigated hits', 'protected']));
+  console.log(row(Array(13).fill('---')));
+  for (const r of rows) {
+    console.log(row([r.styleId, r.completed, r.truncated, r.empty, r.staminaDenied, pct(r.sprintFrac), pct(r.sprintFarFrac), r.itemsSpawned, r.itemsPicked, r.itemsUsed, r.enemyAttackStarts, r.unmitigatedHits, pct(r.protectedFrac)]));
+  }
+  console.log('');
   console.log('### Runs, cadence, space, data\n');
   console.log(row(['style', 'compl', 'trunc', 'empty', 'mean run s', 'median run s', 'min run s', 'actions/min', 'weapon changes/min', 'M2 mean dist px', 'median dist px', 'mean dist while enemy attacks/recovers px', 'in melee (<=60px)', 'attacks w/ enemy attacking', 'enemy attacks/min', 'rooms/run', 'kills/death', 'max action gap s (median of runs)']));
   console.log(row(Array(18).fill('---')));
@@ -267,10 +329,15 @@ function printTables(rows: RawBehaviour[]): void {
 }
 
 function main(): void {
-  const seed = Number(arg('seed') ?? 1);
+  const seed = Number(arg('seed') ?? 4242);
   const runs = Number(arg('runs') ?? 10);
+  if (seed === DEFAULT_EXPERIMENT.seed) {
+    console.error('calibrate-v0: refusing the official experiment seed; calibration uses test seeds only (default 4242)');
+    process.exit(2);
+  }
+  const capMs = Number(arg('cap-ms') ?? DEFAULT_EXPERIMENT.runCapMs);
   const agents = (arg('agents')?.split(',') as StyleId[] | undefined) ?? STYLE_IDS;
-  const cfg: ExperimentConfig = { ...DEFAULT_EXPERIMENT, seed, runsPerAgent: runs };
+  const cfg: ExperimentConfig = { ...DEFAULT_EXPERIMENT, seed, runsPerAgent: runs, runCapMs: capMs };
   const t0 = Date.now();
   const rows = agents.map((id) => rawBehaviour(playAgent(id, cfg, STYLE_IDS.indexOf(id))));
   console.log(`Pilot: seed ${seed}, ${runs} runs/agent, ${cfg.runsPerSession} runs/session, cap ${cfg.runCapMs / 1000} s, step ${cfg.stepMs.toFixed(2)} ms, wall ${((Date.now() - t0) / 1000).toFixed(1)} s\n`);

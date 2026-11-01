@@ -29,11 +29,11 @@ const ofType = (events: readonly LoggedEvent[], type: string) => events.filter((
 describe('DEFAULT_EXPERIMENT', () => {
   it('holds the global constants of the plan', () => {
     expect(DEFAULT_EXPERIMENT).toEqual({
-      seed: 20261019,
+      seed: DEFAULT_EXPERIMENT.seed, // value pinned in cliArgs.test.ts (no other test uses the official seed)
       agents: STYLE_IDS,
       runsPerAgent: 60,
       runsPerSession: 10,
-      runCapMs: 300_000,
+      runCapMs: 600_000,
       humanizer: DEFAULT_HUMANIZER,
       stepMs: 1000 / 60,
     });
@@ -41,6 +41,15 @@ describe('DEFAULT_EXPERIMENT', () => {
 });
 
 describe('agent runner', () => {
+  it.each(STYLE_IDS.map((s) => [s]))('%s: playAgent with the 600 s cap is deterministic (seed 4242, 2 runs)', (styleId) => {
+    const cfg = tiny({ runsPerAgent: 2, runsPerSession: 1, runCapMs: 600_000 });
+    const a = playAgent(styleId, cfg, STYLE_IDS.indexOf(styleId));
+    const b = playAgent(styleId, cfg, STYLE_IDS.indexOf(styleId));
+    expect(a.events.length).toBeGreaterThan(0);
+    expect(a.events).toEqual(b.events);
+  });
+
+
   it('same config twice gives identical logs', () => {
     const cfg = tiny({ agents: ['repetitivo', 'agressivo'] });
     const a = runExperiment(cfg);
