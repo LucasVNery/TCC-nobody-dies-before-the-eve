@@ -1,7 +1,8 @@
 // src/experiments/v0/evaluate.ts
 // Verdicts of the pre-registered hypotheses (spec §4.4) and ICC per dimension (spec §4.5).
 import type { SkillId } from '../../profile/types';
-import { HYPOTHESES, type Hypothesis } from './hypotheses';
+import { HYPOTHESES, M_HYPOTHESES, type Hypothesis } from './hypotheses';
+import type { RunMetricId, RunMetrics } from './runMetrics';
 import { bootstrapDelta, bootstrapIccClustered } from './stats';
 import { STYLE_IDS, type StyleId } from './styles';
 import { REPORT_SKILLS, roomWindowValues, runWindowValues, type WindowValue } from './windowValues';
@@ -159,6 +160,70 @@ function evaluateOne(
     undefinedRate: null,
     nRuns: null,
   };
+}
+
+/** Result of one M hypothesis: the P family 'greater' fields, with the metric instead of a skill. */
+export interface MHypothesisResult {
+  id: string;
+  metric: RunMetricId;
+  verdict: Verdict;
+  /** Cliff's delta (higher vs lower) and its bootstrap 95% interval; null when a side has no defined value. */
+  delta: number | null;
+  lo: number | null;
+  hi: number | null;
+  /** DEFINED (non-null) run values of each group. */
+  nHigher: number;
+  nLower: number;
+  /** Fraction of the group's runs with the metric null; null when the group has no run. */
+  undefinedRateHigher: number | null;
+  undefinedRateLower: number | null;
+}
+
+/**
+ * Evaluates M_HYPOTHESES in order with the P family 'greater' criterion:
+ * indefinida if either group has fewer than MIN_VALUES defined (non-null) run
+ * values; confirmada if the bootstrap 95% interval of Cliff's delta lies above
+ * 0 and delta >= MIN_DELTA; else refutada. A null value is undefined: never a
+ * value, counted only in the undefined rates. Feed it
+ * `prepareRunMetrics(logs).metrics` (empty runs dropped). The rng is consumed
+ * hypothesis by hypothesis, so a fixed seed is deterministic.
+ */
+export function evaluateMHypotheses(
+  metricsByStyle: Record<StyleId, readonly RunMetrics[]>,
+  rng: () => number,
+  B = 2000,
+): MHypothesisResult[] {
+  return M_HYPOTHESES.map((h) => {
+    const hi = metricGroup(metricsByStyle[h.higher], h.metric);
+    const lo = metricGroup(metricsByStyle[h.lower], h.metric);
+    const d = bootstrapDelta(hi.defined, lo.defined, rng, B);
+    let verdict: Verdict;
+    if (hi.defined.length < MIN_VALUES || lo.defined.length < MIN_VALUES) verdict = 'indefinida';
+    else if (d.estimate !== null && d.lo !== null && d.lo > 0 && d.estimate >= MIN_DELTA) verdict = 'confirmada';
+    else verdict = 'refutada';
+    return {
+      id: h.id,
+      metric: h.metric,
+      verdict,
+      delta: d.estimate,
+      lo: d.lo,
+      hi: d.hi,
+      nHigher: hi.defined.length,
+      nLower: lo.defined.length,
+      undefinedRateHigher: undefinedRate(hi),
+      undefinedRateLower: undefinedRate(lo),
+    };
+  });
+}
+
+function metricGroup(values: readonly RunMetrics[] | undefined, metric: RunMetricId): Group {
+  const runs = values ?? [];
+  const defined: number[] = [];
+  for (const r of runs) {
+    const v = r[metric];
+    if (v !== null && Number.isFinite(v)) defined.push(v);
+  }
+  return { runs: runs.length, defined, undefinedCount: runs.length - defined.length };
 }
 
 /**

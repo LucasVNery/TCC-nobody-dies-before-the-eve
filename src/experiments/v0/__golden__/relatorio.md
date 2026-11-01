@@ -112,3 +112,51 @@ Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem a
 - Runs vazias são descartadas (contadas só na seção 2).
 - Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.
 - As 13 hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/13).
+- A elite não adapta (peso fixo).
+
+## 7. Métricas de estamina e de itens por estilo
+
+Valores por run calculados com o mesmo acumulador do painel de análise (`WindowAccumulator`), sobre os eventos de cada run (runs vazias descartadas). Média e desvio-padrão amostral dos valores definidos; — marca o indefinido (sem amostra, ou total de gasto 0 nas participações).
+
+- `staminaSpentPerMinute`: gasto de estamina por minuto
+- `staminaHighFraction`: fração do tempo com estamina ≥ 80% (120 de 150)
+- `dodgeSpendShare`: participação da esquiva no gasto de estamina (dodge / total)
+- `blockSpendShare`: participação do bloqueio no gasto de estamina (block / total)
+- `itemPickRate`: taxa de coleta de itens (coletados / (coletados + expirados por tempo))
+
+| Estilo | Métrica | N runs | N definidos | Média | Desvio |
+| --- | --- | --- | --- | --- | --- |
+| agressivo | staminaSpentPerMinute | 3 | 3 | 120,000 | 30,000 |
+| agressivo | staminaHighFraction | 3 | 3 | 0,292 | 0,191 |
+| agressivo | dodgeSpendShare | 3 | 3 | 0,100 | 0,100 |
+| agressivo | blockSpendShare | 3 | 3 | 0,033 | 0,058 |
+| agressivo | itemPickRate | 3 | 2 | 0,750 | 0,354 |
+| evasivo | staminaSpentPerMinute | 3 | 2 | 52,750 | 10,253 |
+| evasivo | staminaHighFraction | 3 | 2 | 0,688 | 0,088 |
+| evasivo | dodgeSpendShare | 3 | 2 | 0,850 | 0,071 |
+| evasivo | blockSpendShare | 3 | 2 | 0,025 | 0,035 |
+| evasivo | itemPickRate | 3 | 2 | 0,750 | 0,354 |
+
+## 8. Família M (métricas novas)
+
+Unidade: valor da métrica por run (seção 7). Critério igual ao da família P: confirmada se o IC 95% bootstrap do delta de Cliff (maior vs menor) fica acima de 0 e delta ≥ 0,33; indefinida com menos de 10 valores definidos em algum grupo (valor indefinido = métrica sem amostra na run); refutada nos demais casos. A família M é palpite do Claude revisado pelo autor; hipótese refutada ou indefinida é resultado, não defeito.
+
+| Id | Métrica | Maior | Menor | Delta | IC 95% | N definidos (maior) | N definidos (menor) | Indef. maior | Indef. menor | Veredito |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| M1 | staminaSpentPerMinute | agressivo | bloqueador | 0,750 | [0,500; 1,000] | 12 | 11 | 0% | 25% | confirmada |
+| M5 | itemPickRate | evasivo | agressivo | — | — | 0 | 2 | 100% | 33% | indefinida |
+
+## 9. Reação por tipo de ataque (descritiva)
+
+Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes, então só se compara dentro de um mesmo tipo.
+
+| Estilo | Tipo de ataque | N reações | Média (ms) |
+| --- | --- | --- | --- |
+| agressivo | lunge | 1 | 400,0 |
+| agressivo | swing | 3 | 270,0 |
+| evasivo | charge | 1 | 610,0 |
+| evasivo | slam | 4 | 480,0 |
+
+## Apêndice A. Comparação com o piloto 0.0.3 (descritiva)
+
+Aviso: piloto 0.0.3 não encontrado; a comparação foi omitida.

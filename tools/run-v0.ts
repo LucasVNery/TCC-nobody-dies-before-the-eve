@@ -16,9 +16,10 @@ import { GAME_VERSION } from '../src/telemetry/schema';
 import { createPrng } from '../src/core/prng';
 import { DEFAULT_EXPERIMENT, mixSeed, runExperiment, type ExperimentConfig } from '../src/experiments/v0/agentRunner';
 import { defaultOutName, parseCliArgs } from '../src/experiments/v0/cliArgs';
-import { evaluateHypotheses, iccBySkill, prepareValues } from '../src/experiments/v0/evaluate';
+import { evaluateHypotheses, evaluateMHypotheses, iccBySkill, prepareValues } from '../src/experiments/v0/evaluate';
 import { checkAgentLog, type PipelineCheck } from '../src/experiments/v0/pipelineChecks';
 import { buildReport } from '../src/experiments/v0/report';
+import { prepareRunMetrics } from '../src/experiments/v0/runMetrics';
 import type { StyleId } from '../src/experiments/v0/styles';
 
 declare const process: { argv: string[]; exit(code?: number): never };
@@ -60,6 +61,9 @@ const prng = createPrng(mixSeed(cfg.seed, STREAM_ANALYSIS));
 const rng = (): number => prng.next();
 const hypotheses = evaluateHypotheses(runValues, rng);
 const icc = iccBySkill(roomValues, rng);
+// M family after the P family and the ICC, so their rng draws (and results) stay as before.
+const { metrics: runMetrics, reactions } = prepareRunMetrics(logs);
+const mHypotheses = evaluateMHypotheses(runMetrics, rng);
 const checks = {} as Record<StyleId, PipelineCheck[]>;
 for (const log of logs) checks[log.styleId] = checkAgentLog(log);
 const elapsedMs = Date.now() - started;
@@ -76,6 +80,10 @@ const files = buildReport({
   icc,
   checks,
   hypothesesReviewedBeforeFullRun: o.reviewedBefore,
+  runMetrics,
+  mHypotheses,
+  reactions,
+  // pilotVerdicts: the 0.0.3 pilot file is wired by the CLI in Task 6; absent, the appendix is omitted with a warning.
 });
 
 mkdirSync(outDir, { recursive: true });

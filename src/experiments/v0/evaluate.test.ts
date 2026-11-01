@@ -1,9 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { createPrng } from '../../core/prng';
 import type { SkillId } from '../../profile/types';
-import { HYPOTHESES } from './hypotheses';
+import { HYPOTHESES, M_HYPOTHESES } from './hypotheses';
 import { DEFAULT_EXPERIMENT, playAgent } from './agentRunner';
-import { dropEmptyRuns, evaluateHypotheses, iccBySkill, prepareValues, type HypothesisResult } from './evaluate';
+import {
+  MIN_VALUES,
+  dropEmptyRuns,
+  evaluateHypotheses,
+  evaluateMHypotheses,
+  iccBySkill,
+  prepareValues,
+  type HypothesisResult,
+  type MHypothesisResult,
+} from './evaluate';
+import type { RunMetrics } from './runMetrics';
 import { STYLE_IDS, type StyleId } from './styles';
 import { REPORT_SKILLS, runWindowValues, type WindowValue } from './windowValues';
 
@@ -442,5 +452,109 @@ describe('iccBySkill', () => {
     const b = iccBySkill(noisy, rngOf(4), 100);
     expect(b).toEqual(a);
     expect(a.find((r) => r.skill === 'distance')!.icc).not.toBeNull();
+  });
+});
+
+describe('M_HYPOTHESES', () => {
+  it('M1-M5 are pinned', () => {
+    expect(M_HYPOTHESES).toEqual([
+      { id: 'M1', metric: 'staminaSpentPerMinute', higher: 'agressivo', lower: 'bloqueador' },
+      { id: 'M2', metric: 'staminaHighFraction', higher: 'bloqueador', lower: 'agressivo' },
+      { id: 'M3', metric: 'dodgeSpendShare', higher: 'evasivo', lower: 'agressivo' },
+      { id: 'M4', metric: 'blockSpendShare', higher: 'bloqueador', lower: 'evasivo' },
+      { id: 'M5', metric: 'itemPickRate', higher: 'evasivo', lower: 'agressivo' },
+    ]);
+  });
+
+  it('the P family keeps its 13 items, untouched', () => {
+    expect(HYPOTHESES).toHaveLength(13);
+    expect(HYPOTHESES.map((h) => h.id)).toEqual(['H1', 'H1u', 'H2', 'H2u', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9', 'H10', 'H11']);
+  });
+});
+
+const rm = (runIdx: number, v: number | null): RunMetrics => ({
+  runIdx,
+  staminaSpentPerMinute: v,
+  staminaHighFraction: v,
+  dodgeSpendShare: v,
+  blockSpendShare: v,
+  itemPickRate: v,
+});
+
+/** n runs with every metric evenly spaced in [lo, hi]; the last `nulls` undefined. */
+function mRuns(n: number, lo: number, hi: number, nulls = 0): RunMetrics[] {
+  return Array.from({ length: n }, (_, i) => rm(i, i >= n - nulls ? null : lo + ((hi - lo) * i) / Math.max(1, n - 1)));
+}
+
+function mByStyle(over: Partial<Record<StyleId, RunMetrics[]>>): Record<StyleId, RunMetrics[]> {
+  const out = {} as Record<StyleId, RunMetrics[]>;
+  for (const s of STYLE_IDS) out[s] = over[s] ?? [];
+  return out;
+}
+
+const mResult = (rs: MHypothesisResult[], id: string): MHypothesisResult => {
+  const r = rs.find((x) => x.id === id);
+  if (!r) throw new Error(`no result ${id}`);
+  return r;
+};
+
+describe('evaluateMHypotheses', () => {
+  it('returns one result per M hypothesis, in order, with its metric', () => {
+    const rs = evaluateMHypotheses(mByStyle({}), rngOf(), 50);
+    expect(rs.map((r) => r.id)).toEqual(['M1', 'M2', 'M3', 'M4', 'M5']);
+    expect(rs.map((r) => r.metric)).toEqual(M_HYPOTHESES.map((h) => h.metric));
+    for (const r of rs) expect(r.verdict).toBe('indefinida');
+  });
+
+  it('two synthetically separated groups give confirmada (and the reverse refutada)', () => {
+    const rs = evaluateMHypotheses(
+      mByStyle({ agressivo: mRuns(12, 0.6, 0.9), bloqueador: mRuns(12, 0.1, 0.4), evasivo: mRuns(12, 0.6, 0.9) }),
+      rngOf(4242),
+      200,
+    );
+    const m1 = mResult(rs, 'M1'); // agressivo > bloqueador
+    expect(m1.verdict).toBe('confirmada');
+    expect(m1.delta).toBe(1);
+    expect(m1.lo).not.toBeNull();
+    expect(m1.nHigher).toBe(12);
+    expect(m1.nLower).toBe(12);
+    expect(mResult(rs, 'M2').verdict).toBe('refutada'); // bloqueador > agressivo, but it is lower
+    expect(mResult(rs, 'M4').verdict).toBe('refutada');
+  });
+
+  it('fewer than MIN_VALUES defined values gives indefinida', () => {
+    const rs = evaluateMHypotheses(
+      mByStyle({ agressivo: mRuns(MIN_VALUES - 1, 0.6, 0.9), bloqueador: mRuns(12, 0.1, 0.4) }),
+      rngOf(4242),
+      50,
+    );
+    expect(mResult(rs, 'M1').verdict).toBe('indefinida');
+    const lowShort = evaluateMHypotheses(
+      mByStyle({ agressivo: mRuns(12, 0.6, 0.9), bloqueador: mRuns(MIN_VALUES - 1, 0.1, 0.4) }),
+      rngOf(4242),
+      50,
+    );
+    expect(mResult(lowShort, 'M1').verdict).toBe('indefinida');
+  });
+
+  it('null counts as undefined: not a value, and reported in the undefined rates', () => {
+    // 12 runs each, 3 of the higher group null: 9 defined < MIN_VALUES
+    const rs = evaluateMHypotheses(
+      mByStyle({ agressivo: mRuns(12, 0.6, 0.9, 3), bloqueador: mRuns(12, 0.1, 0.4, 6) }),
+      rngOf(4242),
+      50,
+    );
+    const m1 = mResult(rs, 'M1');
+    expect(m1.verdict).toBe('indefinida');
+    expect(m1.nHigher).toBe(9);
+    expect(m1.nLower).toBe(6);
+    expect(m1.undefinedRateHigher).toBe(3 / 12);
+    expect(m1.undefinedRateLower).toBe(6 / 12);
+    for (const r of rs) for (const v of Object.values(r)) if (typeof v === 'number') expect(Number.isNaN(v)).toBe(false);
+  });
+
+  it('is deterministic for a fixed seed', () => {
+    const input = mByStyle({ agressivo: mRuns(12, 0.3, 0.9), bloqueador: mRuns(12, 0.1, 0.7), evasivo: mRuns(11, 0.2, 0.8) });
+    expect(evaluateMHypotheses(input, rngOf(4242), 100)).toEqual(evaluateMHypotheses(input, rngOf(4242), 100));
   });
 });
