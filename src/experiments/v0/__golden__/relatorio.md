@@ -113,6 +113,10 @@ Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem a
 - Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.
 - As 13 hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/13).
 - A elite não adapta (peso fixo).
+- Humanizador igual para todos os estilos: o mesmo atraso de reação, os mesmos lapsos e o mesmo ruído de mira.
+- O *perfect dodge* depende do ruído do humanizador, não de habilidade.
+- As hipóteses da família P (H1…H11, H1u, H2u; 13 itens) já foram vistas na 0.0.3; a V0.1 não as trata como novas (o registro não muda).
+- A dimensão de itens (aproveitamento de itens, candidata à sétima dimensão) fica fora do perfil; só depois destes dados.
 
 ## 7. Métricas de estamina e de itens por estilo
 

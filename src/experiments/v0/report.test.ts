@@ -514,6 +514,22 @@ describe('buildReport: V0.1 sections (M family, stamina/items, reactions, pilot 
     expect(rows).toHaveLength(13);
   });
 
+  it('the spec §4.5 limitation bullets are always in section 6, with or without the pilot file', () => {
+    const bullets = [
+      '- A elite não adapta (peso fixo).',
+      '- Política estacionária',
+      '- Humanizador igual para todos os estilos',
+      '- O *perfect dodge* depende do ruído do humanizador, não de habilidade.',
+      '- As hipóteses da família P (H1…H11, H1u, H2u; 13 itens) já foram vistas na 0.0.3; a V0.1 não as trata como novas',
+      '- A dimensão de itens (aproveitamento de itens, candidata à sétima dimensão) fica fora do perfil; só depois destes dados.',
+    ];
+    for (const pilotVerdicts of [undefined, null, { H3: 'refutada' as const }]) {
+      const md = buildReport(smallInput({ pilotVerdicts }))['relatorio.md'];
+      const limits = md.split('\n## 6. Limitações\n')[1].split('\n## ')[0];
+      for (const b of bullets) expect(limits, `${String(pilotVerdicts)}: ${b}`).toContain(b);
+    }
+  });
+
   it('pilot appendix: omitted with a warning (no throw) when pilotVerdicts is absent', () => {
     for (const pilotVerdicts of [undefined, null]) {
       const md = buildReport(smallInput({ pilotVerdicts }))['relatorio.md'];
