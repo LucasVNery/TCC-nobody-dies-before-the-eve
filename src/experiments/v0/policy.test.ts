@@ -1066,3 +1066,35 @@ describe('AgentPolicy items: use and seeking (V0.1 Task 4)', () => {
     });
   });
 });
+
+describe('AgentPolicy run restart (final review)', () => {
+  it('a lagged seen observation from the previous run does not queue a defence in the new run', () => {
+    const cfg: HumanizerConfig = { reactionMeanMs: 50, reactionSdMs: 1, lapseProb: 0, aimNoiseRad: 0 };
+    const base = AGENT_STYLES.bloqueador;
+    const style: AgentStyle = {
+      ...base,
+      actionWeights: Object.fromEntries(Object.entries(base.actionWeights).filter(([k]) => !k.endsWith('.charged'))),
+      defenseWeights: { dodge: 1, block: 0, parry: 0, none: 0 },
+    };
+    const body = { weapon: 'sword_shield', blocking: false };
+    const run = (seenRunIdx: number): boolean => {
+      const p = makePolicy('bloqueador', 4242, cfg, style);
+      const calm = (t: number, runIdx: number): Observation => ({ ...obsOf(t, { enemyState: 'idle', offset: { x: 200, y: 0 } }, body), runIdx });
+      for (let i = 0; i < 5; i++) p.decide({ now: calm(i * STEP, 0), seen: calm(i * STEP, 0), nowMs: i * STEP });
+      let defended = false;
+      for (let i = 5; i < 60; i++) {
+        const t = i * STEP;
+        const tel: Observation['telegraph'] = { kind: 'swing', progress: 0.1 };
+        const seen: Observation = {
+          ...obsOf(t - PERCEPTION_LAG_MS, { enemyState: 'attacking', offset: { x: 60, y: 0 }, telegraph: tel }, body),
+          runIdx: seenRunIdx,
+        };
+        const now: Observation = { ...obsOf(t, { enemyState: 'idle', offset: { x: 200, y: 0 } }, body), runIdx: 1 };
+        if (isDefense(p.decide({ now, seen, nowMs: t }))) defended = true;
+      }
+      return defended;
+    };
+    expect(run(1)).toBe(true); // control: a current-run telegraph is defended
+    expect(run(0)).toBe(false); // ghost from the previous run: ignored
+  });
+});

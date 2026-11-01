@@ -163,7 +163,9 @@ export class AgentPolicy {
     return this._lastPlannedDefense;
   }
 
-  decide({ now, seen, nowMs }: PolicyInput): AgentIntent {
+  decide({ now, seen: seenIn, nowMs }: PolicyInput): AgentIntent {
+    // a lagged observation from the previous run (a restart within the perception lag) is not this run's world
+    const seen = seenIn !== null && seenIn.runIdx !== now.runIdx ? null : seenIn;
     if (now.equippedWeaponId !== this.lastEquipped) {
       if (this.lastEquipped !== null) this.weaponReadyAt = nowMs + SWITCH_RECOVERY_MS;
       this.lastEquipped = now.equippedWeaponId;
