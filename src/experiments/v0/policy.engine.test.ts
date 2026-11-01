@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { createPrng } from '../../core/prng';
 import { ACTION_REGISTRY } from '../../combat/actionRegistry';
 import { makeBotStack } from '../../telemetry/testing/scriptedBot';
+import { Encounter } from '../../combat/encounter';
+import { primeElite } from '../../combat/testing/eliteTestKit';
 import { DEFAULT_HUMANIZER, Humanizer } from './humanizer';
 import { PerceptionBuffer, observe } from './perception';
-import { AGENT_STYLES, type StyleId } from './styles';
+import { AGENT_STYLES, type AgentStyle, type StyleId } from './styles';
 import { AgentPolicy, PERCEPTION_LAG_MS } from './policy';
 
 const STEP = 1000 / 60;
@@ -69,6 +71,121 @@ function play(id: StyleId, seed: number, ms: number) {
   }
   return { chargedStarts, chargedFired, rejected, earlyRelease, bothOnOneTick };
 }
+
+/**
+ * Pattern scenarios on the real Encounter (Task 2). The elite is primed past its opening delay; the lunge and
+ * the long charge also get their cooldowns served (test-only, the same idea as primeElite). Each attempt runs
+ * until the pattern is over (the elite is recovering) and records, per strike, whether the player took damage.
+ */
+type Pattern = 'swing' | 'lunge' | 'combo' | 'slam' | 'charge';
+const SCENARIO_SEED = 4242;
+const PLAYER_AT = { x: 800, y: 600 };
+const ENEMY_OFFSET: Record<Pattern, number> = { swing: 40, combo: 40, slam: 40, lunge: 200, charge: 400 };
+/** Dodge-only evasivo: the measure is the timing of the press, not the style's choice among defences. */
+const DODGER: AgentStyle = { ...AGENT_STYLES.evasivo, defenseWeights: { dodge: 1, block: 0, parry: 0, none: 0 } };
+const NO_LAPSE = { ...DEFAULT_HUMANIZER, lapseProb: 0 };
+
+function freshEncounter(pattern: Pattern, eliteSeed: number): Encounter {
+  const encounter = new Encounter(
+    { x: PLAYER_AT.x, y: PLAYER_AT.y, width: 20, height: 20 },
+    { x: PLAYER_AT.x + ENEMY_OFFSET[pattern], y: PLAYER_AT.y, width: 20, height: 20 },
+  );
+  const a = encounter.assaltante;
+  primeElite(a);
+  const cooldowns = a as unknown as { lungeCooldownMs: number; chargeCooldownMs: number };
+  cooldowns.lungeCooldownMs = 0;
+  cooldowns.chargeCooldownMs = 0;
+  a.reseed(eliteSeed);
+  return encounter;
+}
+
+/** Elite seeds whose first draw at melee range is a plain swing (the weighted draw is random). */
+function swingSeeds(n: number): number[] {
+  const out: number[] = [];
+  for (let s = SCENARIO_SEED; out.length < n; s++) {
+    const e = freshEncounter('swing', s);
+    e.step(STEP);
+    if (e.assaltante.attackKind === 'swing') out.push(s);
+  }
+  return out;
+}
+
+interface Attempt {
+  /** One entry per strike (combo: two), true when that strike did no damage. */
+  strikesClean: boolean[];
+  /** Per strike: a dodge was credited by the engine (i-frames covered the strike). */
+  strikesDodged: boolean[];
+  dodgesPressed: number;
+}
+
+function attempt(pattern: Pattern, k: number, eliteSeed: number): Attempt {
+  const encounter = freshEncounter(pattern, eliteSeed);
+  const a = encounter.assaltante;
+  if (pattern === 'combo' || pattern === 'slam') a.beginPattern(pattern, encounter.player.position);
+  const seed = SCENARIO_SEED + k;
+  const policy = new AgentPolicy(DODGER, new Humanizer(NO_LAPSE, createPrng(seed).next), createPrng(seed + 1).next);
+  const buffer = new PerceptionBuffer();
+  let strike = 0;
+  const hurtByStrike = [false, false];
+  let started = false;
+  let dodgesPressed = 0;
+  const dodgedByStrike = [false, false];
+  encounter.bus.on('enemy.attack_start', (e) => {
+    started = true;
+    strike = e.hit === 2 ? 1 : 0;
+  });
+  encounter.bus.on('player.hurt', () => (hurtByStrike[strike] = true));
+  encounter.bus.on('player.defense', (e) => {
+    if (e.label === 'dodge') dodgedByStrike[strike] = true;
+  });
+  if (a.state === 'attacking') started = true;
+  for (let i = 0; i < Math.round(4000 / STEP); i++) {
+    const t = i * STEP;
+    const now = observe(encounter, t, 0);
+    buffer.push(now);
+    const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
+    const p = encounter.player;
+    p.setMoveInput(intent.move.x, intent.move.y);
+    p.setSprint(intent.sprint === true);
+    p.setAimDirection(intent.aim);
+    if (intent.switchTo) p.switchWeapon(intent.switchTo);
+    if (intent.block === 'start') p.startBlock();
+    if (intent.block === 'stop') p.stopBlock();
+    if (intent.dodge) {
+      dodgesPressed++;
+      p.tryDodge();
+    }
+    if (intent.startAction) p.tryAction(intent.startAction);
+    if (intent.release) p.releaseAction();
+    encounter.step(STEP);
+    if (started && a.state === 'recovering') break;
+  }
+  expect(started, `${pattern}#${k}`).toBe(true);
+  const strikes = pattern === 'combo' ? 2 : 1;
+  return {
+    strikesClean: hurtByStrike.slice(0, strikes).map((h) => !h),
+    strikesDodged: dodgedByStrike.slice(0, strikes),
+    dodgesPressed,
+  };
+}
+
+describe('AgentPolicy defends every elite pattern on the real engine (Task 2, seed 4242)', () => {
+  const N = 20;
+  const swings = swingSeeds(N);
+  it.each(['swing', 'lunge', 'combo', 'slam', 'charge'] as Pattern[])('%s: a lapse-free dodger takes no damage in >= 60%% of 20 tries per strike', (pattern) => {
+    const runs = Array.from({ length: N }, (_, k) => attempt(pattern, k, pattern === 'swing' ? swings[k] : SCENARIO_SEED + k));
+    const strikes = pattern === 'combo' ? 2 : 1;
+    const pressed = runs.reduce((n, r) => n + r.dodgesPressed, 0);
+    for (let s = 0; s < strikes; s++) {
+      const clean = runs.filter((r) => r.strikesClean[s]).length / N;
+      const dodged = runs.filter((r) => r.strikesDodged[s]).length / N;
+      console.log(`[task2] ${pattern}${strikes > 1 ? ` hit ${s + 1}` : ''}: no damage ${(clean * 100).toFixed(0)}%, dodge credited ${(dodged * 100).toFixed(0)}% (presses ${pressed})`);
+      expect(clean, `${pattern} strike ${s + 1}`).toBeGreaterThanOrEqual(0.6);
+      // the defence is the dodge (not only walking away): the engine credits it on most strikes
+      expect(dodged, `${pattern} strike ${s + 1} dodged`).toBeGreaterThanOrEqual(0.6);
+    }
+  });
+});
 
 describe('AgentPolicy on the real engine', () => {
   it.each(['agressivo', 'aleatorio'] as StyleId[])('%s: the policy wastes no charged start in 3 min of play', (id) => {

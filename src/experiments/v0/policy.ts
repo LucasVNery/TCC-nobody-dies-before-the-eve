@@ -1,13 +1,13 @@
 import type { EnemyState, Vec2 } from '../../combat/types';
 import { ACTION_REGISTRY, lockedMs, type ActionDef } from '../../combat/actionRegistry';
 import { DODGE, PARRY_WINDOW_MS, STAGGER_MS, SWITCH_RECOVERY_MS } from '../../combat/actionDefs';
-import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
-import { SWING_MS } from '../../combat/assaltanteController';
+import type { AttackKind } from '../../combat/eliteDefs';
 import { ARENA_BOUNDS } from '../../combat/movementDefs';
 import { STAMINA_COST } from '../../combat/stamina';
 import { MIN_REACTION_MS, type Humanizer } from './humanizer';
 import type { Observation } from './perception';
 import type { AgentStyle, DefenseWeights } from './styles';
+import { strikeDelayMs } from './threatTiming';
 
 /**
  * Lag the runner should use for `seen` (buffer.at(nowMs, PERCEPTION_LAG_MS)).
@@ -23,22 +23,10 @@ import type { AgentStyle, DefenseWeights } from './styles';
  */
 export const PERCEPTION_LAG_MS = MIN_REACTION_MS;
 
-/**
- * What a player learns by playing (not read from the enemy's code): a swing lands about this long after
- * its telegraph becomes visible. Imported from the owner (eliteDefs), never copied.
- */
-const SEEN_TELEGRAPH_MS = ELITE_TELEGRAPH_MS.swing;
 /** A press aims to land this long before the strike: inside the dodge i-frames, and in the middle of the parry window. */
-const PRESS_LEAD_MS = PARRY_WINDOW_MS / 2;
-/**
- * The agent only sees the enemy state, not the pattern. A swing is over this long after its telegraph became
- * visible; an enemy still 'attacking' beyond it is mid-combo, so the second strike is treated as a fresh threat.
- * (A slam, which also stays 'attacking' past this point, is read the same way: one defence press that comes
- * late for it. Not distinguishing them is accepted until V0.1.)
- */
-const SWING_CYCLE_MS = SEEN_TELEGRAPH_MS + SWING_MS;
+export const PRESS_LEAD_MS = PARRY_WINDOW_MS / 2;
 /** Dodge/parry timing error = (difference of two reaction draws) x this scale. */
-const PRESS_JITTER_SCALE = 0.75;
+export const PRESS_JITTER_SCALE = 0.75;
 /** Guard is held at least this long once raised. */
 const MIN_BLOCK_HOLD_MS = 100;
 /** Slack added to an action's reach (about half an entity) when deciding it can hit. */
@@ -84,6 +72,12 @@ interface Plan {
   plannedAt: number;
 }
 
+/** One planned defence press (one per seen strike), due at `at` (ms, the policy's clock). */
+interface PendingDefense {
+  kind: Exclude<DefenseKind, 'none'>;
+  at: number;
+}
+
 function pick<K extends string>(weights: Record<K, number>, keys: readonly K[], rng: () => number): K | null {
   let total = 0;
   for (const k of keys) total += Math.max(0, weights[k] ?? 0);
@@ -111,9 +105,10 @@ const ACTIONS: readonly ActionDef[] = [...ACTION_REGISTRY.values()];
 export class AgentPolicy {
   private readonly weaponKeys: readonly string[];
   private prevSeenState: EnemyState | null = null;
-  /** seen.tMs at which the current 'attacking' stretch started, and whether its follow-up threat was already planned. */
-  private attackSeenSince = 0;
-  private followUpPlanned = false;
+  /** Telegraph of the previous seen instant (kind and combo strike): a different one is a new threat. */
+  private prevTelegraph: { kind: AttackKind; hit?: 1 | 2 } | null = null;
+  /** tMs of the last seen instant whose events were read: a repeated instant (hit-stop) is not read twice. */
+  private lastSeenTMs = -Infinity;
   private weaponId: string | null = null;
   private lastSwitchCheckAt = 0;
   private plan: Plan | null = null;
@@ -126,7 +121,8 @@ export class AgentPolicy {
   private lastRunIdx: number | null = null;
   private lastStamina: number | null = null;
   private lastBlocking = false;
-  private pending: { kind: Exclude<DefenseKind, 'none'>; at: number } | null = null;
+  /** Planned presses, earliest first; a combo's two strikes each keep their own. */
+  private pending: PendingDefense[] = [];
   private wantBlock = false;
   private blockSince = 0;
   private openingAt: number | null = null;
@@ -159,7 +155,8 @@ export class AgentPolicy {
 
     if (!seen || seen.enemyDead) {
       this.prevSeenState = null;
-      this.pending = null;
+      this.prevTelegraph = null;
+      this.pending = [];
       this.wantBlock = false;
       this.openingAt = null;
       if (now.isBlocking) intent.block = 'stop';
@@ -167,20 +164,25 @@ export class AgentPolicy {
     }
 
     const st = seen.enemyState;
-    if (st === 'attacking' && this.prevSeenState !== 'attacking') {
-      this.attackSeenSince = seen.tMs;
-      this.followUpPlanned = false;
-      this.planDefense(seen.tMs, ELITE_TELEGRAPH_MS.swing);
-    } else if (st === 'attacking' && !this.followUpPlanned && seen.tMs - this.attackSeenSince > SWING_CYCLE_MS) {
-      // still attacking after a whole swing: the combo's second strike winds up now
-      this.followUpPlanned = true;
-      this.planDefense(this.attackSeenSince + SWING_CYCLE_MS, ELITE_TELEGRAPH_MS.combo);
+    if (seen.tMs > this.lastSeenTMs) {
+      // events are read once per seen instant: a frozen step that repeats an instant adds nothing
+      this.lastSeenTMs = seen.tMs;
+      const tg = seen.telegraph;
+      const prev = this.prevTelegraph;
+      if (tg !== null && (prev === null || prev.kind !== tg.kind || prev.hit !== tg.hit)) {
+        // a new telegraph (or the combo's second strike): plan against the strike it announces
+        const seenDist = Math.hypot(seen.enemyPos.x - seen.playerPos.x, seen.enemyPos.y - seen.playerPos.y);
+        this.planDefense(seen.tMs, strikeDelayMs(tg, seenDist));
+      }
+      this.prevTelegraph = tg === null ? null : { kind: tg.kind, hit: tg.hit };
+      // no telegraph and no attack under way (a charge that stopped at a wall): no strike is coming
+      if (tg === null && st !== 'attacking' && st !== 'lunging') this.pending = [];
+      if (st !== 'recovering') this.openingAt = null;
+      else if (this.prevSeenState !== 'recovering' && this.style.waitForOpening) {
+        this.openingAt = seen.tMs + this.humanizer.sampleReactionMs();
+      }
+      this.prevSeenState = st;
     }
-    if (st !== 'recovering') this.openingAt = null;
-    else if (this.prevSeenState !== 'recovering' && this.style.waitForOpening) {
-      this.openingAt = seen.tMs + this.humanizer.sampleReactionMs();
-    }
-    this.prevSeenState = st;
 
     const dx = seen.enemyPos.x - now.playerPos.x;
     const dy = seen.enemyPos.y - now.playerPos.y;
@@ -190,19 +192,20 @@ export class AgentPolicy {
     intent.aim = this.aim;
 
     let dodgeNow = false;
-    if (this.pending && nowMs >= this.pending.at && this.chargeAction?.charge && nowMs - this.lastAttackAt >= this.chargeAction.charge.minHoldMs) {
+    const due = this.pending[0];
+    if (due && nowMs >= due.at && this.chargeAction?.charge && nowMs - this.lastAttackAt >= this.chargeAction.charge.minHoldMs) {
       // a defence falls due mid-charge with the charge already valid: fire it, defend right after.
       // When a defence falls due while a valid charge (held >= minHoldMs) is in progress the charge
       // fires first and the defence runs after its locked phase, up to ~11 ticks (~183 ms) late for
       // heavy_weapon charges and ~9 ticks (~150 ms) for sword_shield — accepted as commitment to the
       // attack; the reaction-delay guarantee holds only when no valid charge is in progress.
       this.releaseCharge(intent, nowMs);
-      this.pending.at = this.lockedUntil;
+      due.at = this.lockedUntil;
     }
-    if (this.pending && nowMs >= this.pending.at) {
+    if (due && nowMs >= due.at) {
       // A player sees the stamina bar: a defence the bar cannot pay for is not pressed (the engine would
       // deny it). A dodge falls back to the guard when there is any stamina, otherwise nothing.
-      let kind: Exclude<DefenseKind, 'none'> | 'none' = this.pending.kind;
+      let kind: Exclude<DefenseKind, 'none'> | 'none' = due.kind;
       if (kind === 'dodge' && now.playerStamina < STAMINA_COST.dodge) kind = now.playerStamina > 0 ? 'block' : 'none';
       if ((kind === 'block' || kind === 'parry') && now.playerStamina <= 0) kind = 'none';
       if (kind === 'dodge') {
@@ -220,11 +223,11 @@ export class AgentPolicy {
         if (!this.wantBlock) this.blockSince = nowMs;
         this.wantBlock = true;
       }
-      this.pending = null;
+      this.pending.shift();
     }
     // an empty bar cannot raise the guard; a guard already up is released by the min-hold rule below
     if (this.wantBlock && !now.isBlocking && now.playerStamina <= 0) this.wantBlock = false;
-    if (this.wantBlock && st !== 'attacking' && nowMs - this.blockSince >= MIN_BLOCK_HOLD_MS) this.wantBlock = false;
+    if (this.wantBlock && st !== 'attacking' && st !== 'lunging' && nowMs - this.blockSince >= MIN_BLOCK_HOLD_MS) this.wantBlock = false;
     if (this.wantBlock && !now.isBlocking) intent.block = 'start';
     else if (!this.wantBlock && now.isBlocking) intent.block = 'stop';
 
@@ -238,7 +241,7 @@ export class AgentPolicy {
       nowMs < this.lockedUntil ||
       this.wantBlock ||
       now.isBlocking ||
-      this.pending !== null ||
+      this.pending.length > 0 ||
       dodgeNow;
     const reachOk = dist <= plan.action.reach + REACH_SLACK_PX;
     const opening =
@@ -257,10 +260,12 @@ export class AgentPolicy {
       }
     }
 
-    // movement
+    // movement. A lunge on screen (aiming or charging) is not walked into: the press was timed on the
+    // distance at which its corridor appeared, and closing in would bring the strike forward.
+    const holdGround = st === 'lunging';
     if (dodgeNow) intent.move = this.retreat(now.playerPos, dir);
-    else if (approach) intent.move = dir;
-    else if (dist > this.style.preferredDistance + this.style.distanceTolerance) intent.move = dir;
+    else if (approach && !holdGround) intent.move = dir;
+    else if (!holdGround && dist > this.style.preferredDistance + this.style.distanceTolerance) intent.move = dir;
     else if (dist < this.style.preferredDistance - this.style.distanceTolerance) intent.move = this.retreat(now.playerPos, dir);
     return intent;
   }
@@ -279,7 +284,9 @@ export class AgentPolicy {
         this.chargeAction = null;
         this.lockedUntil = -Infinity;
         this.wantBlock = false;
-        this.pending = null;
+        this.pending = [];
+        this.lastSeenTMs = -Infinity;
+        this.prevTelegraph = null;
       } else if (now.playerHp < this.lastHp || (this.lastBlocking && now.playerStamina <= 0 && this.lastStamina > 0)) {
         this.chargeReleaseAt = null;
         this.chargeAction = null;
@@ -301,22 +308,23 @@ export class AgentPolicy {
   }
 
   /**
-   * Plans the defence against a strike landing `telegraphMs` after the threat became visible at `threatSeenAtMs`.
-   * Dodge and parry aim the press PRESS_LEAD_MS before the strike (+- noise), never sooner than the reaction
-   * delay; the plain guard goes up as soon as the agent reacts.
+   * Plans the defence against a strike landing `delayMs` after its telegraph became visible at
+   * `threatSeenAtMs`. Dodge and parry aim the press PRESS_LEAD_MS before the strike (+- noise), never sooner
+   * than the reaction delay; the plain guard goes up as soon as the agent reacts. Each strike gets its own
+   * press: an earlier one still pending (combo strike 1) is kept, not replaced.
    */
-  private planDefense(threatSeenAtMs: number, telegraphMs: number): void {
+  private planDefense(threatSeenAtMs: number, delayMs: number): void {
     const kind = pick(this.style.defenseWeights, DEFENSE_KINDS, this.rng) ?? 'none';
     this._lastPlannedDefense = kind;
-    this.pending = null;
     if (kind === 'none' || this.humanizer.lapses()) return;
     const reaction = this.humanizer.sampleReactionMs();
     let at = threatSeenAtMs + reaction;
     if (kind === 'parry' || kind === 'dodge') {
       const jitter = (this.humanizer.sampleReactionMs() - this.humanizer.sampleReactionMs()) * PRESS_JITTER_SCALE;
-      at = threatSeenAtMs + Math.max(reaction, telegraphMs - PRESS_LEAD_MS + jitter);
+      at = threatSeenAtMs + Math.max(reaction, delayMs - PRESS_LEAD_MS + jitter);
     }
-    this.pending = { kind, at };
+    this.pending.push({ kind, at });
+    this.pending.sort((a, b) => a.at - b.at);
   }
 
   private startAttack(intent: AgentIntent, plan: Plan, nowMs: number): void {
