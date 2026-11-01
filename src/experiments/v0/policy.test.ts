@@ -1008,6 +1008,14 @@ describe('AgentPolicy items: use and seeking (V0.1 Task 4)', () => {
     expect(uses(log2)).toHaveLength(0);
   });
 
+  it('the random control does not use power at attack start (only at random)', () => {
+    const steps = Math.round(6000 / STEP);
+    const log = driveItems(makePolicy('aleatorio', 4242), steps, cycleWorld(30), { heldItem: 'power' });
+    const attacks = log.filter((s) => s.intent.startAction).length;
+    expect(attacks).toBeGreaterThan(4);
+    expect(uses(log).length).toBeLessThan(attacks / 2);
+  });
+
   it('random uses whatever is in the slot at ~1/180 per tick, deterministically by seed', () => {
     const style = { ...AGENT_STYLES.aleatorio, itemUse: { ...AGENT_STYLES.aleatorio.itemUse, powerOnAttackStart: false } };
     const steps = Math.round(60_000 / STEP);

@@ -359,6 +359,7 @@ export class AgentPolicy {
     }
     const use = this.style.itemUse;
     if (use.random) {
+      // deliberately ungated by busy and by the reaction delay: a memoryless control, not a player model
       if (this.rng() < RANDOM_USE_PER_TICK) intent.useItem = true;
       return;
     }
@@ -391,6 +392,7 @@ export class AgentPolicy {
       const dy = g.pos.y - now.playerPos.y;
       const dist = Math.hypot(dx, dy);
       if (dist > ITEM_SEEK_RADIUS_PX) continue;
+      // kind + position on a 10 px grid: an item respawning on the same spot reuses the old decision (rare, accepted)
       const key = `${g.kind}:${Math.round(g.pos.x / ITEM_KEY_GRID_PX) * ITEM_KEY_GRID_PX}:${Math.round(g.pos.y / ITEM_KEY_GRID_PX) * ITEM_KEY_GRID_PX}`;
       let go = this.seekDecisions.get(key);
       if (go === undefined) {
@@ -441,7 +443,7 @@ export class AgentPolicy {
   private startAttack(intent: AgentIntent, plan: Plan, nowMs: number, held: Observation['heldItem']): void {
     intent.startAction = plan.action.id;
     intent.aim = this.humanizer.noisyAim(this.aim);
-    if (held === 'power' && this.style.itemUse.powerOnAttackStart) intent.useItem = true;
+    if (held === 'power' && this.style.itemUse.powerOnAttackStart && !this.style.itemUse.random) intent.useItem = true;
     this.lastAttackAt = nowMs;
     const charge = plan.action.charge;
     if (charge) {
