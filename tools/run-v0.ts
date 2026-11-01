@@ -4,6 +4,7 @@
 //   npx vite-node tools/run-v0.ts [--agents a,b,...] [--runs N] [--runs-per-session N]
 //                                 [--cap-ms N] [--seed N] [--out DIR] [--reviewed-before yes|no] [--pilot hipoteses.csv]
 //                                 [--smoke] [--full] [--force]
+//   For the V0.1 report pass --pilot experiments/v0/results/2026-10-21/hipoteses.csv (the 0.0.3 pilot verdicts).
 //
 // Argument parsing and validation are pure and tested (src/experiments/v0/cliArgs.ts). This is the
 // ONLY file of the experiment that touches node:fs / node:path, process.argv and the clock

@@ -7,7 +7,9 @@ import { RUN_METRIC_IDS, type RunMetricId, type RunMetrics, type RunReactions } 
 import { ICC_CRITERION, MIN_DELTA, MIN_VALUES, dropEmptyRuns } from './evaluate';
 import type { AgentLog, ExperimentConfig } from './agentRunner';
 import type { PipelineCheck } from './pipelineChecks';
-import { AGENT_STYLES, type StyleId } from './styles';
+import { AGENT_STYLES, type ItemUse, type StyleId } from './styles';
+import { ELITE_TELEGRAPH_MS } from '../../combat/eliteDefs';
+import { LONG_LUNGE, LUNGE } from '../../combat/movementDefs';
 import { REPORT_SKILLS, type WindowValue } from './windowValues';
 
 export interface ReportInput {
@@ -291,6 +293,12 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** Compact item-use rule for the configuration table. */
+function itemUseText(u: ItemUse): string {
+  if (u.random) return 'aleatório';
+  return `cura abaixo de ${short(u.healBelowHpFraction)} da vida; bomba a ${short(u.bombWithinPx)} px; poder ao iniciar ataque: ${u.powerOnAttackStart ? 'sim' : 'não'}`;
+}
+
 function markdown(
   input: ReportInput,
   logOf: (s: StyleId) => AgentLog | undefined,
@@ -325,15 +333,29 @@ function markdown(
     `- Runs por agente: ${config.runsPerAgent}; runs por sessão: ${config.runsPerSession}`,
     `- Gerado em: ${input.generatedAtIso}`,
     `- Tempo decorrido: ${Math.round(input.elapsedMs)} ms`,
-    `- Hipóteses H1–H11 e H1u, H2u (${HYPOTHESES.length} itens) pré-registradas; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
-    '- Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
-    '- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.',
+    `- Hipóteses da família P (H1–H11 e H1u, H2u; ${HYPOTHESES.length} itens) pré-registradas na 0.0.3; revisadas pelo autor ANTES da execução completa: ${reviewed}`,
+    '- Versão final do pré-registro da família P (revisão do autor em 2026-10-20, depois do piloto da 0.0.3 e antes da execução completa dela): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
+    `- Hipóteses da família M (M1–M5; ${M_HYPOTHESES.length} itens) e parâmetros finais dos estilos (tabela abaixo) revisados pelo autor ANTES da execução completa da V0.1: ${reviewed} (opção \`--reviewed-before\`, spec §4.4.3)`,
+    '- Divulgação: a revisão da família M e dos parâmetros veio DEPOIS de um piloto de calibração da V0.1 (seeds 4242–4244; a seed 20261105 não foi usada), no qual foram vistas as medianas descritivas por estilo e a definição (indefinido ou não) das métricas M; nenhum delta, intervalo ou veredito foi calculado. Ver `experiments/v0/calibration.md`.',
     `- Alterações nas hipóteses depois da primeira execução completa: ${changes.length === 0 ? 'nenhuma registrada' : changes.join('; ')}`,
     '',
     'Parâmetros dos estilos (pesos relativos; distâncias em px):',
     '',
     table(
-      ['Agente', 'Armas', 'Trocas/min', 'Ações', 'Cooldown (ms)', 'Distância ± tolerância', 'Defesa', 'Espera abertura'],
+      [
+        'Agente',
+        'Armas',
+        'Trocas/min',
+        'Ações',
+        'Cooldown (ms)',
+        'Distância ± tolerância',
+        'Defesa',
+        'Espera abertura',
+        'sprintApproach',
+        'staminaReserve',
+        'itemSeeking',
+        'Uso de item',
+      ],
       styles.map((s) => {
         const p = AGENT_STYLES[s];
         const d = p.defenseWeights;
@@ -346,9 +368,29 @@ function markdown(
           `${short(p.preferredDistance)} ± ${short(p.distanceTolerance)}`,
           `esquiva ${short(d.dodge)}; bloqueio ${short(d.block)}; parry ${short(d.parry)}; nada ${short(d.none)}`,
           p.waitForOpening ? 'sim' : 'não',
+          short(p.sprintApproach),
+          short(p.staminaReserve),
+          short(p.itemSeeking),
+          itemUseText(p.itemUse),
         ];
       }),
     ),
+    '',
+    '`sprintApproach` é a chance sorteada a cada trecho de aproximação (não a cada aproximação inteira); como os trechos se interrompem com frequência, a chance efetiva por aproximação inteira é maior que o parâmetro.',
+    '',
+    'Duração da telegraph por tipo de ataque (lida das definições de combate, em ms):',
+    '',
+    table(
+      ['Tipo no log', 'Telegraph (ms)', 'Observação'],
+      [
+        ['swing', md(ELITE_TELEGRAPH_MS.swing, 0), 'golpe'],
+        ['combo', `${md(ELITE_TELEGRAPH_MS.swing, 0)} (golpe 1); ${md(ELITE_TELEGRAPH_MS.combo, 0)} (golpe 2)`, 'o tipo `combo` do log mistura os golpes 1 e 2'],
+        ['lunge', `${md(LUNGE.telegraphMs, 0)} (curto); ${md(LONG_LUNGE.telegraphMs, 0)} (investida longa) + avanço`, 'o tipo `lunge` do log mistura o lunge curto e a investida longa'],
+        ['slam', md(ELITE_TELEGRAPH_MS.slam, 0), 'pancada'],
+      ],
+    ),
+    '',
+    'Como `combo` e `lunge` misturam duas durações de telegraph, a razão reação/telegraph por tipo (spec §9.4) não é exatamente derivável para esses dois tipos; para `swing` e `slam` ela é a reação média da seção 9 dividida pela telegraph da tabela.',
     '',
   );
 
@@ -505,7 +547,9 @@ function markdown(
     '- Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.',
     '- Runs vazias são descartadas (contadas só na seção 2).',
     '- Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.',
-    `- As ${HYPOTHESES.length} hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length}).`,
+    `- As ${HYPOTHESES.length + M_HYPOTHESES.length} hipóteses (${HYPOTHESES.length} da família P e ${M_HYPOTHESES.length} da família M) são testadas sem correção para comparações múltiplas (exploratório; com Bonferroni o alfa seria 0,05/${HYPOTHESES.length + M_HYPOTHESES.length}).`,
+    '- A família M é palpite do Claude revisado pelo autor.',
+    '- `sprintApproach` é a chance por trecho de aproximação e os trechos se interrompem com frequência: a chance efetiva por aproximação inteira excede o parâmetro.',
     '- A elite não adapta (peso fixo).',
     '- Humanizador igual para todos os estilos: o mesmo atraso de reação, os mesmos lapsos e o mesmo ruído de mira.',
     '- O *perfect dodge* depende do ruído do humanizador, não de habilidade.',
@@ -567,7 +611,7 @@ function markdown(
   out.push(
     '## 9. Reação por tipo de ataque (descritiva)',
     '',
-    'Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes, então só se compara dentro de um mesmo tipo.',
+    'Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes (tabela da seção 1), então só se compara dentro de um mesmo tipo; `combo` e `lunge` do log misturam duas durações cada (ver seção 1).',
     '',
     table(
       ['Estilo', 'Tipo de ataque', 'N reações', 'Média (ms)'],

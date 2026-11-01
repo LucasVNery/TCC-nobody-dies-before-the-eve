@@ -339,9 +339,13 @@ describe('buildReport', () => {
     expect(r(false)).toContain('execução completa: não\n');
     expect(r(null)).toContain('execução completa: não informado');
     expect(r(undefined)).toContain('execução completa: não informado');
-    expect(r(true)).toContain('Hipóteses H1–H11 e H1u, H2u (13 itens)');
+    expect(r(true)).toContain('Hipóteses da família P (H1–H11 e H1u, H2u; 13 itens)');
+    expect(r(true)).toContain('revisados pelo autor ANTES da execução completa da V0.1: sim');
+    expect(r(false)).toContain('revisados pelo autor ANTES da execução completa da V0.1: não ');
+    expect(r(null)).toContain('execução completa da V0.1: não informado');
+    expect(r(true)).toContain('seeds 4242–4244; a seed ');
     expect(r(true)).toContain(
-      'Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
+      'Versão final do pré-registro da família P (revisão do autor em 2026-10-20, depois do piloto da 0.0.3 e antes da execução completa dela): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.',
     );
   });
 

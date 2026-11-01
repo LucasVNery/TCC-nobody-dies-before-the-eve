@@ -570,8 +570,9 @@ The 10-run sweeps (4242/4243/4244) agree: 0 denied everywhere; evasivo 10/9/8 co
 - **Stamina spent per minute is large next to the 150 maximum.** Per-run `staminaSpentPerMinute`
   medians (seed 4242) lie between about 700 and 910 for every style (range over single runs about
   430–1230), so the bar turns over about 5–6 times a minute. No `null` and no `NaN` in this metric
-  or in the other three stamina M metrics in any run. Only this magnitude and the
-  definedness were looked at; no delta, interval or verdict.
+  or in the other three stamina M metrics in any run. Per-style medians and the definedness were
+  looked at (which reveals M1's ordering: agressivo highest, bloqueador lowest); no delta, interval
+  or verdict was computed.
 - **Agressivo's cadence lead is narrow.** 56.1 vs repetitivo 55.3 (seed 4242), 57.1 vs 53.1
   (4243), 56.0 vs 55.0 (4244). As in the 0.0.3 pilot, the walk-in is in the denominator, and
   session-level weapon draws move it (heavy weapon 100% of agressivo's actions in the seed-4242

@@ -10,17 +10,31 @@
 - Runs por agente: 2; runs por sessão: 1
 - Gerado em: 2026-10-19T12:00:00.000Z
 - Tempo decorrido: 4321 ms
-- Hipóteses H1–H11 e H1u, H2u (13 itens) pré-registradas; revisadas pelo autor ANTES da execução completa: sim
-- Versão final do pré-registro (revisão do autor em 2026-10-20, depois do piloto e antes da execução completa): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.
-- A revisão das hipóteses pelo autor aconteceu DEPOIS do piloto de calibração dos agentes.
+- Hipóteses da família P (H1–H11 e H1u, H2u; 13 itens) pré-registradas na 0.0.3; revisadas pelo autor ANTES da execução completa: sim
+- Versão final do pré-registro da família P (revisão do autor em 2026-10-20, depois do piloto da 0.0.3 e antes da execução completa dela): H1 recebeu a cláusula "ou indefinido"; H12 foi retirada por redundância com H2u.
+- Hipóteses da família M (M1–M5; 5 itens) e parâmetros finais dos estilos (tabela abaixo) revisados pelo autor ANTES da execução completa da V0.1: sim (opção `--reviewed-before`, spec §4.4.3)
+- Divulgação: a revisão da família M e dos parâmetros veio DEPOIS de um piloto de calibração da V0.1 (seeds 4242–4244; a seed 20261105 não foi usada), no qual foram vistas as medianas descritivas por estilo e a definição (indefinido ou não) das métricas M; nenhum delta, intervalo ou veredito foi calculado. Ver `experiments/v0/calibration.md`.
 - Alterações nas hipóteses depois da primeira execução completa: nenhuma registrada
 
 Parâmetros dos estilos (pesos relativos; distâncias em px):
 
-| Agente | Armas | Trocas/min | Ações | Cooldown (ms) | Distância ± tolerância | Defesa | Espera abertura |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| agressivo | sword_shield 0,8; heavy_weapon 0,2 | 0,5 | sword_shield.light 4; sword_shield.heavy 2; sword_shield.charged 1; heavy_weapon.light 3; heavy_weapon.heavy 1; heavy_weapon.charged 1 | 300 | 25 ± 10 | esquiva 0,1; bloqueio 0,05; parry 0; nada 0,85 | não |
-| evasivo | bow 0,65; sword_shield 0,35 | 2 | bow.shot 1; sword_shield.light 2; sword_shield.heavy 1 | 700 | 170 ± 30 | esquiva 0,85; bloqueio 0,05; parry 0; nada 0,1 | não |
+| Agente | Armas | Trocas/min | Ações | Cooldown (ms) | Distância ± tolerância | Defesa | Espera abertura | sprintApproach | staminaReserve | itemSeeking | Uso de item |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| agressivo | sword_shield 0,8; heavy_weapon 0,2 | 0,5 | sword_shield.light 4; sword_shield.heavy 2; sword_shield.charged 1; heavy_weapon.light 3; heavy_weapon.heavy 1; heavy_weapon.charged 1 | 300 | 25 ± 10 | esquiva 0,1; bloqueio 0,05; parry 0; nada 0,85 | não | 1 | 0 | 0,3 | cura abaixo de 0,5 da vida; bomba a 110 px; poder ao iniciar ataque: sim |
+| evasivo | bow 0,65; sword_shield 0,35 | 2 | bow.shot 1; sword_shield.light 2; sword_shield.heavy 1 | 700 | 170 ± 30 | esquiva 0,85; bloqueio 0,05; parry 0; nada 0,1 | não | 0,2 | 45 | 0,9 | cura abaixo de 0,5 da vida; bomba a 110 px; poder ao iniciar ataque: sim |
+
+`sprintApproach` é a chance sorteada a cada trecho de aproximação (não a cada aproximação inteira); como os trechos se interrompem com frequência, a chance efetiva por aproximação inteira é maior que o parâmetro.
+
+Duração da telegraph por tipo de ataque (lida das definições de combate, em ms):
+
+| Tipo no log | Telegraph (ms) | Observação |
+| --- | --- | --- |
+| swing | 450 | golpe |
+| combo | 450 (golpe 1); 320 (golpe 2) | o tipo `combo` do log mistura os golpes 1 e 2 |
+| lunge | 500 (curto); 650 (investida longa) + avanço | o tipo `lunge` do log mistura o lunge curto e a investida longa |
+| slam | 700 | pancada |
+
+Como `combo` e `lunge` misturam duas durações de telegraph, a razão reação/telegraph por tipo (spec §9.4) não é exatamente derivável para esses dois tipos; para `swing` e `slam` ela é a reação média da seção 9 dividida pela telegraph da tabela.
 
 ## 2. Perfil final por agente
 
@@ -111,7 +125,9 @@ Contagens por tipo de evento (todos os eventos do log de cada agente, em ordem a
 - Dados por sala desiguais entre agentes (o evasivo tem cerca de 10 vezes os dos outros); para os demais, por sala ≈ por run.
 - Runs vazias são descartadas (contadas só na seção 2).
 - Viés de seleção em defensive_repertoire (H5, H6): só entram runs com pelo menos 2 rótulos de defesa; o agressivo defende pouco, então o grupo medido pode não representar todas as suas runs.
-- As 13 hipóteses são testadas sem correção para comparações múltiplas (V0 exploratório; com Bonferroni o alfa seria 0,05/13).
+- As 18 hipóteses (13 da família P e 5 da família M) são testadas sem correção para comparações múltiplas (exploratório; com Bonferroni o alfa seria 0,05/18).
+- A família M é palpite do Claude revisado pelo autor.
+- `sprintApproach` é a chance por trecho de aproximação e os trechos se interrompem com frequência: a chance efetiva por aproximação inteira excede o parâmetro.
 - A elite não adapta (peso fixo).
 - Humanizador igual para todos os estilos: o mesmo atraso de reação, os mesmos lapsos e o mesmo ruído de mira.
 - O *perfect dodge* depende do ruído do humanizador, não de habilidade.
@@ -152,7 +168,7 @@ Unidade: valor da métrica por run (seção 7). Critério igual ao da família P
 
 ## 9. Reação por tipo de ataque (descritiva)
 
-Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes, então só se compara dentro de um mesmo tipo.
+Tempo do início do ataque do inimigo até a primeira esquiva dentro da janela de esquiva (`reaction.byKind` do painel), por tipo de ataque como registrado no log, somado sobre as runs e ponderado pelo número de reações. Descritiva, sem hipótese: as telegraphs têm durações diferentes (tabela da seção 1), então só se compara dentro de um mesmo tipo; `combo` e `lunge` do log misturam duas durações cada (ver seção 1).
 
 | Estilo | Tipo de ataque | N reações | Média (ms) |
 | --- | --- | --- | --- |
