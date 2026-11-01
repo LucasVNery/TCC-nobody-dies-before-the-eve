@@ -1,5 +1,7 @@
+import type { AttackKind } from '../../combat/eliteDefs';
 import type { Encounter } from '../../combat/encounter';
 import type { EnemyState, Vec2 } from '../../combat/types';
+import type { ItemKind } from '../../game/items';
 import type { ProfileSink } from '../../profile/profileSink';
 
 /** Exactly what a human player could see on screen at one instant. */
@@ -13,11 +15,21 @@ export interface Observation {
   isBlocking: boolean;
   equippedWeaponId: string;
   enemyDead: boolean;
+  /** Index of the run being played (the run counter is visible to a player; a change means a restart). */
+  runIdx: number;
+  /** The wind-up on screen (kind, progress 0..1, combo strike), or null outside any telegraph. */
+  telegraph: { kind: AttackKind; progress: number; hit?: 1 | 2 } | null;
+  /** The item in the slot, as the HUD shows it. */
+  heldItem: ItemKind | null;
+  /** Items lying on the map. */
+  groundItems: readonly { kind: ItemKind; pos: Vec2 }[];
+  isSprinting: boolean;
 }
 
 /** Reads only public, player-visible members; builds a fresh object with exactly the Observation keys. */
-export function observe(encounter: Encounter<ProfileSink>, tMs: number): Observation {
-  const { player, assaltante } = encounter;
+export function observe(encounter: Encounter<ProfileSink>, tMs: number, runIdx: number): Observation {
+  const { player, assaltante, items } = encounter;
+  const tg = assaltante.telegraph;
   const ep = assaltante.position;
   const pp = player.position;
   return {
@@ -31,6 +43,11 @@ export function observe(encounter: Encounter<ProfileSink>, tMs: number): Observa
     isBlocking: player.isBlocking,
     equippedWeaponId: player.equippedWeaponId,
     enemyDead: assaltante.isDead,
+    runIdx,
+    telegraph: tg ? (tg.hit === undefined ? { kind: tg.kind, progress: tg.progress } : { kind: tg.kind, progress: tg.progress, hit: tg.hit }) : null,
+    heldItem: items.held,
+    groundItems: items.onMap.map((m) => ({ kind: m.kind, pos: { x: m.pos.x, y: m.pos.y } })),
+    isSprinting: player.isSprinting,
   };
 }
 

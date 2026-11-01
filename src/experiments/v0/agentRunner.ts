@@ -110,8 +110,10 @@ function sessionWallClock(n: number): string {
 }
 
 /** Applies the intents in the order documented on AgentIntent. */
-function applyIntent(player: ReturnType<typeof createTelemetryStack>['encounter']['player'], intent: AgentIntent): void {
+export function applyIntent(encounter: ReturnType<typeof createTelemetryStack>['encounter'], intent: AgentIntent): void {
+  const player = encounter.player;
   player.setMoveInput(intent.move.x, intent.move.y);
+  player.setSprint(intent.sprint === true);
   player.setAimDirection(intent.aim);
   if (intent.switchTo) player.switchWeapon(intent.switchTo);
   if (intent.block === 'start') player.startBlock();
@@ -119,6 +121,7 @@ function applyIntent(player: ReturnType<typeof createTelemetryStack>['encounter'
   if (intent.dodge) player.tryDodge();
   if (intent.startAction) player.tryAction(intent.startAction);
   if (intent.release) player.releaseAction();
+  if (intent.useItem) encounter.useItem();
 }
 
 /**
@@ -190,9 +193,9 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
       // A hit-stop step does not advance the simulation (nor recorder.nowMs): the agent waits it out.
       if (!encounter.hitStop.active) {
         const t = recorder.nowMs;
-        const now = observe(encounter, t);
+        const now = observe(encounter, t, stack.director.runIdx);
         buffer.push(now);
-        applyIntent(encounter.player, policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t }));
+        applyIntent(encounter, policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t }));
       }
       stack.step(cfg.stepMs);
       if (runEnded) {

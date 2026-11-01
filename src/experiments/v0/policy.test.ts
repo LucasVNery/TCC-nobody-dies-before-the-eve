@@ -39,6 +39,11 @@ function obsOf(tMs: number, w: World, body: { weapon: string; blocking: boolean;
     isBlocking: body.blocking,
     equippedWeaponId: body.weapon,
     enemyDead: false,
+    runIdx: 0,
+    telegraph: null,
+    heldItem: null,
+    groundItems: [],
+    isSprinting: false,
   };
 }
 
@@ -645,5 +650,52 @@ describe('AgentPolicy under stamina limits (Task 9)', () => {
     const after: AgentIntent[] = [];
     for (; t < tBreak + STAGGER_MS + 300; t += STEP) after.push(step(t, STAMINA_COST.dodge, false));
     expect(after.some((i) => i.startAction)).toBe(true);
+  });
+});
+
+describe('AgentPolicy own-body reset (run index, not HP)', () => {
+  type Internals = {
+    readOwnBody(o: Observation, t: number): void;
+    lockedUntil: number;
+    pending: unknown;
+    chargeReleaseAt: number | null;
+    wantBlock: boolean;
+  };
+  const w: World = { enemyState: 'idle', offset: { x: 300, y: 0 } };
+  const body = { weapon: 'sword_shield', blocking: false };
+  const armed = () => {
+    const p = makePolicy('agressivo', 4242) as unknown as Internals;
+    p.readOwnBody(obsOf(0, w, body), 0);
+    p.lockedUntil = 5000;
+    p.pending = { kind: 'dodge', at: 900 };
+    p.chargeReleaseAt = 800;
+    p.wantBlock = true;
+    return p;
+  };
+  const expectCleared = (p: Internals) => {
+    expect(p.lockedUntil).toBe(-Infinity);
+    expect(p.pending).toBeNull();
+    expect(p.chargeReleaseAt).toBeNull();
+    expect(p.wantBlock).toBe(false);
+  };
+
+  it('a changed runIdx clears the timers', () => {
+    const p = armed();
+    p.readOwnBody({ ...obsOf(16, w, body), runIdx: 1 }, 16);
+    expectCleared(p);
+  });
+
+  it('a heal (HP rises, same runIdx) clears nothing', () => {
+    const p = armed();
+    p.readOwnBody({ ...obsOf(16, w, body), playerHp: 60 }, 16); // drop first: stagger
+    p.lockedUntil = 5000;
+    p.pending = { kind: 'dodge', at: 900 };
+    p.chargeReleaseAt = 800;
+    p.wantBlock = true;
+    p.readOwnBody({ ...obsOf(32, w, body), playerHp: 100 }, 32);
+    expect(p.lockedUntil).toBe(5000);
+    expect(p.pending).not.toBeNull();
+    expect(p.chargeReleaseAt).toBe(800);
+    expect(p.wantBlock).toBe(true);
   });
 });

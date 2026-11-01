@@ -6,7 +6,10 @@ import { GAME_VERSION, SCHEMA_VERSION, CONFIG_VERSION, windowsMs } from '../../t
 import { DEFAULT_HUMANIZER } from './humanizer';
 import { STYLE_IDS } from './styles';
 import { REPORT_SKILLS } from './windowValues';
-import { DEFAULT_EXPERIMENT, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
+import { DEFAULT_EXPERIMENT, applyIntent, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
+import { createTelemetryStack } from '../../telemetry/stack';
+import { sessionStartPayload } from '../../telemetry/schema';
+import { ProfileAccumulator } from '../../profile/profileAccumulator';
 
 const tiny = (over: Partial<ExperimentConfig> = {}): ExperimentConfig => ({
   ...DEFAULT_EXPERIMENT,
@@ -236,5 +239,42 @@ describe('agent runner', () => {
     // game seeds are per (seed, agent, run): agents never share a stream
     expect(gameSeed(cfg.seed, 2, 0)).not.toBe(gameSeed(cfg.seed, 3, 0));
     expect(gameSeed(cfg.seed, 2, 0)).not.toBe(gameSeed(cfg.seed, 2, 1));
+  });
+});
+
+describe('applyIntent: sprint and item', () => {
+  const stack = () =>
+    createTelemetryStack({
+      accumulator: new ProfileAccumulator(),
+      playerId: 'agent-test',
+      sessionId: 's0',
+      firstRunIdx: 0,
+      nextSeed: () => 4242,
+      entitySize: 20,
+      onRunEnd: () => {},
+    });
+  const aim = { x: 1, y: 0 };
+
+  it('sprint with movement leaves the player sprinting', () => {
+    const s = stack();
+    s.startSession(sessionStartPayload('2026-01-01T00:00:00.000Z', true), null);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim, sprint: true });
+    for (let i = 0; i < 10; i++) s.step(1000 / 60);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim, sprint: true });
+    expect(s.encounter.player.isSprinting).toBe(true);
+    applyIntent(s.encounter, { move: { x: 1, y: 0 }, aim });
+    s.step(1000 / 60);
+    expect(s.encounter.player.isSprinting).toBe(false);
+  });
+
+  it('useItem with an item in the slot emits item.use', () => {
+    const s = stack();
+    s.startSession(sessionStartPayload('2026-01-01T00:00:00.000Z', true), null);
+    const items = s.encounter.items as unknown as { slot: unknown };
+    items.slot = { id: 'i1', kind: 'heal', heldMs: 0 };
+    applyIntent(s.encounter, { move: { x: 0, y: 0 }, aim, useItem: true });
+    s.step(1000 / 60);
+    expect(s.encounter.items.held).toBeNull();
+    expect(ofType(s.recorder.drain(), 'item.use')).toHaveLength(1);
   });
 });

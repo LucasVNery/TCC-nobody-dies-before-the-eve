@@ -64,8 +64,8 @@ export interface PolicyInput {
 
 /**
  * Intents for the player surface; the runner applies them in this order:
- * setMoveInput(move), setAimDirection(aim), switchTo, block, dodge,
- * startAction (tryAction), release (releaseAction).
+ * setMoveInput(move), setSprint(sprint === true), setAimDirection(aim), switchTo,
+ * block, dodge, startAction (tryAction), release (releaseAction), useItem.
  */
 export interface AgentIntent {
   move: Vec2;
@@ -75,6 +75,8 @@ export interface AgentIntent {
   release?: boolean;
   dodge?: boolean;
   block?: 'start' | 'stop';
+  sprint?: boolean;
+  useItem?: boolean;
 }
 
 interface Plan {
@@ -121,6 +123,7 @@ export class AgentPolicy {
   /** Own body is inside an action's non-cancelable part until then (own timer: lockedMs from the registry). */
   private lockedUntil = -Infinity;
   private lastHp: number | null = null;
+  private lastRunIdx: number | null = null;
   private lastStamina: number | null = null;
   private lastBlocking = false;
   private pending: { kind: Exclude<DefenseKind, 'none'>; at: number } | null = null;
@@ -264,12 +267,14 @@ export class AgentPolicy {
 
   /**
    * Own HP/stamina bars are visible to a player: an HP drop (or stamina emptied while blocking)
-   * means the body was staggered, which also ends any charge; an HP rise means
-   * a fresh run (full reset), so every own-body timer is cleared.
+   * means the body was staggered, which also ends any charge; a change of run index
+   * means a fresh run (full reset), so every own-body timer is cleared. An HP rise is
+   * a heal, not a restart.
    */
   private readOwnBody(now: Observation, nowMs: number): void {
+    const restarted = this.lastRunIdx !== null && now.runIdx !== this.lastRunIdx;
     if (this.lastHp !== null && this.lastStamina !== null) {
-      if (now.playerHp > this.lastHp) {
+      if (restarted) {
         this.chargeReleaseAt = null;
         this.chargeAction = null;
         this.lockedUntil = -Infinity;
@@ -282,6 +287,7 @@ export class AgentPolicy {
         this.lockedUntil = Math.max(this.lockedUntil, nowMs + STAGGER_MS + STAGGER_MARGIN_MS);
       }
     }
+    this.lastRunIdx = now.runIdx;
     this.lastHp = now.playerHp;
     this.lastStamina = now.playerStamina;
     this.lastBlocking = now.isBlocking;

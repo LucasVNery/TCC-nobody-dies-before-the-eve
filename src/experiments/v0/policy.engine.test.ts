@@ -40,7 +40,7 @@ function play(id: StyleId, seed: number, ms: number) {
       stack.step(STEP);
       continue;
     }
-    const now = observe(encounter, t);
+    const now = observe(encounter, t, stack.director.runIdx);
     buffer.push(now);
     const intent = policy.decide({ now, seen: buffer.at(t, PERCEPTION_LAG_MS), nowMs: t });
     const p = encounter.player;
