@@ -549,9 +549,14 @@ The 10-run sweeps (4242/4243/4244) agree: 0 denied everywhere; evasivo 10/9/8 co
   `itemPickRate` is `null` in 30 of 30 runs (seed 4242); repetitivo 30/30, aleatorio 29/30,
   variado 27/30, paciente 14/30, bloqueador 5/30, evasivo 0/30. M5 (`evasivo` > `agressivo`) has
   no defined value in its lower group as worded. No allowed parameter changes this (the item clock
-  is a game rule; `itemSeeking` acts only after a spawn). The author should decide on M5 before
-  the full run (for example compare evasivo with a style that does see items, or add an "or lower
-  undefined" clause as H1 and H5 have).
+  is a game rule; `itemSeeking` acts only after a spawn).
+  **Author decision (2026-11-01): M5 stays exactly as pre-registered and is expected to come out
+  "indefinida".** The defect is in the metric, not in the tested agent: a real player who plays like
+  agressivo dies before the first item, so `itemPickRate` cannot measure item seeking for that
+  profile (it also depends on survival time and spawn geometry, only 4–5% of spawns appear within
+  reach). Swapping the comparator would hide this, so it is recorded as a finding about the metric
+  (limitation in the report, section 8 and Limitações). A metric valid for the trait (for example
+  trajectory deviation towards visible items) is left for a later version.
 - **Pickups are rare even for the item-seeking styles.** Evasivo picks 31 of 343 (9.0%, seed
   4242), 24 of 278 (8.6%, 4243) and 32 of 337 (9.5%, 4244) spawned items; 83% of its items expire
   by timeout on each seed. Only 13–15 of those spawns appear within the policy's seek radius

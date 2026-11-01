@@ -161,6 +161,8 @@ Valores por run calculados com o mesmo acumulador do painel de análise (`Window
 
 Unidade: valor da métrica por run (seção 7). Critério igual ao da família P: confirmada se o IC 95% bootstrap do delta de Cliff (maior vs menor) fica acima de 0 e delta ≥ 0,33; indefinida com menos de 10 valores definidos em algum grupo (valor indefinido = métrica sem amostra na run); refutada nos demais casos. A família M é palpite do Claude revisado pelo autor; hipótese refutada ou indefinida é resultado, não defeito.
 
+Limitação de M5 (decisão do autor, 2026-11-01): M5 foi mantida como pré-registrada e deve sair indefinida. O itemPickRate depende do tempo de sobrevivência e da geometria de aparecimento dos itens; um jogador que joga como o agressivo morre antes do primeiro item e não gera valor algum. A métrica, portanto, não é interpretável como medida de busca de itens; isto é um achado sobre a métrica, não sobre o agente testado. Uma métrica válida para essa característica fica para uma versão futura.
+
 | Id | Métrica | Maior | Menor | Delta | IC 95% | N definidos (maior) | N definidos (menor) | Indef. maior | Indef. menor | Veredito |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | M1 | staminaSpentPerMinute | agressivo | bloqueador | 0,750 | [0,500; 1,000] | 12 | 11 | 0% | 25% | confirmada |
