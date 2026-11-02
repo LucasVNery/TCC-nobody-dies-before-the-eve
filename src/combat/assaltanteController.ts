@@ -84,6 +84,13 @@ export class AssaltanteController implements ThreatAssessor {
   private patternKind: 'swing' | 'combo' | 'slam' = 'swing';
   /** Which strike of the combo is in progress. */
   private comboStrike: 1 | 2 = 1;
+  /** Boss mode: max hp (null = normal elite) and chase speed multiplier. */
+  private bossMaxHp: number | null = null;
+  private advanceMult = 1;
+  /** Barrage: swings still to start, the pause between them, and whether a barrage swing is in progress. */
+  private barrageRemaining = 0;
+  private barragePauseMs = 0;
+  private barrageStrikeActive = false;
 
   constructor(
     private bus: EventBus<GameEvents>,
@@ -97,6 +104,54 @@ export class AssaltanteController implements ThreatAssessor {
 
   get position(): Vec2 {
     return { x: this._position.x, y: this._position.y };
+  }
+
+  get maxHp(): number {
+    return this.bossMaxHp ?? ASSALTANTE_MAX_HP;
+  }
+
+  /** A barrage is queued or one of its swings is in progress. */
+  get isBarraging(): boolean {
+    return this.barrageRemaining > 0 || this.barrageStrikeActive;
+  }
+
+  private get chaseSpeed(): number {
+    return ASSALTANTE_CHASE_SPEED * this.advanceMult;
+  }
+
+  /**
+   * Boss mode: a fresh enemy (as after respawn, position kept) with `maxHp` and the chase speed scaled
+   * by `advanceMult`. Open windows are closed as source_interrupted, like respawn.
+   */
+  configureBoss(opts: { maxHp: number; advanceMult: number }): void {
+    this.respawn(this._position, 'source_interrupted');
+    this.bossMaxHp = opts.maxHp;
+    this.advanceMult = opts.advanceMult;
+    this.hp = opts.maxHp;
+  }
+
+  /** Back to the normal elite tuning; hp and position untouched. */
+  clearBoss(): void {
+    this.bossMaxHp = null;
+    this.advanceMult = 1;
+    this.clearBarrage();
+  }
+
+  /**
+   * Queues `strikes` consecutive swings, `pauseMs` apart (instead of the pattern pause), chasing into range
+   * as needed. Ignored unless idle/chasing and not already barraging. Stagger, parry, respawn and
+   * configureBoss/clearBoss cancel it.
+   */
+  startBarrage(strikes: number, pauseMs: number): void {
+    if (this.state !== 'idle' && this.state !== 'chasing') return;
+    if (this.isBarraging || strikes < 1) return;
+    this.barrageRemaining = Math.floor(strikes);
+    this.barragePauseMs = pauseMs;
+  }
+
+  private clearBarrage(): void {
+    this.barrageRemaining = 0;
+    this.barrageStrikeActive = false;
   }
 
   get activeRuleId(): string | null {
@@ -271,6 +326,9 @@ export class AssaltanteController implements ThreatAssessor {
     this.recoveryDurationMs = RECOVERY_MS;
     this.patternKind = 'swing';
     this.comboStrike = 1;
+    this.bossMaxHp = null;
+    this.advanceMult = 1;
+    this.clearBarrage();
   }
 
   private closeOpenWindows(reason: InvalidReason): void {
@@ -296,6 +354,7 @@ export class AssaltanteController implements ThreatAssessor {
     this.recoveryDurationMs = ms;
     this.patternKind = 'swing';
     this.comboStrike = 1;
+    this.clearBarrage(); // a stagger cancels the barrage
   }
 
   hurtbox(): AABB {
@@ -342,12 +401,14 @@ export class AssaltanteController implements ThreatAssessor {
       attackDirection: this._attackDirection,
       readyInMs:
         this.state === 'idle' || this.state === 'chasing'
-          ? Math.max(0, ELITE.firstAttackDelayMs - this.ageMs, ELITE.patternPauseMs - this.sincePatternMs)
+          ? this.barrageRemaining > 0
+            ? Math.max(0, this.barragePauseMs - this.sincePatternMs)
+            : Math.max(0, ELITE.firstAttackDelayMs - this.ageMs, ELITE.patternPauseMs - this.sincePatternMs)
           : 0,
     };
     const config: ChaseTelegraphConfig = {
       attackRange: ATTACK_RANGE,
-      chaseSpeedPxPerSec: ASSALTANTE_CHASE_SPEED,
+      chaseSpeedPxPerSec: this.chaseSpeed,
       telegraphMs: this.state === 'attacking' ? this.strikeTelegraphMs : TELEGRAPH_MS,
       swingMs: SWING_MS,
       recoveryMs: this.state === 'recovering' ? this.recoveryDurationMs : RECOVERY_MS,
@@ -421,7 +482,18 @@ export class AssaltanteController implements ThreatAssessor {
       this.lungeDodgeOppId = null;
     }
 
-    if (this.state === 'idle' || this.state === 'chasing') {
+    if ((this.state === 'idle' || this.state === 'chasing') && this.barrageRemaining > 0) {
+      // Barrage: no pattern draw (the PRNG is not consumed), no first-attack delay, own pause.
+      if (distanceToPlayer <= ATTACK_RANGE && this.sincePatternMs >= this.barragePauseMs) {
+        this._activeRuleId = 'assaltante.attack';
+        this.barrageRemaining--;
+        this.barrageStrikeActive = true;
+        this.startPattern('swing', dx, dy, distanceToPlayer);
+      } else {
+        this._activeRuleId = 'assaltante.chase';
+        this.chase(stepMs, dx, dy, distanceToPlayer);
+      }
+    } else if (this.state === 'idle' || this.state === 'chasing') {
       const bb: Blackboard = {
         distanceToPlayer,
         state: this.state,
@@ -448,15 +520,7 @@ export class AssaltanteController implements ThreatAssessor {
         this.activeOppId = this.opp.open('dodge', 'assaltante.lunge', lungeWindowMs(this.lungeLong));
         this.lungeDodgeOppId = this.activeOppId;
       } else {
-        this.state = 'chasing';
-        const direction = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : { x: 0, y: 0 };
-        if (distanceToPlayer > 0) this._attackDirection = direction;
-        this._position = clampToArena(
-          applyMovement(this._position, direction, ASSALTANTE_CHASE_SPEED, stepMs),
-          this.width,
-          this.height,
-          ARENA_BOUNDS,
-        );
+        this.chase(stepMs, dx, dy, distanceToPlayer);
       }
     }
 
@@ -472,6 +536,17 @@ export class AssaltanteController implements ThreatAssessor {
         if (this.patternKind === 'combo' && this.comboStrike === 1) {
           this.startSecondComboStrike(dx, dy, distanceToPlayer);
           return;
+        }
+        if (this.barrageStrikeActive) {
+          this.barrageStrikeActive = false;
+          if (this.barrageRemaining > 0) {
+            // Mid-barrage: straight back to idle (no recovery, no punish window); the swing's dodge
+            // window expires on its own. The next swing waits only the barrage pause.
+            this.state = 'idle';
+            this.phaseElapsedMs = 0;
+            this.activeOppId = null;
+            return;
+          }
         }
         const punishMs = this.patternKind === 'slam' ? ELITE.slamRecoveryMs : RECOVERY_MS;
         this.state = 'recovering';
@@ -499,6 +574,18 @@ export class AssaltanteController implements ThreatAssessor {
       }
       return;
     }
+  }
+
+  private chase(stepMs: number, dx: number, dy: number, distanceToPlayer: number): void {
+    this.state = 'chasing';
+    const direction = distanceToPlayer > 0 ? normalizeVelocity(dx, dy) : { x: 0, y: 0 };
+    if (distanceToPlayer > 0) this._attackDirection = direction;
+    this._position = clampToArena(
+      applyMovement(this._position, direction, this.chaseSpeed, stepMs),
+      this.width,
+      this.height,
+      ARENA_BOUNDS,
+    );
   }
 
   /** Lunge: telegraph standing still (aim follows the player), then a straight charge locked on the final aim. */
@@ -561,6 +648,7 @@ export class AssaltanteController implements ThreatAssessor {
   onPlayerParrySuccess(): void {
     if (!this.isCommitted || !this.activeOppId) return;
     this.opp.resolve(this.activeOppId, 'taken');
+    this.clearBarrage(); // a parry cancels the barrage
     this.lungeDodgeOppId = null;
     this.lungeMoving = false;
     this.lungeLandedThisTick = false;

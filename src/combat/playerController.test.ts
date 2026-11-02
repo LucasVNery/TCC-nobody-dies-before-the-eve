@@ -1094,3 +1094,38 @@ describe('combat v2: forgiving player flow', () => {
     expect(player.isDashCancelable).toBe(false);
   });
 });
+
+describe('PlayerController — overridable dash cooldown (boss)', () => {
+  /** Dashes, ends the dash, then waits `waitMs`: true if a new press dashes exactly at `waitMs` and not 1 ms before. */
+  function cooldownIs(player: PlayerController, waitMs: number): boolean {
+    player.tryDodge();
+    player.step(DODGE.durationMs);
+    player.step(waitMs - 1);
+    player.tryDodge(); // 1 ms of cooldown left: buffered, not started
+    const blocked = player.state === 'idle';
+    player.step(1); // cooldown ends: the buffered dash fires
+    return blocked && player.state === 'dodging';
+  }
+
+  it('setDodgeCooldownMs(4000): the second dash only starts 220 + 4000 ms after the first', () => {
+    const { player } = makePlayer();
+    player.setDodgeCooldownMs(4000);
+    expect(cooldownIs(player, 4000)).toBe(true);
+  });
+
+  it('reset() restores the base cooldown', () => {
+    const { player } = makePlayer();
+    player.setDodgeCooldownMs(4000);
+    player.reset({ x: 0, y: 0 });
+    expect(cooldownIs(player, DODGE.cooldownMs)).toBe(true);
+  });
+
+  it('clamps above to 4000 and below to the base cooldown', () => {
+    const high = makePlayer().player;
+    high.setDodgeCooldownMs(9999);
+    expect(cooldownIs(high, 4000)).toBe(true);
+    const low = makePlayer().player;
+    low.setDodgeCooldownMs(10);
+    expect(cooldownIs(low, DODGE.cooldownMs)).toBe(true);
+  });
+});

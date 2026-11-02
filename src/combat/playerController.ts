@@ -27,6 +27,9 @@ import { Stamina, STAMINA_COST } from './stamina';
 import { InputBuffer, type BufferedInput } from './inputBuffer';
 import type { ProjectileLaunch } from './projectile';
 
+/** Upper bound of the dash cooldown the boss may impose (design cap). */
+export const MAX_DODGE_COOLDOWN_MS = 4000;
+
 export class PlayerController {
   state: PlayerState = 'idle';
   private phaseElapsedMs = 0;
@@ -36,6 +39,8 @@ export class PlayerController {
   equippedWeaponId: string = 'sword_shield';
   private attackLockedMs = 0;
   private dodgeCooldownRemainingMs = 0;
+  /** Cooldown armed when a dash ends; raised by the boss, back to DODGE.cooldownMs on reset(). */
+  private dodgeCooldownMs: number = DODGE.cooldownMs;
   private invulnerable = false;
   private _position: Vec2;
   private readonly width: number;
@@ -94,6 +99,11 @@ export class PlayerController {
   refundDodge(): number {
     this.stamina.refund(STAMINA_COST.dodge);
     return STAMINA_COST.dodge;
+  }
+
+  /** Dash cooldown for the next dashes, clamped to [DODGE.cooldownMs, MAX_DODGE_COOLDOWN_MS]. */
+  setDodgeCooldownMs(ms: number): void {
+    this.dodgeCooldownMs = Math.min(MAX_DODGE_COOLDOWN_MS, Math.max(DODGE.cooldownMs, ms));
   }
 
   setSprint(on: boolean): void {
@@ -167,6 +177,7 @@ export class PlayerController {
     this.equippedWeaponId = 'sword_shield';
     this.attackLockedMs = 0;
     this.dodgeCooldownRemainingMs = 0;
+    this.dodgeCooldownMs = DODGE.cooldownMs;
     this.invulnerable = false;
     this.blockHeldMs = 0;
     this.staggerRemainingMs = 0;
@@ -473,7 +484,7 @@ export class PlayerController {
     if (this.phaseElapsedMs >= DODGE.durationMs) {
       this.state = 'idle';
       this.phaseElapsedMs = 0;
-      this.dodgeCooldownRemainingMs = DODGE.cooldownMs;
+      this.dodgeCooldownRemainingMs = this.dodgeCooldownMs;
     }
   }
 
