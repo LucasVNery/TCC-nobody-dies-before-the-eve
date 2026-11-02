@@ -92,6 +92,10 @@ export function runBot(stack: TelemetryStack, ticks: number) {
     if (!longCharge) longChargeDodged = false;
     if (dodgeNow && longCharge) longChargeDodged = true;
     if (dodgeNow && encounter.player.stamina.value >= STAMINA_COST.dodge) encounter.player.tryDodge();
+    // The dash has a 2.5 s base cooldown: when a strike is due and the dash is not available, the bot blocks instead.
+    const strikeDue = strikeInMs !== null || (lunging && threatTicks >= LUNGE_DODGE_TICK - 10);
+    if (strikeDue && encounter.player.state !== 'dodging' && encounter.player.state !== 'blocking') encounter.player.startBlock();
+    else if (!strikeDue && encounter.player.state === 'blocking') encounter.player.stopBlock();
     if (i % 12 === 0 && encounter.assaltante.state === 'recovering' && encounter.player.stamina.value > 0) {
       const light = findWeaponAction(encounter.player.equippedWeaponId, 'light');
       if (light) encounter.player.tryAction(light.id);

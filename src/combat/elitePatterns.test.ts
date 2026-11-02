@@ -139,9 +139,8 @@ describe('combo', () => {
     conserved(log);
   });
 
-  it('dodging strike 1 and strike 2 each credit a dodge, strike 2 by invulnerability alone while standing outside the sector', () => {
-    // Two dashes away from the elite: both end outside every sector. Strike 2's first active tick is credited
-    // only because firstLandingProcessed is re-armed when the second dodge window opens.
+  it('dodging strike 1 credits a dodge; the 2.5 s dash cooldown blocks the second dash (strike 2 is not credited)', () => {
+    // Two dash attempts away from the elite; only the first can fire (2.5 s cooldown), so strike 2 finds the player outside its reach.
     const { encounter, log } = setup({ x: 250, y: 0 }, { x: 330, y: 0 });
     const a = encounter.assaltante;
     a.beginPattern('combo', encounter.player.position);
@@ -151,12 +150,12 @@ describe('combo', () => {
         encounter.player.tryDodge();
       }
     });
-    expect(log.defenses.map((d) => d.label)).toEqual(['dodge', 'dodge']);
+    // The 2.5 s dash cooldown blocks the second dash: only strike 1 is credited a dodge (it used to be two).
+    expect(log.defenses.map((d) => d.label)).toEqual(['dodge']);
     const dodgeOpens = log.opens.filter((o) => o.type === 'dodge');
-    expect(dodgeOpens).toHaveLength(2);
-    for (const open of dodgeOpens) {
-      expect(log.closes.find((c) => c.opp_id === open.opp_id)?.outcome).toBe('taken');
-    }
+    expect(dodgeOpens).toHaveLength(2); // the second window still opens, but nothing closes it as taken
+    expect(log.closes.find((c) => c.opp_id === dodgeOpens[0].opp_id)?.outcome).toBe('taken');
+    expect(log.closes.find((c) => c.opp_id === dodgeOpens[1].opp_id)).toBeUndefined();
     expect(log.hurts).toHaveLength(0);
     settle(encounter);
     conserved(log);

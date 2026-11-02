@@ -11,10 +11,10 @@ export const SCHEMA_VERSION = 2 as const;
  * Bump whenever gameplay/balance changes make older logs non-comparable
  * (hp, damage, timings, hitbox geometry). Written into every session.start.
  */
-export const GAME_VERSION = '0.0.5';
+export const GAME_VERSION = '0.0.6';
 
 /** Window/timing configuration revision, written into every session.start next to windows_ms. */
-export const CONFIG_VERSION = '0.0.5-c2';
+export const CONFIG_VERSION = '0.0.6-c1';
 
 /** The timing windows (ms) in force, logged so analyses can tell configurations apart. */
 export interface WindowsMs {
@@ -22,6 +22,7 @@ export interface WindowsMs {
   perfect: number;
   parry: number;
   buffer: number;
+  dodge_cooldown: number;
   telegraph_swing: number;
   telegraph_combo: number;
   telegraph_lunge: number;
@@ -35,6 +36,7 @@ export function windowsMs(): WindowsMs {
     perfect: PERFECT_DODGE_MS,
     parry: PARRY_WINDOW_MS,
     buffer: INPUT_BUFFER_MS,
+    dodge_cooldown: DODGE.cooldownMs,
     telegraph_swing: ELITE_TELEGRAPH_MS.swing,
     telegraph_combo: ELITE_TELEGRAPH_MS.combo,
     telegraph_lunge: LUNGE.telegraphMs,

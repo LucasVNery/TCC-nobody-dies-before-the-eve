@@ -639,9 +639,10 @@ describe('PlayerController — dodge denial while the dash is blocked', () => {
     const dodged = vi.fn();
     bus.on('player.stamina_denied', denied);
     bus.on('player.dodge', dodged);
+    player.step(DODGE.cooldownMs - 100); // 100 ms of cooldown left: inside the 120 ms buffer window
+    // spent after the step: the 2.5 s cooldown is long enough for stamina to regenerate past 29 before the press
     player.stamina.spend(player.stamina.value - 29, 'attack'); // leaves exactly 29
     expect(player.stamina.value).toBe(29);
-    player.step(DODGE.cooldownMs - 100); // 100 ms of cooldown left: inside the 120 ms buffer window
     player.tryDodge();
     expect(denied).toHaveBeenCalledTimes(1);
     expect(denied).toHaveBeenCalledWith({ action: 'dodge' });
@@ -956,16 +957,15 @@ describe('combat B: responsive combat', () => {
     expect(player.state).toBe('dodging');
   });
 
-  it('a dash buffered from blocking fires when the cooldown ends inside INPUT_BUFFER_MS (cooldown 160 < buffer 170)', () => {
+  it('a dash pressed from blocking with the full cooldown left (> INPUT_BUFFER_MS) is not buffered', () => {
+    // was "buffered when cooldown 160 < buffer 170": the 2.5 s cooldown now outlasts the buffer window
     const { player } = makePlayer();
     player.tryDodge();
     player.step(DODGE.durationMs);
     player.startBlock();
-    player.tryDodge(); // full cooldown left, < INPUT_BUFFER_MS
-    player.step(DODGE.cooldownMs - 1);
+    player.tryDodge(); // full cooldown left, > INPUT_BUFFER_MS
+    player.step(DODGE.cooldownMs);
     expect(player.state).toBe('blocking');
-    player.step(1);
-    expect(player.state).toBe('dodging');
   });
 
   it('the dash cooldown applies while charging: dash waits, then cancels the charge when the cooldown ends', () => {
@@ -1010,7 +1010,7 @@ describe('combat v2: forgiving player flow', () => {
   it('uses the new constants', () => {
     expect(STAMINA_MAX).toBe(150);
     expect(STAMINA_REGEN.perSecond).toBe(50);
-    expect(DODGE).toEqual({ durationMs: 220, iframesMs: 200, cooldownMs: 160 });
+    expect(DODGE).toEqual({ durationMs: 220, iframesMs: 200, cooldownMs: 2500 }); // dash cooldown raised from 160 ms
     expect(PERFECT_DODGE_MS).toBe(110);
     expect(INPUT_BUFFER_MS).toBe(170);
     expect(DASH_CANCEL_EARLY_MS).toBe(60);

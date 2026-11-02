@@ -183,7 +183,8 @@ describe('agent runner', () => {
       expect(log.styleId).toBe(id);
       expect(log.simulatedMs).toBeGreaterThanOrEqual(600_000);
       expect(ofType(log.events, 'player.stamina_denied')).toHaveLength(0);
-      expect(log.completedRuns).toBeGreaterThanOrEqual(2);
+      // evasivo (dash-only defence) completes 1 run, not 2, now that the dash has a 2.5 s cooldown
+      expect(log.completedRuns).toBeGreaterThanOrEqual(id === 'evasivo' ? 1 : 2);
       expect(ofType(log.events, 'player.action').length).toBeGreaterThan(0);
     });
 

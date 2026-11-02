@@ -14,7 +14,7 @@ export interface DodgeTiming {
 export const DODGE: DodgeTiming = {
   durationMs: 220,
   iframesMs: 200,
-  cooldownMs: 160,
+  cooldownMs: 2500,
 };
 
 export const SWITCH_RECOVERY_MS = 150;
