@@ -10,7 +10,7 @@ import { AGENT_STYLES } from './styles';
 import { createPrng } from '../../core/prng';
 import { STYLE_IDS } from './styles';
 import { REPORT_SKILLS } from './windowValues';
-import { DEFAULT_EXPERIMENT, applyIntent, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
+import { DEFAULT_EXPERIMENT, applyIntent, findEmptyRuns, gameSeed, playAgent, runExperiment, type ExperimentConfig } from './agentRunner';
 import { createTelemetryStack } from '../../telemetry/stack';
 import { sessionStartPayload } from '../../telemetry/schema';
 import { ProfileAccumulator } from '../../profile/profileAccumulator';
@@ -344,3 +344,18 @@ describe('agents and items, end to end (V0.1 Task 4)', () => {
   });
 });
 
+
+describe('findEmptyRuns', () => {
+  const ev = (seq: number, type: string, run_idx: number, extra: Record<string, unknown> = {}): LoggedEvent => ({
+    v: 2, seq, t_ms: seq, player_id: 'p', session_id: 's', run_idx, room_idx: 0, enc_idx: 0, type, ...extra,
+  });
+
+  it('a run ended by death or by a boss victory is not empty; an abandoned one without evidence is', () => {
+    const log = [
+      ev(0, 'run.start', 0), ev(1, 'run.end', 0, { cause: 'death' }),
+      ev(2, 'run.start', 1), ev(3, 'run.end', 1, { cause: 'victory' }),
+      ev(4, 'run.start', 2), ev(5, 'run.end', 2, { cause: 'abandoned' }),
+    ];
+    expect(findEmptyRuns(log, new Set())).toEqual([2]);
+  });
+});

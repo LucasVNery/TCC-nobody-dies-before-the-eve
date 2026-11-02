@@ -5,6 +5,7 @@ import type { DefensiveLabel } from '../profile/profileAccumulator';
 import type { ProfileSnapshotPayload } from '../profile/types';
 import type { ItemKind } from '../game/items';
 import type { AttackKind } from '../combat/eliteDefs';
+import type { BossAdaptRecord } from '../boss/types';
 
 export interface PlayerActionPayload {
   actionId: string;
@@ -52,8 +53,8 @@ export interface RunStartPayload {
 
 export interface RunEndPayload {
   run_idx: number;
-  /** 'abandoned': closed at the next boot because the tab was closed mid-run. */
-  cause: 'death' | 'abandoned';
+  /** 'abandoned': closed at the next boot because the tab was closed mid-run; 'victory': the boss was killed. */
+  cause: 'death' | 'abandoned' | 'victory';
   duration_ms: number;
   rooms_cleared: number;
   encounters_cleared: number;
@@ -71,6 +72,16 @@ export interface ProfileSnapshotEventPayload {
   /** true when the room was cut short by the player's death. */
   partial: boolean;
   snapshot: ProfileSnapshotPayload;
+}
+
+/** One active boss response at boss.entry, with the totals actually applied. */
+export type BossAdaptPayload = BossAdaptRecord & { dash_cooldown_ms: number; advance_mult: number };
+
+export interface BossBarragePayload {
+  strikes: number;
+  chance: number;
+  duration_mult: number;
+  level: number;
 }
 
 export type GameEvents = {
@@ -100,4 +111,6 @@ export type GameEvents = {
   'profile.snapshot': ProfileSnapshotEventPayload;
   'player.death': EmptyPayload;
   'enemy.death': EmptyPayload;
+  'boss.adapt': BossAdaptPayload;
+  'boss.barrage': BossBarragePayload;
 };

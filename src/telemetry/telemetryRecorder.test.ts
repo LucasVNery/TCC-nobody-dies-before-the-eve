@@ -84,6 +84,53 @@ describe('TelemetryRecorder', () => {
     expect(events[2]).toMatchObject({ hp: 100, dist_to_enemy: 90, held_ms: 800, effective: true });
   });
 
+  it('a boss.entry snapshot logs levels and applied top-level; boss.adapt and boss.barrage carry a ctx', () => {
+    const stack = makeStack();
+    stack.director.start();
+    stack.recorder.drain();
+    const bus = stack.encounter.bus;
+    const levels = { far: 0, passive_defense: 1, dodge_abuse: 0.5, reflex_dash: 0 };
+    bus.emit('profile.snapshot', {
+      partial: false,
+      snapshot: {
+        ...stack.accumulator.snapshot('boss.entry'),
+        levels,
+        applied: { dash_cooldown_ms: 3250, advance_mult: 1.2 },
+      },
+    });
+    bus.emit('boss.adapt', {
+      habit: 'dodge_abuse', level: 0.5, runs_qualifying: 3, runs_window: 5, confidence: 0.7, active: true,
+      dash_cooldown_ms: 3250, advance_mult: 1.2,
+    });
+    bus.emit('boss.barrage', { strikes: 5, chance: 0.5, duration_mult: 1.5, level: 1 });
+    const events = stack.recorder.drain();
+    const [snap] = ofType(events, 'profile.snapshot');
+    expect(snap).toMatchObject({
+      type: 'profile.snapshot', at: 'boss.entry', partial: false, levels,
+      applied: { dash_cooldown_ms: 3250, advance_mult: 1.2 }, target: null, lambda: 0,
+    });
+    const [adapt] = ofType(events, 'boss.adapt');
+    expect(adapt).toMatchObject({
+      habit: 'dodge_abuse', level: 0.5, runs_qualifying: 3, runs_window: 5, confidence: 0.7, active: true,
+      dash_cooldown_ms: 3250, advance_mult: 1.2, run_idx: 0,
+    });
+    expect(adapt.ctx).toMatchObject({ e_hp: 160 });
+    const [barrage] = ofType(events, 'boss.barrage');
+    expect(barrage).toMatchObject({ strikes: 5, chance: 0.5, duration_mult: 1.5, level: 1 });
+    expect(barrage.ctx).toMatchObject({ e_hp: 160 });
+  });
+
+  it('a room.exit snapshot has no levels/applied fields', () => {
+    const stack = makeStack();
+    stack.director.start();
+    stack.encounter.player.takeDamage(999);
+    stack.step(16);
+    const [snap] = ofType(stack.recorder.drain(), 'profile.snapshot');
+    expect(snap.at).toBe('room.exit');
+    expect('levels' in snap).toBe(false);
+    expect('applied' in snap).toBe(false);
+  });
+
   it('player.stamina_denied is logged with ctx.p_stam', () => {
     const stack = makeStack();
     stack.director.start();

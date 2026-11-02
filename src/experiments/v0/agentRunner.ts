@@ -36,7 +36,7 @@ export const DEFAULT_EXPERIMENT: ExperimentConfig = {
  * One agent's play. Every logged run falls in exactly one of three classes
  * (mutually exclusive and exhaustive), so
  *   run.start count = completedRuns + truncatedRuns + emptyRuns.length
- * - completed: ended by the agent's death (run.end cause 'death');
+ * - completed: ended by the agent's death or a boss kill (run.end cause 'death' | 'victory');
  * - truncated: hit runCapMs (no run.end in its session; the next session, if
  *   any, closes it as abandoned, otherwise it stays open);
  * - empty: the run the director opens right after a death when that death
@@ -229,13 +229,13 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
   };
 }
 
-/** Runs with a run.start, no evidence (obs.* other than obs.boundary), no death end, and not truncated; ascending. */
+/** Runs with a run.start, no evidence (obs.* other than obs.boundary), no death/victory end, and not truncated; ascending. */
 export function findEmptyRuns(events: readonly LoggedEvent[], truncated: ReadonlySet<number>): number[] {
   const started = new Set<number>();
   const busy = new Set<number>();
   for (const e of events) {
     if (e.type === 'run.start') started.add(e.run_idx);
-    else if (e.type === 'run.end' && e.cause === 'death') busy.add(e.run_idx);
+    else if (e.type === 'run.end' && (e.cause === 'death' || e.cause === 'victory')) busy.add(e.run_idx);
     else if (e.type.startsWith('obs.') && e.type !== 'obs.boundary') busy.add(e.run_idx);
   }
   return [...started].filter((r) => !busy.has(r) && !truncated.has(r)).sort((a, b) => a - b);

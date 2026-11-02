@@ -10,6 +10,7 @@ export const POS_SAMPLE_INTERVAL_MS = 250;
 const CONTEXT_EVENTS = [
   'player.action', 'player.dodge', 'player.cancel', 'player.defense', 'player.hit_unmitigated', 'player.hurt',
   'player.death', 'player.stamina_denied', 'player.guard_break', 'enemy.attack_start', 'enemy.hurt', 'enemy.death', 'projectile.hit', 'projectile.expire', 'opp.open', 'opp.close',
+  'boss.adapt', 'boss.barrage',
 ] as const;
 
 /** Bus events logged as-is, without a combat `ctx` (map items carry their own fields). */

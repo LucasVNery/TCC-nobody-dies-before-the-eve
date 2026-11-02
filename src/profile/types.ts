@@ -12,4 +12,8 @@ export interface ProfileSnapshotPayload {
   confidence: Record<SkillId, number>;
   target: SkillId | null; // sempre null neste sub-projeto — seleção de alvo é passo 6 do §8
   lambda: number;         // sempre 0 neste sub-projeto — pesos de regra são passo 7 do §8
+  /** boss.entry only: frozen habit levels (0..1) the boss fight uses. */
+  levels?: Record<string, number>;
+  /** boss.entry only: response totals applied to the fight. */
+  applied?: { dash_cooldown_ms: number; advance_mult: number };
 }

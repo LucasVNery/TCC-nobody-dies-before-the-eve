@@ -5,6 +5,10 @@ import type { ProfileSnapshotPayload } from '../profile/types';
 import type { Vec2 } from '../combat/types';
 import { createPrng, type Prng } from '../core/prng';
 import { ARENA_BOUNDS, ROOM_ENCOUNTER_COUNT, MIN_SPAWN_DISTANCE } from '../combat/movementDefs';
+import type { BossPlan } from '../boss/types';
+import { BOSS_AFTER_ENCOUNTERS, BOSS_CONFIG, type BossConfig } from '../boss/bossConfig';
+import { advanceMult, dashCooldownMs } from '../boss/responses';
+import { BossBrain } from '../boss/bossBrain';
 
 /** Player start position of every run (center of the arena). */
 export const PLAYER_START: Vec2 = {
@@ -53,6 +57,11 @@ export interface RunDirectorOptions {
   nextSeed: () => number;
   /** Continues run numbering across sessions (read from the stored log). */
   firstRunIdx?: number;
+  /** Boss plan, called once at each boss room entry. Without it there is no boss room. */
+  planBoss?: () => BossPlan;
+  /** Encounters cleared in a run before the boss room (default BOSS_AFTER_ENCOUNTERS). */
+  bossAfterEncounters?: number;
+  bossConfig?: BossConfig;
 }
 
 /**
@@ -61,6 +70,10 @@ export interface RunDirectorOptions {
  * encounters end a room, player death ends the run (the interrupted room
  * still counts, flagged partial). The profile is never reset here — it is the
  * player's, not the run's (D4).
+ *
+ * With `planBoss`, the run's encounter number `bossAfterEncounters` closes its
+ * room and opens the boss room: the plan's levels are frozen and logged at
+ * boss.entry, and killing the boss ends the run as a victory.
  */
 export class RunDirector {
   private _runIdx: number;
@@ -70,6 +83,8 @@ export class RunDirector {
   private roomsCleared = 0;
   private encountersCleared = 0;
   private prng: Prng = createPrng(0);
+  private runSeed = 0;
+  private bossRoom = false;
   private started = false;
 
   constructor(private readonly opts: RunDirectorOptions) {
@@ -88,6 +103,14 @@ export class RunDirector {
     return this._encIdx;
   }
 
+  get inBossRoom(): boolean {
+    return this.bossRoom;
+  }
+
+  private get bossConfig(): BossConfig {
+    return this.opts.bossConfig ?? BOSS_CONFIG;
+  }
+
   start(): void {
     if (this.started) throw new Error('RunDirector already started');
     this.started = true;
@@ -103,7 +126,9 @@ export class RunDirector {
       this.endRun(); // player death wins a same-tick double KO
       return;
     }
-    if (encounter.assaltante.isDead) this.endEncounter();
+    if (!encounter.assaltante.isDead) return;
+    if (this.bossRoom) this.endBossRun();
+    else this.endEncounter();
   }
 
   private get bus() {
@@ -118,6 +143,9 @@ export class RunDirector {
     const { encounter } = this.opts;
     const seed = this.opts.nextSeed() >>> 0;
     this.prng = createPrng(seed);
+    this.runSeed = seed;
+    this.bossRoom = false;
+    encounter.boss = null;
     this._roomIdx = 0;
     this._encIdx = 0;
     this.runElapsedMs = 0;
@@ -125,7 +153,7 @@ export class RunDirector {
     this.encountersCleared = 0;
     encounter.items.reset((seed ^ 0x1e7e55) >>> 0);
     encounter.assaltante.reseed((seed ^ 0x5eed11) >>> 0);
-    encounter.resetPlayer(PLAYER_START);
+    encounter.resetPlayer(PLAYER_START); // also restores the base dash cooldown
     encounter.respawnEnemy(pickSpawn(this.prng, PLAYER_START), 'source_interrupted');
     this.bus.emit('run.start', { run_idx: this._runIdx, seed });
     this.bus.emit('room.enter', { room_idx: 0 });
@@ -140,7 +168,12 @@ export class RunDirector {
     this.profile.applyEncounterBoundary();
     this.encountersCleared += 1;
     this._encIdx += 1;
-    if (this._encIdx >= ROOM_ENCOUNTER_COUNT) {
+    const toBoss =
+      this.opts.planBoss !== undefined &&
+      !this.bossRoom &&
+      this.encountersCleared >= (this.opts.bossAfterEncounters ?? BOSS_AFTER_ENCOUNTERS);
+    if (toBoss || this._encIdx >= ROOM_ENCOUNTER_COUNT) {
+      // The boss closes the current room early; it always holds at least the encounter just ended.
       this.profile.applyRoomBoundary();
       this.emitSnapshot(false);
       this.roomsCleared += 1;
@@ -148,7 +181,75 @@ export class RunDirector {
       this._encIdx = 0;
       this.bus.emit('room.enter', { room_idx: this._roomIdx });
     }
+    if (toBoss) this.enterBossRoom();
     this.bus.emit('encounter.start', { enc_idx: this._encIdx });
+  }
+
+  /**
+   * Boss setup on the enemy endEncounter just respawned. The plan is read once
+   * and its levels stay frozen for the whole fight. Logs, in order:
+   * profile.snapshot{at:'boss.entry'} (always: it is what opens the gate for
+   * later runs), then one boss.adapt per active response.
+   */
+  private enterBossRoom(): void {
+    const { encounter } = this.opts;
+    const cfg = this.bossConfig;
+    const plan = this.opts.planBoss!();
+    const levels = { ...plan.levels };
+    const dodgeLevel = Math.max(levels.dodge_abuse, levels.reflex_dash);
+    const applied = {
+      dash_cooldown_ms: dashCooldownMs(dodgeLevel, cfg),
+      advance_mult: Math.max(advanceMult(levels.far, cfg), advanceMult(dodgeLevel, cfg)),
+    };
+    this.bossRoom = true;
+    this.bus.emit('profile.snapshot', {
+      partial: false,
+      snapshot: { ...this.opts.snapshots.snapshot('boss.entry'), levels: { ...levels }, applied: { ...applied } },
+    });
+    for (const record of plan.records) {
+      if (record.active) this.bus.emit('boss.adapt', { ...record, ...applied });
+    }
+    const assaltante = encounter.assaltante;
+    assaltante.configureBoss({ maxHp: cfg.bossMaxHp, advanceMult: applied.advance_mult });
+    encounter.player.setDodgeCooldownMs(applied.dash_cooldown_ms);
+    encounter.boss = new BossBrain({
+      barrageLevel: levels.passive_defense,
+      prng: createPrng((this.runSeed ^ 0xb055) >>> 0),
+      config: cfg,
+      onBarrage: (strikes, info) => {
+        assaltante.startBarrage(strikes, cfg.barragePauseMs);
+        this.bus.emit('boss.barrage', {
+          strikes,
+          chance: info.chance,
+          duration_mult: info.durationMult,
+          level: info.level,
+        });
+      },
+    });
+  }
+
+  /** The boss died (the player did not, same tick): the run ends as a victory. */
+  private endBossRun(): void {
+    const { encounter } = this.opts;
+    this.bus.emit('enemy.death', {});
+    // Close the dead boss's open windows inside the run that is ending, as any enemy death does.
+    encounter.respawnEnemy(encounter.assaltante.position, 'source_interrupted');
+    this.bus.emit('encounter.end', { enc_idx: this._encIdx });
+    this.profile.applyEncounterBoundary();
+    this.encountersCleared += 1;
+    this.profile.applyRoomBoundary(); // the boss room is cleared
+    this.emitSnapshot(false);
+    this.roomsCleared += 1;
+    encounter.items.endRun();
+    this.bus.emit('run.end', {
+      run_idx: this._runIdx,
+      cause: 'victory',
+      duration_ms: this.runElapsedMs,
+      rooms_cleared: this.roomsCleared,
+      encounters_cleared: this.encountersCleared,
+    });
+    this._runIdx += 1;
+    this.beginRun();
   }
 
   private endRun(): void {

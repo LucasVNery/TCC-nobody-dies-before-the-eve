@@ -26,7 +26,8 @@ export interface AbandonedRun {
  * - duration_ms: t_ms of the run's last stored event minus t_ms of its
  *   run.start (simulation time; the tail lost with the tab, ≤ one persist
  *   interval, is not counted);
- * - rooms_cleared: completed rooms = profile.snapshot with partial === false;
+ * - rooms_cleared: completed rooms = profile.snapshot with partial === false,
+ *   except the boss.entry one (it opens the boss room, it closes none);
  * - encounters_cleared: encounters ended by a kill = enemy.death events.
  */
 export function findAbandonedRun(events: readonly LoggedEvent[], playerId: string): AbandonedRun | null {
@@ -50,7 +51,7 @@ export function findAbandonedRun(events: readonly LoggedEvent[], playerId: strin
     room_idx: last.room_idx,
     enc_idx: last.enc_idx,
     duration_ms: r1(last.t_ms - start.t_ms),
-    rooms_cleared: run.filter((e) => e.type === 'profile.snapshot' && e.partial === false).length,
+    rooms_cleared: run.filter((e) => e.type === 'profile.snapshot' && e.partial === false && e.at !== 'boss.entry').length,
     encounters_cleared: run.filter((e) => e.type === 'enemy.death').length,
   };
 }

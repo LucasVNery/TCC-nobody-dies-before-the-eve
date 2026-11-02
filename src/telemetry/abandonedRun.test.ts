@@ -33,6 +33,25 @@ describe('findAbandonedRun', () => {
     });
   });
 
+  it('a run left open in the boss room: the boss.entry snapshot is not a cleared room', () => {
+    const log = [
+      ev('s', 0, 'run.start', { run_idx: 2, t_ms: 0 }),
+      ev('s', 1, 'enemy.death', { run_idx: 2, t_ms: 500 }),
+      ev('s', 2, 'profile.snapshot', { run_idx: 2, t_ms: 500 }, { partial: false, at: 'room.exit' }),
+      ev('s', 3, 'room.enter', { run_idx: 2, room_idx: 1, t_ms: 500 }, { room_idx: 1 }),
+      ev('s', 4, 'profile.snapshot', { run_idx: 2, room_idx: 1, t_ms: 500 }, { partial: false, at: 'boss.entry' }),
+      ev('s', 5, 'boss.adapt', { run_idx: 2, room_idx: 1, t_ms: 500 }, { habit: 'far', level: 1 }),
+      ev('s', 6, 'pos.sample', { run_idx: 2, room_idx: 1, t_ms: 750 }),
+    ];
+    expect(findAbandonedRun(log, 'me')).toEqual({
+      run_idx: 2, room_idx: 1, enc_idx: 0, duration_ms: 750, rooms_cleared: 1, encounters_cleared: 1,
+    });
+  });
+
+  it('a run ended by a victory is not abandoned', () => {
+    expect(findAbandonedRun([ev('s', 0, 'run.start'), ev('s', 1, 'run.end', {}, { cause: 'victory' })], 'me')).toBeNull();
+  });
+
   it('only looks at the given player', () => {
     const log = [
       ev('a', 0, 'run.start', { player_id: 'me' }),
