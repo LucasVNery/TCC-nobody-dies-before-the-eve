@@ -6,6 +6,7 @@ import { findAbandonedRun } from '../../telemetry/abandonedRun';
 import { nextRunIdx, rebuildProfileWithStats } from '../../telemetry/replay';
 import { sessionStartPayload, type LoggedEvent } from '../../telemetry/schema';
 import { createTelemetryStack } from '../../telemetry/stack';
+import type { BossConfig } from '../../boss/bossConfig';
 import { DEFAULT_HUMANIZER, Humanizer, type HumanizerConfig } from './humanizer';
 import { PerceptionBuffer, observe } from './perception';
 import { AgentPolicy, PERCEPTION_LAG_MS, type AgentIntent } from './policy';
@@ -20,6 +21,8 @@ export interface ExperimentConfig {
   runCapMs: number;
   humanizer: HumanizerConfig;
   stepMs: number;
+  /** Opt-in boss room (profile-to-boss tests); absent = the pre-registered V0 pipeline. */
+  boss?: { config?: BossConfig; afterEncounters?: number };
 }
 
 export const DEFAULT_EXPERIMENT: ExperimentConfig = {
@@ -175,6 +178,8 @@ export function playAgent(styleId: StyleId, cfg: ExperimentConfig, agentIndex: n
       onRunEnd: () => {
         runEnded = true;
       },
+      // The evidence reads the previous sessions' log at construction.
+      ...(cfg.boss ? { boss: cfg.boss, history } : {}),
     });
     stack.startSession(
       sessionStartPayload(sessionWallClock(n), true),
