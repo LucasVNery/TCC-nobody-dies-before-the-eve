@@ -1,0 +1,6 @@
+id,metric,higher,lower,delta,ci_lo,ci_hi,n_higher,n_lower,undefined_rate_higher,undefined_rate_lower,verdict
+M1,staminaSpentPerMinute,agressivo,bloqueador,0.881,0.778,0.957,60,60,0.000,0.000,confirmada
+M2,staminaHighFraction,bloqueador,agressivo,0.902,0.805,0.979,60,60,0.000,0.000,confirmada
+M3,dodgeSpendShare,evasivo,agressivo,1.000,1.000,1.000,60,60,0.000,0.000,confirmada
+M4,blockSpendShare,bloqueador,evasivo,1.000,1.000,1.000,60,60,0.000,0.000,confirmada
+M5,itemPickRate,evasivo,agressivo,,,,60,0,0.000,1.000,indefinida
