@@ -1,7 +1,7 @@
 // src/scenes/ArenaScene.ts
 import Phaser from 'phaser';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
-import { PLAYER_MAX_HP, ASSALTANTE_MAX_HP, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
+import { PLAYER_MAX_HP, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
 import { findWeaponAction } from '../combat/actionRegistry';
 import { ASSET_KEYS } from '../visual/assetRegistry';
 import { loadFloorTiles } from '../visual/floor/floorAssets';
@@ -184,12 +184,13 @@ export class ArenaScene extends Phaser.Scene {
     this.world.sync(encounter, snap.move.dx !== 0 || snap.move.dy !== 0, this.loop.alpha);
     this.cameraRig.update(delta);
     this.hud.update({
-      hp: player.hp, maxHp: PLAYER_MAX_HP, enemyHp: assaltante.hp, enemyMaxHp: ASSALTANTE_MAX_HP,
+      hp: player.hp, maxHp: PLAYER_MAX_HP, enemyHp: assaltante.hp, enemyMaxHp: assaltante.maxHp,
       stamina: player.stamina.value,
       weaponLabel: WEAPON_LABELS[player.equippedWeaponId] ?? player.equippedWeaponId,
       heldItem: encounter.items.held,
       powerActive: encounter.items.powerActive,
       run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,
+      bossRoom: director.inBossRoom,
     });
     this.feedback.update(encounter);
     this.debugDraw.draw(encounter);

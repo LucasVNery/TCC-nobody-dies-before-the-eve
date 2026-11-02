@@ -29,6 +29,8 @@ export interface GameplayHudData {
   room: number;
   enc: number;
   encTotal: number;
+  /** True in the boss room: the run line reads CHEFE. */
+  bossRoom?: boolean;
 }
 
 const STAMINA_FLASH_MS = 300;
@@ -53,6 +55,16 @@ const HELP_LINES = [
 export function staminaBar(value: number, max: number = STAMINA_MAX, cells: number = STAMINA_BAR_CELLS): string {
   const filled = value > 0 ? Math.max(0, Math.min(cells, Math.ceil((value / max) * cells))) : 0;
   return `[${'#'.repeat(filled)}${'-'.repeat(cells - filled)}]`;
+}
+
+/** Run line: room and encounter, or just CHEFE in the boss room. */
+export function runLine(m: Pick<GameplayHudData, 'run' | 'room' | 'enc' | 'encTotal' | 'bossRoom'>): string {
+  return m.bossRoom ? `run ${m.run} · CHEFE` : `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`;
+}
+
+/** Player and enemy HP line. */
+export function statusLine(m: Pick<GameplayHudData, 'hp' | 'maxHp' | 'enemyHp' | 'enemyMaxHp'>): string {
+  return `HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`;
 }
 
 /** Minimal player HUD; the help list is hidden until toggled. */
@@ -89,12 +101,12 @@ export class GameplayHud {
 
   update(m: GameplayHudData): void {
     const exhausted = m.stamina <= 0;
-    this.statusText.setText(`HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`);
+    this.statusText.setText(statusLine(m));
     this.staminaText.setText(`estamina: ${staminaBar(m.stamina)} ${Math.round(m.stamina)}/${STAMINA_MAX}${exhausted ? ' EXAUSTO' : ''}`);
     const flashing = performance.now() < this.staminaFlashUntil;
     this.staminaText.setColor(exhausted || flashing ? '#ff5252' : '#ffffff');
     this.staminaText.setBackgroundColor(flashing ? '#7f0000' : '');
-    this.runText.setText(`run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`);
+    this.runText.setText(runLine(m));
     const item = m.heldItem ? ITEM_LABELS[m.heldItem] : '-';
     this.weaponText.setText(`Arma: ${m.weaponLabel} · Item: ${item}${m.powerActive ? ' · PODER' : ''}`);
   }
