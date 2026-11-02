@@ -605,7 +605,10 @@ The 10-run sweeps (4242/4243/4244) agree: 0 denied everywhere; evasivo 10/9/8 co
 
 ### Pending the author's review (spec §4.4 step 3, §9 items 1–2)
 
-The family M (M1–M5, especially M5 above), the final parameters (the unchanged initial values)
-and the order to run the full experiment (`--full`, 7 agents × 60 runs, seed `20261105`) await the
-author. The full run was **not** executed; its `--reviewed-before yes|no` flag records whether this
-review happened before it.
+**Author review (2026-11-01):** the author approved the family M (M1–M4 as written; M5 as
+pre-registered, with the metric limitation above) and the final parameters (the unchanged initial
+values of the style table), with no change. This review happened after the calibration pilot, in
+which per-style descriptive medians and definedness were seen (see the disclosure above), and
+before any full run. The order to run the full experiment (`--full`, 7 agents × 60 runs, seed
+`20261105`) is a separate step and had not been given when this was written; its
+`--reviewed-before yes|no` flag records whether this review happened before it.
