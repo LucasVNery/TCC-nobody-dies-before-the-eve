@@ -18,6 +18,7 @@ import { HitStop, HITSTOP_STEPS } from './hitstop';
 import { isPatientAttack } from './patience';
 import { ProjectileSystem } from './projectile';
 import { ItemSystem, ITEM } from '../game/items';
+import type { BossBrain } from '../boss/bossBrain';
 
 export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   readonly bus: EventBus<GameEvents>;
@@ -28,6 +29,10 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Simulation freeze on impacts; consumed by TelemetryStack.step. */
   readonly hitStop = new HitStop();
   readonly items: ItemSystem;
+  /** Optional profile-driven boss brain; null keeps the plain elite behavior. */
+  boss: BossBrain | null = null;
+  // Player position at the end of the previous step, for the measured speed.
+  private prevPlayerPos: Vec2 | null = null;
   /**
    * Write side of the profile. Defaults to a fresh `ProfileAccumulator` so
    * existing call sites (and tests that read `encounter.profile.domain(...)`)
@@ -128,6 +133,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
   /** Start-of-run player. */
   resetPlayer(position: Vec2): void {
     this.player.reset(position);
+    this.prevPlayerPos = null;
     this.hitStop.reset();
     this.projectiles.clear();
     this.hitAppliedThisAction = false;
@@ -257,6 +263,17 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     const distance = Math.hypot(dx, dy);
     const stepSeconds = stepMs / 1000;
     this.profile.record('distance', distance <= ATTACK_REACH ? stepSeconds : 0, stepSeconds);
+
+    const pos = this.player.position;
+    const prev = this.prevPlayerPos;
+    const playerSpeed = prev ? Math.hypot(pos.x - prev.x, pos.y - prev.y) / stepSeconds : 0;
+    this.prevPlayerPos = { x: pos.x, y: pos.y };
+    if (this.boss) {
+      const bossFree =
+        (this.assaltante.state === 'idle' || this.assaltante.state === 'chasing') &&
+        !this.assaltante.isBarraging;
+      this.boss.step(stepMs, { playerBlocking: this.player.isBlocking, playerSpeed, distance, bossFree });
+    }
   }
 
   private recordDefenseOnce(label: 'block' | 'parry'): void {
