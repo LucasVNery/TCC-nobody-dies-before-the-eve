@@ -32,7 +32,9 @@ export class BossBrain {
   private readonly onBarrage: BossBrainOptions['onBarrage'];
   private elapsedMs = 0;
   private passiveMs = 0;
-  // Window already found; re-armed only once the passive condition breaks.
+  // Passive time reached the window; decided on the first tick the boss is free.
+  private pending = false;
+  // Window already decided; re-armed only once the player-side condition breaks.
   private consumed = false;
   private lastBarrageAtMs: number | null = null;
   private windows = 0;
@@ -53,23 +55,35 @@ export class BossBrain {
     return this.fired;
   }
 
+  /**
+   * Passive time accumulates from the PLAYER-side condition only (blocking,
+   * still, near), whatever the boss is doing: the boss attacking does not
+   * reset or pause it. Once it reaches passiveWindowMs the window is pending
+   * and is decided on the first tick the boss is free. A player-side break
+   * clears the time, a pending window and the consumed flag.
+   */
   step(stepMs: number, view: BrainView): void {
     this.elapsedMs += stepMs;
     const cfg = this.cfg;
     const passive =
       view.playerBlocking &&
       view.playerSpeed <= cfg.passiveMaxSpeed &&
-      view.distance <= cfg.passiveMaxDistance &&
-      view.bossFree;
+      view.distance <= cfg.passiveMaxDistance;
     if (!passive) {
       this.passiveMs = 0;
+      this.pending = false;
       this.consumed = false;
       return;
     }
     if (this.consumed) return;
-    this.passiveMs += stepMs;
-    if (this.passiveMs < cfg.passiveWindowMs) return;
+    if (!this.pending) {
+      this.passiveMs += stepMs;
+      if (this.passiveMs < cfg.passiveWindowMs) return;
+      this.pending = true;
+    }
+    if (!view.bossFree) return;
 
+    this.pending = false;
     this.passiveMs = 0;
     this.consumed = true;
     this.windows += 1;
@@ -82,10 +96,8 @@ export class BossBrain {
     if (this.prng.next() >= chance) return;
     this.fired += 1;
     this.lastBarrageAtMs = this.elapsedMs;
-    this.onBarrage(Math.round(cfg.barrageBaseStrikes * durationMult), {
-      chance,
-      durationMult,
-      level: this.level,
-    });
+    // Floor keeps the strikes within base x barrageDurationMaxMult (round gave 5 = 1.67x at level 1).
+    const strikes = Math.max(1, Math.floor(cfg.barrageBaseStrikes * durationMult));
+    this.onBarrage(strikes, { chance, durationMult, level: this.level });
   }
 }

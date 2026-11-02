@@ -312,7 +312,7 @@ describe('RunDirector — boss room', () => {
     const order = d.events.map(([t]) => t);
     expect(order.indexOf('boss.barrage')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('boss.barrage')).toBeLessThan(order.indexOf('enemy.attack_start'));
-    expect(payloads(d.events, 'boss.barrage')).toEqual([{ strikes: 5, chance: 1, duration_mult: 1.5, level: 1 }]);
+    expect(payloads(d.events, 'boss.barrage')).toEqual([{ strikes: 4, chance: 1, duration_mult: 1.5, level: 1 }]);
     expect(payloads(d.events, 'enemy.attack_start')[0]).toEqual({ kind: 'swing' });
     // Before the 2 s first-attack delay: only a barrage can start a swing this early.
     expect(elapsed).toBeLessThan(2000);

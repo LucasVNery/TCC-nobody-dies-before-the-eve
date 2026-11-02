@@ -268,7 +268,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     const prev = this.prevPlayerPos;
     const playerSpeed = prev ? Math.hypot(pos.x - prev.x, pos.y - prev.y) / stepSeconds : 0;
     this.prevPlayerPos = { x: pos.x, y: pos.y };
-    if (this.boss) {
+    // Never on a death tick: a barrage would be logged just before enemy.death / player.death.
+    if (this.boss && !this.assaltante.isDead && !this.player.isDead) {
       const bossFree =
         (this.assaltante.state === 'idle' || this.assaltante.state === 'chasing') &&
         !this.assaltante.isBarraging;

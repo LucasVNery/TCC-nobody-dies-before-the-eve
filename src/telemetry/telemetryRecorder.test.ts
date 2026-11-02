@@ -102,7 +102,7 @@ describe('TelemetryRecorder', () => {
       habit: 'dodge_abuse', level: 0.5, runs_qualifying: 3, runs_window: 5, confidence: 0.7, active: true,
       dash_cooldown_ms: 3250, advance_mult: 1.2,
     });
-    bus.emit('boss.barrage', { strikes: 5, chance: 0.5, duration_mult: 1.5, level: 1 });
+    bus.emit('boss.barrage', { strikes: 4, chance: 0.5, duration_mult: 1.5, level: 1 });
     const events = stack.recorder.drain();
     const [snap] = ofType(events, 'profile.snapshot');
     expect(snap).toMatchObject({
@@ -116,7 +116,7 @@ describe('TelemetryRecorder', () => {
     });
     expect(adapt.ctx).toMatchObject({ e_hp: 160 });
     const [barrage] = ofType(events, 'boss.barrage');
-    expect(barrage).toMatchObject({ strikes: 5, chance: 0.5, duration_mult: 1.5, level: 1 });
+    expect(barrage).toMatchObject({ strikes: 4, chance: 0.5, duration_mult: 1.5, level: 1 });
     expect(barrage.ctx).toMatchObject({ e_hp: 160 });
   });
 
