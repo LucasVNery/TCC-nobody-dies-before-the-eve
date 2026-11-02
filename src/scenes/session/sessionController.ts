@@ -120,6 +120,8 @@ export class SessionController {
       nextSeed: this.opts.nextSeed,
       entitySize: this.opts.entitySize,
       onRunEnd: () => void this.persist(),
+      history: boot.history,
+      boss: {},
     });
     opts.onStackReady?.(this._stack, boot.history);
 

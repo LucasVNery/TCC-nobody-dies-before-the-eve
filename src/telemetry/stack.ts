@@ -5,6 +5,11 @@ import { RunDirector, PLAYER_START } from '../game/runDirector';
 import { RecordingProfile } from './recordingProfile';
 import { TelemetryRecorder } from './telemetryRecorder';
 import type { AbandonedRun } from './abandonedRun';
+import type { LoggedEvent } from './schema';
+import { GAME_VERSION } from './schema';
+import { HabitEvidence } from '../boss/habitEvidence';
+import { planBoss } from '../boss/bossPlanner';
+import type { BossConfig } from '../boss/bossConfig';
 
 export interface TelemetryStackOptions {
   /** The live profile — freshly rebuilt from the stored log on load. */
@@ -16,6 +21,10 @@ export interface TelemetryStackOptions {
   /** Hurtbox size of player and Assaltante (the scene passes ENTITY_SIZE). */
   entitySize: number;
   onRunEnd?: () => void;
+  /** The current player's stored events (all game versions); only read when `boss` is set. */
+  history?: readonly LoggedEvent[];
+  /** Opt-in boss room: habit evidence from `history` + the live log drives the boss plan. */
+  boss?: { config?: BossConfig; afterEncounters?: number };
 }
 
 export interface TelemetryStack {
@@ -24,6 +33,8 @@ export interface TelemetryStack {
   recording: RecordingProfile;
   encounter: Encounter<RecordingProfile>;
   director: RunDirector;
+  /** Habit evidence behind the boss plan; null when the boss room is off. */
+  evidence: HabitEvidence | null;
   /** One fixed simulation step: advance telemetry time, then the game. */
   step(stepMs: number): void;
   /**
@@ -52,11 +63,27 @@ export function createTelemetryStack(opts: TelemetryStackOptions): TelemetryStac
     recording,
   );
   recorder.attach(encounter);
+  const boss = opts.boss;
+  let evidence: HabitEvidence | null = null;
+  if (boss) {
+    evidence = new HabitEvidence({ playerId: opts.playerId, gameVersion: GAME_VERSION, config: boss.config });
+    evidence.applyAll(opts.history ?? []);
+    // Subscribed before session.start is logged: the evidence learns the session's version from it.
+    const live = evidence;
+    recorder.subscribe((e) => live.apply(e));
+  }
   const director = new RunDirector({
     encounter,
     snapshots: opts.accumulator,
     nextSeed: opts.nextSeed,
     firstRunIdx: opts.firstRunIdx,
+    ...(evidence && boss
+      ? {
+          planBoss: () => planBoss(evidence, opts.accumulator, boss.config),
+          bossAfterEncounters: boss.afterEncounters,
+          bossConfig: boss.config,
+        }
+      : {}),
   });
   const closeAbandonedRun = (run: AbandonedRun): void => {
     recorder.withIndices(run, () => {
@@ -80,6 +107,7 @@ export function createTelemetryStack(opts: TelemetryStackOptions): TelemetryStac
     recording,
     encounter,
     director,
+    evidence,
     step(stepMs: number) {
       // Hit-stop: a frozen step advances nothing (log time, opportunities,
       // stamina, input-buffer clock, enemy, player).

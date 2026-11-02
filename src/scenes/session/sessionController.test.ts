@@ -57,6 +57,13 @@ function wrapStore(inner: EventStore, hooks: { append?: (events: readonly Logged
 }
 
 describe('SessionController', () => {
+  it('builds the stack with the boss room on (habit evidence present)', async () => {
+    const { platform } = fakePlatform();
+    const c = controller(platform);
+    await c.start();
+    expect(c.stack.evidence).toBeTruthy();
+  });
+
   it('start on an empty store creates a player, starts run 0 and logs session.start with persistent=false for a memory store', async () => {
     const store = new MemoryEventStore();
     const { platform } = fakePlatform({ store });
