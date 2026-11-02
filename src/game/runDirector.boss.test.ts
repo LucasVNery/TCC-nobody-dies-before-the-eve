@@ -10,6 +10,7 @@ import { RunDirector, PLAYER_START } from './runDirector';
 import type { GameEvents } from '../core/events';
 import { BOSS_CONFIG, type BossConfig } from '../boss/bossConfig';
 import type { BossAdaptRecord, BossPlan, HabitLevels } from '../boss/types';
+import { TelemetryRecorder } from '../telemetry/telemetryRecorder';
 
 const STEP = 16;
 const SEED = 4242;
@@ -146,6 +147,22 @@ describe('RunDirector — boss room', () => {
     expect(adapts).toHaveLength(1);
     expect(adapts[0]).toMatchObject({ ...record('dodge_abuse', 1), dash_cooldown_ms: 4000 });
     expect(adapts[0].advance_mult as number).toBeCloseTo(1.4, 12);
+  });
+
+  it('boss.adapt is logged after the boss is configured: its ctx shows the boss (400 hp), log order unchanged', () => {
+    const d = makeDirector({ plan: plan({ dodge_abuse: 1 }, [record('dodge_abuse', 1)]) });
+    const recorder = new TelemetryRecorder({ playerId: 'p', sessionId: 's' });
+    recorder.attach(d.encounter);
+    d.director.start();
+    killEnemy(d);
+    const log = recorder.drain();
+    const adapt = log.find((e) => e.type === 'boss.adapt');
+    expect(BOSS_CONFIG.bossMaxHp).toBe(400);
+    expect(adapt?.ctx).toMatchObject({ e_hp: 400 });
+    const tail = log.map((e) => e.type).filter((t) => ['room.enter', 'profile.snapshot', 'boss.adapt', 'encounter.start'].includes(t));
+    expect(tail.slice(-4)).toEqual(['room.enter', 'profile.snapshot', 'boss.adapt', 'encounter.start']);
+    const entry = log.filter((e) => e.type === 'profile.snapshot').pop();
+    expect(entry?.at).toBe('boss.entry');
   });
 
   it('the boss has 400 hp, dodge_abuse 1 gives a 4000 ms dash cooldown and advance_mult 1.4', () => {

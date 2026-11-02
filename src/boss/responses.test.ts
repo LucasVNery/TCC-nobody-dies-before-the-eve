@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { advanceMult, barrageParams, dashCooldownMs } from './responses';
+import { BOSS_CONFIG } from './bossConfig';
+import { MAX_DODGE_COOLDOWN_MS } from '../combat/playerController';
 
 describe('barrageParams', () => {
   it('has anchor values at 0, 0.6 and 1', () => {
@@ -31,5 +33,10 @@ describe('dashCooldownMs', () => {
     expect(dashCooldownMs(0)).toBe(2500);
     expect(dashCooldownMs(1)).toBe(4000);
     expect(dashCooldownMs(5)).toBeLessThanOrEqual(4000);
+  });
+
+  it("the player's clamp equals the boss cap, so the logged dash_cooldown_ms is never silently clamped", () => {
+    expect(MAX_DODGE_COOLDOWN_MS).toBe(BOSS_CONFIG.dashCooldownMaxMs);
+    expect(dashCooldownMs(1)).toBe(MAX_DODGE_COOLDOWN_MS);
   });
 });

@@ -103,19 +103,26 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
     const passive = fs.slice(1).flatMap((f) => f.adapts.filter((a) => a.habit === 'passive_defense'));
     expect(passive.length).toBeGreaterThan(0);
     for (const a of passive) expect(a.level as number).toBeGreaterThan(0);
+    let levelZeroFights = 0;
     for (const f of fs) {
       if (levels(f.entry).passive_defense === 0) {
+        levelZeroFights++;
         expect(f.events.some((e) => e.type === 'boss.barrage')).toBe(false);
       }
     }
+    expect(levelZeroFights).toBeGreaterThan(0);
   });
 
-  // SKIPPED (measured, seed 4242, afterEncounters 1/2, 8 runs): the bloqueador
-  // faced 8 boss fights with passive_defense at 0.2/0.6/1 and the BossBrain saw
-  // 0 passive windows in every one. The agent holds block only while an attack
-  // is coming (released 100 ms after the boss leaves attacking/lunging), so
-  // "blocking while the boss is idle/chasing for 1200 ms" never happens.
-  // A policy/trigger mismatch for the author to decide; not loosened here.
+  // SKIPPED (re-measured after the fix wave, seed 4242, afterEncounters 1, 8 runs). The
+  // passive window now counts player-side time only (blocking, still, near), whatever the
+  // boss is doing, and is decided on the first free tick. Still 0 windows: the BossBrain ran
+  // in 7 boss fights (passive_defense 0/0.2/0.6/0.6/0.6/0.6/1) and the longest contiguous
+  // blocking+still+near stretch per fight was 117/383/917/717/667/567/933 ms (< 1200), with
+  // 4.0-9.8 s of blocking in total in the long fights. Every stretch was broken by the agent
+  // releasing block (never by speed or distance): it raises the guard only while an attack
+  // is coming and drops it ~100 ms after the boss leaves attacking/lunging, so it never holds
+  // block 1200 ms in a row. A policy/threshold mismatch for the author (passiveWindowMs is
+  // author calibration); not loosened here.
   it.skip('bloqueador: its boss fights fire capped barrages', () => {
     const fs = fights(played('bloqueador').events);
     const barrages = fs.flatMap((f) => f.events.filter((e) => e.type === 'boss.barrage'));
@@ -123,6 +130,7 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
     for (const b of barrages) {
       expect(b.chance as number).toBeLessThanOrEqual(0.5);
       expect(b.strikes as number).toBeGreaterThanOrEqual(3);
+      expect(b.strikes as number).toBeLessThanOrEqual(4); // floor(3 x 1.5): the 1.5x duration cap
     }
   });
 
@@ -170,8 +178,10 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
   });
 
   it('caps hold across every produced log', () => {
+    let fightCount = 0;
     for (const log of allLogs()) {
       for (const f of fights(log.events)) {
+        fightCount++;
         expect(applied(f.entry).dash_cooldown_ms).toBeLessThanOrEqual(4000);
         expect(applied(f.entry).advance_mult).toBeLessThanOrEqual(1.4 + 1e-9);
         expect(f.adapts.length).toBeLessThanOrEqual(2);
@@ -190,6 +200,7 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
         if (e.type.startsWith('boss.')) expect(inFights.has(e)).toBe(true);
       }
     }
+    expect(fightCount).toBeGreaterThan(0);
   });
 
   it('without cfg.boss the log has no boss events and no boss.entry snapshot', () => {

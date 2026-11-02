@@ -206,12 +206,13 @@ export class RunDirector {
       partial: false,
       snapshot: { ...this.opts.snapshots.snapshot('boss.entry'), levels: { ...levels }, applied: { ...applied } },
     });
-    for (const record of plan.records) {
-      if (record.active) this.bus.emit('boss.adapt', { ...record, ...applied });
-    }
     const assaltante = encounter.assaltante;
     assaltante.configureBoss({ maxHp: cfg.bossMaxHp, advanceMult: applied.advance_mult });
     encounter.player.setDodgeCooldownMs(applied.dash_cooldown_ms);
+    // After configureBoss: the boss.adapt ctx describes the boss, not the respawned elite.
+    for (const record of plan.records) {
+      if (record.active) this.bus.emit('boss.adapt', { ...record, ...applied });
+    }
     encounter.boss = new BossBrain({
       barrageLevel: levels.passive_defense,
       prng: createPrng((this.runSeed ^ 0xb055) >>> 0),

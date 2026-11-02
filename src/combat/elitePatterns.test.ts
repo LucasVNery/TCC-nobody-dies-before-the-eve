@@ -161,6 +161,28 @@ describe('combo', () => {
     conserved(log);
   });
 
+  it('blocking strike 1 and dashing strike 2 credits block then dodge (the landing check re-arms for strike 2)', () => {
+    // The path a real player takes under the 2.5 s dash cooldown: guard up for strike 1, dash out of strike 2.
+    const { encounter, log } = setup({ x: 290, y: 0 }, { x: 330, y: 0 });
+    const a = encounter.assaltante;
+    encounter.player.startBlock(); // held far longer than the parry window by the impact: a block
+    a.beginPattern('combo', encounter.player.position);
+    steps(encounter, 1, SECOND_STRIKE_STEP + 4, (n) => {
+      if (n === SECOND_STRIKE_STEP - 8) {
+        encounter.player.stopBlock();
+        encounter.setPlayerMoveInput(-1, 0);
+        encounter.player.tryDodge();
+      }
+    });
+    expect(log.defenses.map((d) => d.label)).toEqual(['block', 'dodge']);
+    const dodgeOpens = log.opens.filter((o) => o.type === 'dodge');
+    expect(dodgeOpens).toHaveLength(2);
+    expect(log.closes.find((c) => c.opp_id === dodgeOpens[1].opp_id)?.outcome).toBe('taken');
+    expect(log.hurts).toHaveLength(0);
+    settle(encounter);
+    conserved(log);
+  });
+
   it('an unmitigated strike 1 hurts, and strike 2 hurts again (two separate defense flags)', () => {
     const { encounter, log } = setup({ x: 0, y: 0 }, { x: 30, y: 0 });
     encounter.assaltante.beginPattern('combo', encounter.player.position);
