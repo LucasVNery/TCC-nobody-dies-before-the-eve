@@ -135,16 +135,17 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
     }
   });
 
-  it('negative: an agent with too little data never adapts the boss', () => {
-    // One short run: the only boss fight is the gated first one.
+  it('negative: insufficient data or no valid habit never adapts the boss', () => {
+    // Insufficient data: one short run, so the only boss fight is the gated first one.
     for (const id of ['evasivo', 'bloqueador'] as const) {
       const log = playAgent(id, withBoss({ runsPerAgent: 1, runsPerSession: 1, runCapMs: 60_000 }), STYLE_IDS.indexOf(id));
       expect(log.events.some((e) => e.type === 'boss.adapt'), id).toBe(false);
     }
-    // Many boss fights, but at most one run reaches minLabels / minNearSeconds before the boss, and none
-    // qualifies a habit even at full confidence. Measured with the 1.7x boss body (seed 4242): run 0's boss
-    // fight now ends in a death, which reshapes run 1 (11 labels, 21.6 s near, dodge share 0.45, near
-    // fraction 0.18); every other run stays below both thresholds, as before the bigger body.
+    // No valid habit: many boss fights, at most one run reaching minLabels / minNearSeconds, and no habit
+    // qualifies even at full confidence, so the boss never adapts. Measured with the 1.7x boss body (seed 4242).
+    // Before the centre-consistent boss distance (top-left to top-left) run 1 reached both thresholds
+    // (11 labels, 21.6 s near); with distances measured from the boss's centre anchor the trajectory changes
+    // and no run reaches them (largest: run 7, 6 labels, 18.4 s near). The bound below holds either way.
     const { events, playerId } = played('evasivo');
     expect(fights(events).length).toBeGreaterThan(2);
     const evidence = new HabitEvidence({ playerId, gameVersion: GAME_VERSION, config: BOSS_CONFIG_DEMO });

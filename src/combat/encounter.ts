@@ -146,7 +146,8 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
    */
   useItem(): void {
     if (!this.items.held || !this.player.canAct) return;
-    const enemyPos = this.assaltante.position;
+    // Centre-consistent (boss body may be bigger); exactly `position` for the ordinary enemy.
+    const enemyPos = this.assaltante.distanceAnchor;
     const result = this.items.use({ playerHp: this.player.hp, enemyPos, playerPos: this.player.position });
     if (!result) return;
     this.profile.recordAction('utility');
@@ -251,15 +252,17 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       if (this.assaltante.isDead) this.projectiles.clear();
     }
 
-    this.items.step(stepMs, this.player.hurtbox(), this.assaltante.position);
+    this.items.step(stepMs, this.player.hurtbox(), this.assaltante.distanceAnchor);
 
     // Must run last: if a hit/dodge was resolved above this tick, the opportunity
     // needs to be removed before its own expiry check fires here — otherwise a
     // same-call race would close it as 'expired' one tick early.
     this.opportunities.step(stepMs);
 
-    const dx = this.assaltante.position.x - this.player.position.x;
-    const dy = this.assaltante.position.y - this.player.position.y;
+    // Measured from the boss's centre-consistent anchor (exactly `position` at bodyScale 1).
+    const enemyAnchor = this.assaltante.distanceAnchor;
+    const dx = enemyAnchor.x - this.player.position.x;
+    const dy = enemyAnchor.y - this.player.position.y;
     const distance = Math.hypot(dx, dy);
     const stepSeconds = stepMs / 1000;
     this.profile.record('distance', distance <= ATTACK_REACH ? stepSeconds : 0, stepSeconds);

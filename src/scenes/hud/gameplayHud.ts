@@ -56,8 +56,15 @@ export const HELP_LINES = [
   '  Esc          - voltar ao menu (encerra a run; o histórico fica salvo)',
   '  F2 / F8 / F9 - resetar perfil / exportar / importar histórico',
   '  F3           - mostrar/ocultar hitboxes (depuração)',
-  '  F4 / F6      - pular para a sala do chefe / forçar barragem (teste)',
 ];
+
+/** Help line for the playtest shortcuts; shown only when they are enabled (see debugKeysEnabled). */
+export const DEBUG_KEYS_HELP_LINE = '  F4 / F6      - pular para a sala do chefe / forçar barragem (teste)';
+
+/** The in-game help list: HELP_LINES, plus the F4/F6 line when the playtest shortcuts are on. */
+export function helpLines(debugKeys: boolean): readonly string[] {
+  return debugKeys ? [...HELP_LINES, DEBUG_KEYS_HELP_LINE] : HELP_LINES;
+}
 
 /** Plain-text bar of `cells` cells for 0..max; any value above 0 shows at least one cell. */
 export function staminaBar(value: number, max: number = STAMINA_MAX, cells: number = STAMINA_BAR_CELLS): string {
@@ -116,7 +123,7 @@ export class GameplayHud {
   private readonly hintText: Phaser.GameObjects.Text;
   private readonly helpText: Phaser.GameObjects.Text;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, opts: { debugKeys?: boolean } = {}) {
     const line = { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' };
     this.statusText = scene.add.text(10, 10, '', line);
     this.staminaText = scene.add.text(10, 29, '', line);
@@ -127,7 +134,7 @@ export class GameplayHud {
       fontSize: '13px',
       color: '#aaaaaa',
     });
-    this.helpText = scene.add.text(590, 10, HELP_LINES, {
+    this.helpText = scene.add.text(590, 10, [...helpLines(opts.debugKeys ?? false)], {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#ffffff',

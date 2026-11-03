@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES, bannerAlpha, bossBarFill, bossBarLabel, BANNER_HOLD_MS, BANNER_FADE_MS, BOSS_BAR_WIDTH } from './gameplayHud';
+import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES, helpLines, DEBUG_KEYS_HELP_LINE, bannerAlpha, bossBarFill, bossBarLabel, BANNER_HOLD_MS, BANNER_FADE_MS, BOSS_BAR_WIDTH } from './gameplayHud';
 
 describe('staminaBar', () => {
   it('150 of 150 is a full 15-cell bar', () => {
@@ -56,6 +56,12 @@ describe('HELP_LINES', () => {
   });
   it('mentions Esc for the menu', () => {
     expect(HELP_LINES.some((l) => l.includes('Esc') && l.includes('menu'))).toBe(true);
+  });
+  it('does not advertise the F4/F6 playtest shortcuts; helpLines adds them only when enabled', () => {
+    expect(HELP_LINES.some((l) => l.includes('F4') || l.includes('F6'))).toBe(false);
+    expect(helpLines(false)).toEqual(HELP_LINES);
+    expect(helpLines(true)).toEqual([...HELP_LINES, DEBUG_KEYS_HELP_LINE]);
+    expect(DEBUG_KEYS_HELP_LINE).toContain('F4 / F6');
   });
 });
 

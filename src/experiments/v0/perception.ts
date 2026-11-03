@@ -30,7 +30,8 @@ export interface Observation {
 export function observe(encounter: Encounter<ProfileSink>, tMs: number, runIdx: number): Observation {
   const { player, assaltante, items } = encounter;
   const tg = assaltante.telegraph;
-  const ep = assaltante.position;
+  // Centre-consistent for the bigger boss body; exactly `position` for the ordinary enemy.
+  const ep = assaltante.distanceAnchor;
   const pp = player.position;
   return {
     tMs,

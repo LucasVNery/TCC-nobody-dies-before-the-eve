@@ -129,10 +129,20 @@ export class AssaltanteController implements ThreatAssessor {
    * Exactly `_position` at scale 1, so the plain elite's arithmetic is untouched.
    */
   private get anchor(): Vec2 {
+    // Scale 1: the very `_position` numbers (no `+ 0` arithmetic), so the plain elite stays bit-identical.
+    if (this._bodyScale === 1) return { x: this._position.x, y: this._position.y };
     return {
       x: this._position.x + (this.width - this.baseWidth) / 2,
       y: this._position.y + (this.height - this.baseHeight) / 2,
     };
+  }
+
+  /**
+   * Public copy of the centre-consistent reference above, for distances measured outside the controller
+   * (profile distance, boss brain, item use / spawn, agent perception). Exactly `position` at bodyScale 1.
+   */
+  get distanceAnchor(): Vec2 {
+    return this.anchor;
   }
 
   /** Plain swing / combo strike reach from the centre. */

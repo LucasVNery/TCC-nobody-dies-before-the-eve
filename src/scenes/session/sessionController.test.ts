@@ -259,6 +259,41 @@ describe('SessionController', () => {
     await c.shutdown();
   });
 
+  it('a shutdown during an import waits for the merge before closing the store, and ready stays false', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const order: string[] = [];
+    const gate: { release?: () => void } = {};
+    let gated = false;
+    const store = wrapStore(new MemoryEventStore(), { close: () => void order.push('close') });
+    const realGet = store.getMeta.bind(store);
+    store.getMeta = (async (k: string) => {
+      if (gated) {
+        await new Promise<void>((r) => { gate.release = r; });
+        order.push('merge-end');
+        throw new Error('meta unreadable'); // the merge fails: the 'kept' path
+      }
+      return realGet(k);
+    }) as EventStore['getMeta'];
+    const donor = new MemoryEventStore();
+    const dc = controller(fakePlatform({ store: donor }).platform);
+    await dc.start();
+    await dc.shutdown();
+    const c = controller(fakePlatform({ store, picked: toNdjson(await donor.readAll()) }).platform);
+    await c.start();
+    gated = true;
+    const imp = c.importHistory();
+    for (let i = 0; i < 50 && !gate.release; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(gate.release).toBeDefined(); // the merge is in flight, blocked in the store
+    const down = c.shutdown();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(order).toEqual([]); // not closed under the import
+    gate.release?.();
+    expect(await imp).toBe('kept');
+    await down;
+    expect(order).toEqual(['merge-end', 'close']);
+    expect(c.ready).toBe(false); // the 'kept' path does not revive a shut-down session
+  });
+
   it('shutdown flushes pending evidence and closes the store only after in-flight writes settle', async () => {
     const inner = new MemoryEventStore();
     const order: string[] = [];

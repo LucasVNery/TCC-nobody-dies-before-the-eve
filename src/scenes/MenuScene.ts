@@ -42,6 +42,8 @@ export class MenuScene extends Phaser.Scene {
   private panel: AnalysisPanel | null = null;
   /** Bumped whenever the Análise screen is left: a stale load drops its result. */
   private analysisToken = 0;
+  /** Set once Jogar queued the scene switch, so a click + Enter in the same frame cannot queue two starts. */
+  private starting = false;
 
   constructor() {
     super('MenuScene');
@@ -52,6 +54,7 @@ export class MenuScene extends Phaser.Scene {
     this.selected = firstEnabled(MENU_ITEMS);
     this.buttons = [];
     this.panel = null;
+    this.starting = false; // the scene object is reused when the Arena comes back here
 
     const title = this.add.text(640, 120, 'TCC · arena adaptativa', { fontFamily: FONT, fontSize: '40px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
     const version = this.add.text(640, 172, `protótipo ${GAME_VERSION}`, { fontFamily: FONT, fontSize: '16px', color: '#aaaaaa' }).setOrigin(0.5);
@@ -112,9 +115,10 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private activate(id: MenuId): void {
-    if (this.screen !== 'main') return;
+    if (this.screen !== 'main' || this.starting) return;
     switch (id) {
       case 'play':
+        this.starting = true;
         this.scene.start('ArenaScene');
         return;
       case 'howto':

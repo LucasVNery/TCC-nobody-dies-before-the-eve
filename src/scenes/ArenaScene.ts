@@ -1,4 +1,5 @@
 // src/scenes/ArenaScene.ts
+/// <reference types="vite/client" />
 import Phaser from 'phaser';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
 import { PLAYER_MAX_HP } from '../combat/movementDefs';
@@ -11,6 +12,7 @@ import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
 import { createBrowserPlatform } from './session/browserPlatform';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindHotkeys } from './input/hotkeys';
+import { debugKeysEnabled } from './input/debugKeys';
 import { claimStore } from './session/storeHandoff';
 import { CameraRig } from './view/cameraRig';
 import { WorldView } from './view/worldView';
@@ -56,6 +58,8 @@ export class ArenaScene extends Phaser.Scene {
   private panel!: AnalysisPanel;
   private gate!: RefreshGate;
   private stepAvg!: MovingAverage;
+  /** Set when Esc already queued the switch to the menu, so a second press in the same frame is ignored. */
+  private leaving = false;
 
   constructor() {
     super('ArenaScene');
@@ -72,6 +76,12 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Per create(): false once THIS run of the scene shut down, so a late async callback (an import) started
+    // before Esc never restarts a later Arena (the scene object is reused when the menu comes back here).
+    let alive = true;
+    this.leaving = false;
+    // Playtest shortcuts (F4/F6) only with ?boss=demo or in a dev build.
+    const debugKeys = debugKeysEnabled(window.location.search, import.meta.env.DEV);
     const session = new SessionController({
       platform: createBrowserPlatform(),
       entitySize: ENTITY_SIZE,
@@ -93,33 +103,40 @@ export class ArenaScene extends Phaser.Scene {
       flash: (target) => this.world.flash(target),
       staminaDenied: () => this.hud.flashStamina(),
     });
-    this.hud = new GameplayHud(this);
+    this.hud = new GameplayHud(this, { debugKeys });
     this.cameraRig = new CameraRig(this);
     this.cameraRig.attach(this.world.playerSprite.gameObject, this.hud.objects);
 
+    const keyboard = this.input.keyboard;
+    if (!keyboard) throw new Error('Keyboard input plugin not available');
+    // Claimed only past the throw above, so a failed create() can never leave the claim held forever.
     // Waits for whoever held the store before (a restarted ArenaScene or the menu's Análise) to close it.
     const storeClaim = claimStore(this.registry);
     this.playerInput = new PlayerInput(this, () => (session.ready ? this.intents() : null));
     this.panel = new AnalysisPanel(document.body);
-    const keyboard = this.input.keyboard;
-    if (!keyboard) throw new Error('Keyboard input plugin not available');
     const unbindHotkeys = bindHotkeys(keyboard, {
       resetProfile: () => { if (session.ready) session.resetProfile(); },
       exportHistory: () => void session.exportHistory(),
       importHistory: () =>
         void session.importHistory().then((r) => {
-          if (r === 'restart') this.scene.restart();
+          // The scene may have been shut down (Esc) while the import was in flight.
+          if (r === 'restart' && alive) this.scene.restart();
         }),
       togglePanel: () => this.panel.toggle(),
       toggleHelp: () => this.hud.toggleHelp(),
       toggleDebug: () => this.debugDraw.toggle(),
       jumpToBoss: () => { if (session.ready) session.stack.director.debugEnterBoss(); },
       forceBarrage: () => { if (session.ready) session.stack.director.debugBarrage(); },
-      backToMenu: () => this.scene.start('MenuScene'),
-    });
+      backToMenu: () => {
+        if (this.leaving) return;
+        this.leaving = true;
+        this.scene.start('MenuScene');
+      },
+    }, { debugKeys });
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void session.persist() });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      alive = false;
       unbindHotkeys();
       this.playerInput.destroy();
       // PlayerInput's keys were added with capture on; captures are global, so drop them before the next scene.

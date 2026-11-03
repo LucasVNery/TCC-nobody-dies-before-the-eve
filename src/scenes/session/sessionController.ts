@@ -56,6 +56,8 @@ export class SessionController {
   private unsubscribeHide: (() => void) | null = null;
   /** The pending start(), if any; shutdown() waits for it before closing the store. */
   private booting: Promise<void> = Promise.resolve();
+  /** The in-flight merge of an importHistory(), if any; shutdown() waits for it before closing the store. */
+  private importing: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(private readonly opts: SessionControllerOptions) {}
@@ -224,34 +226,41 @@ export class SessionController {
     // Stop the simulation (and with it every new event) before the awaits,
     // so nothing is produced between the last persist and the restart.
     this._ready = false;
-    let merged = false;
-    try {
-      this.stack.recording.flushPending();
-      await this.persist();
-      const result = await importInto(this.store, text);
-      merged = true;
-      if (result.invalidLines > 0) {
-        console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
+    const merge = (async (): Promise<boolean> => {
+      let merged = false;
+      try {
+        this.stack.recording.flushPending();
+        await this.persist();
+        const result = await importInto(this.store, text);
+        merged = true;
+        if (result.invalidLines > 0) {
+          console.warn(`[telemetry] import skipped ${result.invalidLines} invalid line(s)`);
+        }
+        if (result.foreignPlayerIds.length > 0) {
+          console.warn(
+            `[telemetry] import brought events of other player(s) (${result.foreignPlayerIds.join(', ')}); ` +
+              `adopted player ${result.playerId} — only that player's events are replayed`,
+          );
+        }
+        this.stack.recording.flushPending();
+        await this.persist();
+      } catch (err) {
+        console.warn('[telemetry] import failed', err);
       }
-      if (result.foreignPlayerIds.length > 0) {
-        console.warn(
-          `[telemetry] import brought events of other player(s) (${result.foreignPlayerIds.join(', ')}); ` +
-            `adopted player ${result.playerId} — only that player's events are replayed`,
-        );
-      }
-      this.stack.recording.flushPending();
-      await this.persist();
-    } catch (err) {
-      console.warn('[telemetry] import failed', err);
-    }
+      return merged;
+    })();
+    this.importing = merge.then(() => undefined);
+    const merged = await merge;
     if (merged) return 'restart'; // new session: profile rebuilt from the merged history
-    this._ready = true; // nothing was merged: keep playing this session
+    // Nothing was merged: keep playing this session, unless it was shut down meanwhile.
+    if (!this.stopped) this._ready = true;
     return 'kept';
   }
 
   /**
    * Final flush, then closes the store only after every in-flight append settled.
    * If start() is still booting, waits for it (it then stops before starting the game) and closes the store it opened.
+   * An importHistory() merge in flight is waited for too, so the store is never closed under it.
    */
   shutdown(): Promise<void> {
     this.stopped = true;
@@ -260,7 +269,7 @@ export class SessionController {
     const wasRunning = this._ready;
     this._ready = false;
     if (wasRunning) this.stack.recording.flushPending();
-    return this.booting.then(() => {
+    return Promise.all([this.booting, this.importing]).then(() => {
       const store = this.store;
       return this.persist().finally(() => store.close());
     });

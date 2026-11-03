@@ -107,3 +107,52 @@ describe('Encounter boss wiring', () => {
     expect(() => e.step(STEP_MS)).not.toThrow();
   });
 });
+
+describe('Encounter boss-room distances (centre-consistent anchor)', () => {
+  /** Boss centred at (800, 600); player 20×20 whose centre is `dx` from it. One step, the distance the brain saw. */
+  function distanceSeen(bodyScale: number | null, dx: number): { seen: number; e: Encounter } {
+    const e = new Encounter(
+      { x: 800 + dx - 10, y: 590, width: 20, height: 20 },
+      { x: 790, y: 590, width: 20, height: 20 },
+    );
+    if (bodyScale !== null) e.assaltante.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1, bodyScale });
+    const views: number[] = [];
+    e.boss = { step: (_ms: number, view: { distance: number }) => void views.push(view.distance) } as unknown as BossBrain;
+    e.step(STEP_MS);
+    return { seen: views[0], e };
+  }
+
+  it('ordinary enemy: distanceAnchor is exactly position and the distance is the old top-left one', () => {
+    for (const dx of [-100, 100, 37.25]) {
+      const { seen, e } = distanceSeen(null, dx);
+      expect(e.assaltante.bodyScale).toBe(1);
+      expect(e.assaltante.distanceAnchor).toEqual(e.assaltante.position);
+      const p = e.assaltante.position;
+      const q = e.player.position;
+      expect(seen).toBe(Math.hypot(p.x - q.x, p.y - q.y)); // bit-identical to the pre-anchor formula
+    }
+  });
+
+  it('boss at bodyScale 1.7: a player left or right of the boss centre is at the same distance (no direction bias)', () => {
+    const left = distanceSeen(1.7, -100).seen;
+    const right = distanceSeen(1.7, 100).seen;
+    expect(left).toBeCloseTo(right, 9);
+    // Top-left to top-left would have read ~7 px less on one side and ~7 px more on the other.
+    const { e } = distanceSeen(1.7, 100);
+    const tl = e.assaltante.position;
+    const pp = e.player.position;
+    expect(Math.abs(Math.hypot(tl.x - pp.x, tl.y - pp.y) - right)).toBeGreaterThan(5);
+  });
+
+  it('boss at bodyScale 1.7: item use measures dist_to_enemy from the centre anchor (symmetric)', () => {
+    const dists: number[] = [];
+    for (const dx of [-80, 80]) {
+      const e = new Encounter({ x: 800 + dx - 10, y: 590, width: 20, height: 20 }, { x: 790, y: 590, width: 20, height: 20 });
+      e.assaltante.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1, bodyScale: 1.7 });
+      (e.items as unknown as { slot: unknown }).slot = { id: 'item-t', kind: 'bomb', heldMs: 0 };
+      e.bus.on('item.use', (ev) => dists.push(ev.dist_to_enemy));
+      e.useItem();
+    }
+    expect(dists).toEqual([80, 80]);
+  });
+});
