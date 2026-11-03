@@ -337,3 +337,32 @@ describe('RunDirector — boss room', () => {
     expect(d.encounter.boss?.barragesFired).toBe(1);
   });
 });
+
+describe('RunDirector — playtest shortcuts', () => {
+  it('debugEnterBoss opens the boss room mid-run, once', () => {
+    const d = makeDirector({ bossAfterEncounters: 3 });
+    d.director.start();
+    d.director.debugEnterBoss();
+    expect(d.director.inBossRoom).toBe(true);
+    expect(d.encounter.assaltante.maxHp).toBe(BOSS_CONFIG.bossMaxHp);
+    d.director.debugEnterBoss();
+    expect(d.planBoss).toHaveBeenCalledTimes(1);
+  });
+
+  it('debugEnterBoss does nothing without a boss plan', () => {
+    const d = makeDirector({ noBoss: true });
+    d.director.start();
+    d.director.debugEnterBoss();
+    expect(d.director.inBossRoom).toBe(false);
+  });
+
+  it('debugBarrage starts a barrage only in the boss room', () => {
+    const d = makeDirector({ bossAfterEncounters: 3 });
+    d.director.start();
+    d.director.debugBarrage();
+    expect(d.encounter.assaltante.isBarraging).toBe(false);
+    d.director.debugEnterBoss();
+    d.director.debugBarrage();
+    expect(d.encounter.assaltante.isBarraging).toBe(true);
+  });
+});

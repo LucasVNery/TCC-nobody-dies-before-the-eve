@@ -5,6 +5,7 @@ import { loadProfileState, type BootState } from '../../telemetry/bootstrap';
 import { ProfileAccumulator } from '../../profile/profileAccumulator';
 import { toNdjson, importInto } from '../../telemetry/ndjson';
 import { SCHEMA_VERSION, GAME_VERSION, sessionStartPayload, type LoggedEvent } from '../../telemetry/schema';
+import type { BossConfig } from '../../boss/bossConfig';
 import type { Platform } from './platform';
 
 export interface SessionStatus {
@@ -27,6 +28,8 @@ export interface SessionControllerOptions {
   platform: Platform;
   entitySize: number;
   nextSeed: () => number;
+  /** Boss thresholds; omitted means BOSS_CONFIG. */
+  bossConfig?: BossConfig;
 }
 
 export interface StartOptions {
@@ -121,7 +124,7 @@ export class SessionController {
       entitySize: this.opts.entitySize,
       onRunEnd: () => void this.persist(),
       history: boot.history,
-      boss: {},
+      boss: { config: this.opts.bossConfig },
     });
     opts.onStackReady?.(this._stack, boot.history);
 

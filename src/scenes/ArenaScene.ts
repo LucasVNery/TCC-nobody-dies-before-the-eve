@@ -7,6 +7,7 @@ import { ASSET_KEYS } from '../visual/assetRegistry';
 import { loadFloorTiles } from '../visual/floor/floorAssets';
 import { generatePlaceholderTextures, ENTITY_SIZE } from '../visual/placeholderTextures';
 import { SessionController } from './session/sessionController';
+import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
 import { createBrowserPlatform } from './session/browserPlatform';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindHotkeys } from './input/hotkeys';
@@ -76,6 +77,8 @@ export class ArenaScene extends Phaser.Scene {
       platform: createBrowserPlatform(),
       entitySize: ENTITY_SIZE,
       nextSeed: () => Math.floor(Math.random() * 0x100000000),
+      // playtest: open the game with ?boss=demo for the short-run thresholds
+      bossConfig: new URLSearchParams(window.location.search).get('boss') === 'demo' ? BOSS_CONFIG_DEMO : undefined,
     });
     this.session = session;
     this.aggregator = new MetricsAggregator();
@@ -109,6 +112,8 @@ export class ArenaScene extends Phaser.Scene {
       togglePanel: () => this.panel.toggle(),
       toggleHelp: () => this.hud.toggleHelp(),
       toggleDebug: () => this.debugDraw.toggle(),
+      jumpToBoss: () => { if (session.ready) session.stack.director.debugEnterBoss(); },
+      forceBarrage: () => { if (session.ready) session.stack.director.debugBarrage(); },
     });
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void session.persist() });

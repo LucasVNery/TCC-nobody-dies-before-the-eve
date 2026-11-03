@@ -49,6 +49,7 @@ const HELP_LINES = [
   '  F           - usar item (cura / poder / bomba)',
   '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
   '  F3          - mostrar/ocultar hitboxes (depuracao)',
+  '  F4 / F6     - pular para a sala do chefe / forcar barragem (teste)',
 ];
 
 /** Plain-text bar of `cells` cells for 0..max; any value above 0 shows at least one cell. */

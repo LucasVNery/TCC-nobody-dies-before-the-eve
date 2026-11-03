@@ -131,6 +131,26 @@ export class RunDirector {
     else this.endEncounter();
   }
 
+  /**
+   * Playtest shortcut: closes the current encounter as a normal clear and opens the boss room right away
+   * (the log looks like a run that cleared its encounters). No-op without a boss plan or inside the boss room.
+   */
+  debugEnterBoss(): void {
+    if (!this.started || this.bossRoom || !this.opts.planBoss) return;
+    this.encountersCleared = (this.opts.bossAfterEncounters ?? BOSS_AFTER_ENCOUNTERS) - 1;
+    this.endEncounter();
+  }
+
+  /**
+   * Playtest shortcut: makes the boss start a barrage now (base strikes, not logged as boss.barrage).
+   * Ignored outside the boss room or while the boss is busy.
+   */
+  debugBarrage(): void {
+    if (!this.bossRoom) return;
+    const cfg = this.bossConfig;
+    this.opts.encounter.assaltante.startBarrage(cfg.barrageBaseStrikes, cfg.barragePauseMs);
+  }
+
   private get bus() {
     return this.opts.encounter.bus;
   }
