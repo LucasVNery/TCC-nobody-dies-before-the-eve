@@ -29,11 +29,17 @@ export interface GameplayHudData {
   room: number;
   enc: number;
   encTotal: number;
-  /** True in the boss room: the run line reads CHEFE. */
+  /** True in the boss room: the indicator reads BOSS ROOM, the boss bar shows and the plain enemy HP is dropped. */
   bossRoom?: boolean;
 }
 
 const STAMINA_FLASH_MS = 300;
+export const BANNER_HOLD_MS = 1400;
+export const BANNER_FADE_MS = 600;
+export const BOSS_BAR_WIDTH = 600;
+export const BOSS_BAR_HEIGHT = 18;
+const BOSS_BAR_X = (1280 - BOSS_BAR_WIDTH) / 2;
+const BOSS_BAR_Y = 62;
 
 export const HELP_LINES = [
   'Controls:',
@@ -68,6 +74,24 @@ export function runTag(run: number): string {
   return `run ${run}`;
 }
 
+/** Banner opacity `elapsedMs` after it was triggered: full during the hold, then a linear fade to 0. */
+export function bannerAlpha(elapsedMs: number): number {
+  if (elapsedMs < 0) return 0;
+  if (elapsedMs <= BANNER_HOLD_MS) return 1;
+  return Math.max(0, 1 - (elapsedMs - BANNER_HOLD_MS) / BANNER_FADE_MS);
+}
+
+/** Filled pixel width of the boss bar; any hp above 0 shows at least 1px, clamped to [0, width]. */
+export function bossBarFill(hp: number, maxHp: number, width: number = BOSS_BAR_WIDTH): number {
+  if (!(hp > 0) || !(maxHp > 0)) return 0;
+  return Math.max(1, Math.min(width, Math.round((hp / maxHp) * width)));
+}
+
+/** Boss bar numeric label. */
+export function bossBarLabel(hp: number, maxHp: number): string {
+  return `CHEFE  ${Math.max(0, Math.ceil(hp))}/${Math.ceil(maxHp)}`;
+}
+
 /** Player HP line; the enemy part is dropped in the boss room (the boss bar replaces it). */
 export function statusLine(m: Pick<GameplayHudData, 'hp' | 'maxHp' | 'enemyHp' | 'enemyMaxHp' | 'bossRoom'>): string {
   const hp = `HP: ${m.hp}/${m.maxHp}`;
@@ -81,6 +105,12 @@ export class GameplayHud {
   private readonly staminaText: Phaser.GameObjects.Text;
   private readonly runText: Phaser.GameObjects.Text;
   private staminaFlashUntil = 0;
+  private readonly indicatorText: Phaser.GameObjects.Text;
+  private readonly bannerText: Phaser.GameObjects.Text;
+  private readonly bossBar: Phaser.GameObjects.Graphics;
+  private readonly bossLabel: Phaser.GameObjects.Text;
+  private bannerStart = -1;
+  private wasBossRoom = false;
   private readonly weaponText: Phaser.GameObjects.Text;
   private readonly hintText: Phaser.GameObjects.Text;
   private readonly helpText: Phaser.GameObjects.Text;
@@ -102,8 +132,17 @@ export class GameplayHud {
       color: '#ffffff',
     });
     this.helpText.setVisible(false);
-    for (const t of [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText]) t.setScrollFactor(0);
-    this.objects = [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText];
+    this.runText.setFontSize(13).setColor('#aaaaaa');
+    this.indicatorText = scene.add.text(640, 8, '', { fontFamily: 'monospace', fontSize: '28px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5, 0);
+    this.bannerText = scene.add.text(640, 300, 'BOSS ROOM', { fontFamily: 'monospace', fontSize: '84px', color: '#ff5252', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8 }).setOrigin(0.5).setAlpha(0).setVisible(false);
+    this.bossBar = scene.add.graphics().setVisible(false);
+    this.bossLabel = scene.add.text(640, BOSS_BAR_Y + BOSS_BAR_HEIGHT / 2, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
+    const all = [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText, this.indicatorText, this.bannerText, this.bossBar, this.bossLabel];
+    for (const t of all) t.setScrollFactor(0);
+    this.bossBar.setDepth(0);
+    this.bannerText.setDepth(10);
+    this.bossLabel.setDepth(1);
+    this.objects = all;
   }
 
   update(m: GameplayHudData): void {
@@ -113,9 +152,30 @@ export class GameplayHud {
     const flashing = performance.now() < this.staminaFlashUntil;
     this.staminaText.setColor(exhausted || flashing ? '#ff5252' : '#ffffff');
     this.staminaText.setBackgroundColor(flashing ? '#7f0000' : '');
-    this.runText.setText(`${runTag(m.run)} · ${encounterLine(m)}`);
+    this.runText.setText(runTag(m.run));
+    this.runText.setPosition(1270 - this.runText.width, 10);
+    this.indicatorText.setText(encounterLine(m));
+    this.updateBoss(m);
     const item = m.heldItem ? ITEM_LABELS[m.heldItem] : '-';
     this.weaponText.setText(`Arma: ${m.weaponLabel} · Item: ${item}${m.powerActive ? ' · PODER' : ''}`);
+  }
+
+  /** Boss-room banner (fades on its own; never pauses anything) and wide boss health bar. */
+  private updateBoss(m: GameplayHudData): void {
+    const boss = !!m.bossRoom;
+    if (boss && !this.wasBossRoom) this.bannerStart = performance.now();
+    this.wasBossRoom = boss;
+    const alpha = boss && this.bannerStart >= 0 ? bannerAlpha(performance.now() - this.bannerStart) : 0;
+    this.bannerText.setAlpha(alpha).setVisible(alpha > 0);
+    this.bossBar.setVisible(boss);
+    this.bossLabel.setVisible(boss);
+    if (!boss) return;
+    const g = this.bossBar;
+    g.clear();
+    g.fillStyle(0x000000, 0.7).fillRect(BOSS_BAR_X - 3, BOSS_BAR_Y - 3, BOSS_BAR_WIDTH + 6, BOSS_BAR_HEIGHT + 6);
+    g.fillStyle(0x4a1010, 1).fillRect(BOSS_BAR_X, BOSS_BAR_Y, BOSS_BAR_WIDTH, BOSS_BAR_HEIGHT);
+    g.fillStyle(0xd32f2f, 1).fillRect(BOSS_BAR_X, BOSS_BAR_Y, bossBarFill(m.enemyHp, m.enemyMaxHp), BOSS_BAR_HEIGHT);
+    this.bossLabel.setText(bossBarLabel(m.enemyHp, m.enemyMaxHp));
   }
 
   /** Brief flash of the stamina line when an action was denied for lack of stamina. */

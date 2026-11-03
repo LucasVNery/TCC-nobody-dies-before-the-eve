@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES } from './gameplayHud';
+import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES, bannerAlpha, bossBarFill, bossBarLabel, BANNER_HOLD_MS, BANNER_FADE_MS, BOSS_BAR_WIDTH } from './gameplayHud';
 
 describe('staminaBar', () => {
   it('150 of 150 is a full 15-cell bar', () => {
@@ -53,5 +53,37 @@ describe('statusLine', () => {
 describe('HELP_LINES', () => {
   it('is exported', () => {
     expect(HELP_LINES[0]).toBe('Controls:');
+  });
+});
+
+describe('bannerAlpha', () => {
+  it('is full during the hold, fades linearly, then 0', () => {
+    expect(bannerAlpha(0)).toBe(1);
+    expect(bannerAlpha(BANNER_HOLD_MS)).toBe(1);
+    expect(bannerAlpha(BANNER_HOLD_MS + BANNER_FADE_MS / 2)).toBeCloseTo(0.5);
+    expect(bannerAlpha(BANNER_HOLD_MS + BANNER_FADE_MS)).toBe(0);
+    expect(bannerAlpha(10000)).toBe(0);
+  });
+  it('is 0 for negative elapsed', () => {
+    expect(bannerAlpha(-1)).toBe(0);
+  });
+});
+
+describe('bossBarFill', () => {
+  it('scales with hp and clamps', () => {
+    expect(bossBarFill(400, 400)).toBe(BOSS_BAR_WIDTH);
+    expect(bossBarFill(200, 400)).toBe(BOSS_BAR_WIDTH / 2);
+    expect(bossBarFill(0, 400)).toBe(0);
+    expect(bossBarFill(-5, 400)).toBe(0);
+    expect(bossBarFill(999, 400)).toBe(BOSS_BAR_WIDTH);
+    expect(bossBarFill(0.01, 400)).toBe(1);
+    expect(bossBarFill(10, 0)).toBe(0);
+  });
+});
+
+describe('bossBarLabel', () => {
+  it('shows CHEFE with hp/max', () => {
+    expect(bossBarLabel(350.2, 400)).toBe('CHEFE  351/400');
+    expect(bossBarLabel(-3, 400)).toBe('CHEFE  0/400');
   });
 });
