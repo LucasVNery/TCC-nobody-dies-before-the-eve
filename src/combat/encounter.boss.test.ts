@@ -49,7 +49,7 @@ describe('Encounter boss wiring', () => {
       { x: 40, y: 0, width: 20, height: 20 },
       { x: 100, y: 0, width: 20, height: 20 },
     );
-    e.assaltante.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1 });
+    e.assaltante.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1, bodyScale: 1 });
     const starts: Array<{ t: number; kind: string }> = [];
     let t = 0;
     e.bus.on('enemy.attack_start', (ev) => starts.push({ t, kind: ev.kind }));

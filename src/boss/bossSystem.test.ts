@@ -7,6 +7,7 @@ import { STYLE_IDS, type StyleId } from '../experiments/v0/styles';
 import { GAME_VERSION, type LoggedEvent } from '../telemetry/schema';
 import { BOSS_CONFIG_DEMO } from './bossConfig';
 import { HabitEvidence } from './habitEvidence';
+import { evaluateHabits } from './habits';
 
 const BASE_COOLDOWN_MS = 2500;
 
@@ -140,15 +141,22 @@ describe('profile-to-boss system with synthetic agents (seed 4242, BOSS_CONFIG_D
       const log = playAgent(id, withBoss({ runsPerAgent: 1, runsPerSession: 1, runCapMs: 60_000 }), STYLE_IDS.indexOf(id));
       expect(log.events.some((e) => e.type === 'boss.adapt'), id).toBe(false);
     }
-    // Many boss fights, but no run ever reaches minLabels / minNearSeconds before the boss.
+    // Many boss fights, but at most one run reaches minLabels / minNearSeconds before the boss, and none
+    // qualifies a habit even at full confidence. Measured with the 1.7x boss body (seed 4242): run 0's boss
+    // fight now ends in a death, which reshapes run 1 (11 labels, 21.6 s near, dodge share 0.45, near
+    // fraction 0.18); every other run stays below both thresholds, as before the bigger body.
     const { events, playerId } = played('evasivo');
     expect(fights(events).length).toBeGreaterThan(2);
     const evidence = new HabitEvidence({ playerId, gameVersion: GAME_VERSION, config: BOSS_CONFIG_DEMO });
     evidence.applyAll(events);
-    for (const r of evidence.runs()) {
-      expect(r.dodge + r.block + r.parry + r.retreat).toBeLessThan(BOSS_CONFIG_DEMO.minLabels);
-      expect(r.nearDen).toBeLessThan(BOSS_CONFIG_DEMO.minNearSeconds);
-    }
+    const withData = evidence.runs().filter(
+      (r) =>
+        r.dodge + r.block + r.parry + r.retreat >= BOSS_CONFIG_DEMO.minLabels ||
+        r.nearDen >= BOSS_CONFIG_DEMO.minNearSeconds,
+    );
+    expect(withData.length).toBeLessThanOrEqual(1);
+    const states = evaluateHabits(evidence.runs(), { confidence: () => 1 }, BOSS_CONFIG_DEMO);
+    expect(states.filter((s) => s.valid)).toEqual([]);
     expect(events.some((e) => e.type === 'boss.adapt')).toBe(false);
   });
 

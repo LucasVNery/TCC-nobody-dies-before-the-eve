@@ -227,7 +227,7 @@ export class RunDirector {
       snapshot: { ...this.opts.snapshots.snapshot('boss.entry'), levels: { ...levels }, applied: { ...applied } },
     });
     const assaltante = encounter.assaltante;
-    assaltante.configureBoss({ maxHp: cfg.bossMaxHp, advanceMult: applied.advance_mult });
+    assaltante.configureBoss({ maxHp: cfg.bossMaxHp, advanceMult: applied.advance_mult, bodyScale: cfg.bodyScale });
     encounter.player.setDodgeCooldownMs(applied.dash_cooldown_ms);
     // After configureBoss: the boss.adapt ctx describes the boss, not the respawned elite.
     for (const record of plan.records) {

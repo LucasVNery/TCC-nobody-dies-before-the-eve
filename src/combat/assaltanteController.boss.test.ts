@@ -34,7 +34,7 @@ describe('AssaltanteController — boss mode', () => {
   it('configureBoss sets hp and maxHp and restarts idle', () => {
     const { enemy } = makeEnemy();
     enemy.takeDamage(50);
-    enemy.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1.4 });
+    enemy.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1.4, bodyScale: 1 });
     expect(enemy.hp).toBe(400);
     expect(enemy.maxHp).toBe(400);
     expect(enemy.state).toBe('idle');
@@ -46,7 +46,7 @@ describe('AssaltanteController — boss mode', () => {
     enemy.step(STEP, { x: 70, y: 0 }); // swing: dodge window open
     const closed: GameEvents['opp.close'][] = [];
     bus.on('opp.close', (p) => closed.push(p));
-    enemy.configureBoss({ maxHp: 400, advanceMult: 1 });
+    enemy.configureBoss({ maxHp: 400, advanceMult: 1, bodyScale: 1 });
     expect(closed).toHaveLength(1);
     expect(closed[0]).toMatchObject({ outcome: 'invalid', reason: 'source_interrupted' });
   });
@@ -54,13 +54,13 @@ describe('AssaltanteController — boss mode', () => {
   it('chases at 150 px/s normally and 210 px/s with advanceMult 1.4', () => {
     expect(chasedInOneSecond(makeEnemy().enemy)).toBeCloseTo(ASSALTANTE_CHASE_SPEED, 0);
     const { enemy } = makeEnemy();
-    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4 });
+    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4, bodyScale: 1 });
     expect(Math.abs(chasedInOneSecond(enemy) - 210)).toBeLessThanOrEqual(1);
   });
 
   it('respawn() clears boss mode: 160 hp and 150 px/s', () => {
     const { enemy } = makeEnemy();
-    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4 });
+    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4, bodyScale: 1 });
     enemy.respawn({ x: 100, y: 600 }, 'source_interrupted');
     expect(enemy.hp).toBe(ASSALTANTE_MAX_HP);
     expect(enemy.maxHp).toBe(ASSALTANTE_MAX_HP);
@@ -69,7 +69,7 @@ describe('AssaltanteController — boss mode', () => {
 
   it('clearBoss() restores maxHp and speed without touching hp or position', () => {
     const { enemy } = makeEnemy();
-    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4 });
+    enemy.configureBoss({ maxHp: 400, advanceMult: 1.4, bodyScale: 1 });
     enemy.takeDamage(30);
     const pos = enemy.position;
     enemy.clearBoss();
@@ -83,7 +83,7 @@ describe('AssaltanteController — boss mode', () => {
     const target = { x: 900, y: 600, width: 20, height: 20 };
     const normal = makeEnemy().enemy;
     const boss = makeEnemy().enemy;
-    boss.configureBoss({ maxHp: 400, advanceMult: 1.4 });
+    boss.configureBoss({ maxHp: 400, advanceMult: 1.4, bodyScale: 1 });
     primeElite(normal); // past the opening delay: the chase time decides
     primeElite(boss);
     const tNormal = normal.msUntilThreatens(target, 10_000);

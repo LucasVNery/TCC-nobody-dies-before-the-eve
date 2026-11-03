@@ -21,6 +21,11 @@ export interface ChaseTelegraphSnapshot {
   position: Vec2; // canto superior esquerdo — mesma convenção de assaltanteRules.distanceToPlayer
   width: number;
   height: number;
+  /**
+   * Offset from `position` to the point distances are measured from (the top-left a base-size body with the
+   * same centre would have). Set only for a grown boss body; absent = 0, the plain elite's arithmetic.
+   */
+  anchorOffset?: Vec2;
   attackDirection: Vec2; // só relevante quando state === 'attacking'
   /** Idle/chasing only: ms until the enemy may start an attack at all (opening delay or pause still running). */
   readyInMs?: number;
@@ -43,8 +48,9 @@ export function predictThreatMs(
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     if (state === 'idle' || state === 'chasing') {
-      const dx = target.x - position.x;
-      const dy = target.y - position.y;
+      const off = snapshot.anchorOffset;
+      const dx = off ? target.x - (position.x + off.x) : target.x - position.x;
+      const dy = off ? target.y - (position.y + off.y) : target.y - position.y;
       const distance = Math.hypot(dx, dy);
 
       // The earliest possible attack: the enemy has closed to attack range and its pause is over.

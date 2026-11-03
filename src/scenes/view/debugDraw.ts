@@ -4,7 +4,6 @@ import type { ProfileSink } from '../../profile/profileSink';
 import type { Vec2, AABB } from '../../combat/types';
 import type { AttackSector } from '../../combat/sector';
 import { ATTACK_RANGE } from '../../ai/rules/assaltanteRules';
-import { ENTITY_SIZE } from '../../visual/placeholderTextures';
 import { toScreen, GROUND_PROJECTION, type GroundProjection } from '../../visual/groundProjection';
 
 const HURTBOX_COLOR = 0xffffff;
@@ -79,13 +78,14 @@ export class DebugDraw {
     g.strokePoints(boxCorners(encounter.player.hurtbox(), GROUND_PROJECTION), true);
     g.strokePoints(boxCorners(encounter.assaltante.hurtbox(), GROUND_PROJECTION), true);
 
+    const body = encounter.assaltante.bodySize;
     const assaltanteCenter: Vec2 = {
-      x: encounter.assaltante.position.x + ENTITY_SIZE / 2,
-      y: encounter.assaltante.position.y + ENTITY_SIZE / 2,
+      x: encounter.assaltante.position.x + body.width / 2,
+      y: encounter.assaltante.position.y + body.height / 2,
     };
     const rangeScreenCenter = toScreen(assaltanteCenter, GROUND_PROJECTION);
     g.lineStyle(1, ATTACK_RANGE_COLOR, 0.6);
-    const rangeSize = rangeEllipseSize(ATTACK_RANGE, GROUND_PROJECTION);
+    const rangeSize = rangeEllipseSize(ATTACK_RANGE * encounter.assaltante.bodyScale, GROUND_PROJECTION);
     g.strokeEllipse(rangeScreenCenter.x, rangeScreenCenter.y, rangeSize.width, rangeSize.height);
 
     g.fillStyle(ATTACK_HITBOX_COLOR, 0.4);

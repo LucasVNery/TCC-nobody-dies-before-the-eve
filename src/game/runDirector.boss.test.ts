@@ -178,6 +178,15 @@ describe('RunDirector — boss room', () => {
     expect(cooldownIs(d.encounter.player, 4000)).toBe(true);
   });
 
+  it('the boss body is BOSS_CONFIG.bodyScale times the elite body', () => {
+    const d = makeDirector({ plan: plan({}) });
+    d.director.start();
+    killEnemy(d);
+    expect(d.director.inBossRoom).toBe(true);
+    expect(d.encounter.assaltante.bodySize.width).toBeCloseTo(20 * BOSS_CONFIG.bodyScale, 9);
+    expect(d.encounter.assaltante.bodySize.height).toBeCloseTo(20 * BOSS_CONFIG.bodyScale, 9);
+  });
+
   it('advance_mult takes the larger of far and the dodge level', () => {
     const d = makeDirector({ plan: plan({ far: 1, reflex_dash: 0.5 }, [record('far', 1), record('reflex_dash', 0.5)]) });
     d.director.start();

@@ -55,8 +55,13 @@ export class AssaltanteController implements ThreatAssessor {
   private activeOppId: string | null = null;
   private _activeRuleId: string | null = null;
   private _position: Vec2;
-  private readonly width: number;
-  private readonly height: number;
+  /** Hurtbox size: the base size times `_bodyScale` (the boss is drawn and hit as a bigger body). */
+  private width: number;
+  private height: number;
+  private readonly baseWidth: number;
+  private readonly baseHeight: number;
+  /** Boss body scale (1 outside boss mode): scales the hurtbox, the strike reaches and the decision ranges. */
+  private _bodyScale = 1;
   private _attackDirection: Vec2 = { x: -1, y: 0 };
   private playerWasInRangeDuringPunish = false;
   private lungeCooldownMs: number = Math.max(ELITE.firstAttackDelayMs, LUNGE.cooldownMs);
@@ -100,10 +105,67 @@ export class AssaltanteController implements ThreatAssessor {
     this._position = { x: initialHurtbox.x, y: initialHurtbox.y };
     this.width = initialHurtbox.width;
     this.height = initialHurtbox.height;
+    this.baseWidth = initialHurtbox.width;
+    this.baseHeight = initialHurtbox.height;
   }
 
   get position(): Vec2 {
     return { x: this._position.x, y: this._position.y };
+  }
+
+  /** 1 outside boss mode. */
+  get bodyScale(): number {
+    return this._bodyScale;
+  }
+
+  /** Current hurtbox size (the base size times bodyScale). */
+  get bodySize(): { width: number; height: number } {
+    return { width: this.width, height: this.height };
+  }
+
+  /**
+   * Top-left a base-size body with the same centre would have. Every distance to the player is measured from
+   * here (the player position is a base-size top-left too), so a grown body keeps measuring centre to centre.
+   * Exactly `_position` at scale 1, so the plain elite's arithmetic is untouched.
+   */
+  private get anchor(): Vec2 {
+    return {
+      x: this._position.x + (this.width - this.baseWidth) / 2,
+      y: this._position.y + (this.height - this.baseHeight) / 2,
+    };
+  }
+
+  /** Plain swing / combo strike reach from the centre. */
+  private get swingReach(): number {
+    return ATTACK_REACH * this._bodyScale + this.width / 2;
+  }
+
+  /** Slam radius past the body (the telegraph's ring) and the slam reach from the centre. */
+  private get slamRadius(): number {
+    return ELITE.slamRadius * this._bodyScale;
+  }
+
+  private get slamReach(): number {
+    return this.slamRadius + this.width / 2;
+  }
+
+  private get lungeContactDistance(): number {
+    return LUNGE.contactDistance * this._bodyScale;
+  }
+
+  /** Resizes the body to `scale` × base around its current centre, kept inside the arena. */
+  private setBodyScale(scale: number): void {
+    const cx = this._position.x + this.width / 2;
+    const cy = this._position.y + this.height / 2;
+    this._bodyScale = scale;
+    this.width = this.baseWidth * scale;
+    this.height = this.baseHeight * scale;
+    this._position = clampToArena(
+      { x: cx - this.width / 2, y: cy - this.height / 2 },
+      this.width,
+      this.height,
+      ARENA_BOUNDS,
+    );
   }
 
   get maxHp(): number {
@@ -121,20 +183,23 @@ export class AssaltanteController implements ThreatAssessor {
 
   /**
    * Boss mode: a fresh enemy (as after respawn, position kept) with `maxHp` and the chase speed scaled
-   * by `advanceMult`. Open windows are closed as source_interrupted, like respawn.
+   * by `advanceMult`, its body grown to `bodyScale` × the base size around the same centre (then clamped
+   * to the arena). Open windows are closed as source_interrupted, like respawn.
    */
-  configureBoss(opts: { maxHp: number; advanceMult: number }): void {
+  configureBoss(opts: { maxHp: number; advanceMult: number; bodyScale: number }): void {
     this.respawn(this._position, 'source_interrupted');
     this.bossMaxHp = opts.maxHp;
     this.advanceMult = opts.advanceMult;
     this.hp = opts.maxHp;
+    this.setBodyScale(opts.bodyScale);
   }
 
-  /** Back to the normal elite tuning; hp and position untouched. */
+  /** Back to the normal elite tuning and base body (same centre); hp untouched. */
   clearBoss(): void {
     this.bossMaxHp = null;
     this.advanceMult = 1;
     this.clearBarrage();
+    if (this._bodyScale !== 1) this.setBodyScale(1);
   }
 
   /**
@@ -191,10 +256,10 @@ export class AssaltanteController implements ThreatAssessor {
         progress: Math.min(1, this.phaseElapsedMs / this.lungeTelegraphMs),
         origin,
         direction,
-        reach: ATTACK_REACH + this.width / 2,
+        reach: this.swingReach,
         halfAngleRad: ATTACK_HALF_ANGLE_RAD,
         travel: this.lungeMaxTravel,
-        contactDistance: LUNGE.contactDistance,
+        contactDistance: this.lungeContactDistance,
       };
     }
     if (this.state !== 'attacking') return null;
@@ -207,9 +272,9 @@ export class AssaltanteController implements ThreatAssessor {
         progress,
         origin,
         direction,
-        reach: ELITE.slamRadius + this.width / 2,
+        reach: this.slamReach,
         halfAngleRad: Math.PI,
-        radius: ELITE.slamRadius,
+        radius: this.slamRadius,
       };
     }
     const view: TelegraphView = {
@@ -217,7 +282,7 @@ export class AssaltanteController implements ThreatAssessor {
       progress,
       origin,
       direction,
-      reach: ATTACK_REACH + this.width / 2,
+      reach: this.swingReach,
       halfAngleRad: ATTACK_HALF_ANGLE_RAD,
     };
     if (this.patternKind === 'combo') view.hit = this.comboStrike;
@@ -256,8 +321,9 @@ export class AssaltanteController implements ThreatAssessor {
    */
   beginPattern(kind: 'combo' | 'slam', playerPosition: Vec2): void {
     if (this.state !== 'idle' && this.state !== 'chasing') return;
-    const dx = playerPosition.x - this._position.x;
-    const dy = playerPosition.y - this._position.y;
+    const anchor = this.anchor;
+    const dx = playerPosition.x - anchor.x;
+    const dy = playerPosition.y - anchor.y;
     this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
     this.startPattern(kind, dx, dy, Math.hypot(dx, dy));
   }
@@ -308,6 +374,9 @@ export class AssaltanteController implements ThreatAssessor {
   respawn(position: Vec2, reason: InvalidReason): void {
     this.closeOpenWindows(reason);
     this._position = { x: position.x, y: position.y };
+    this._bodyScale = 1;
+    this.width = this.baseWidth;
+    this.height = this.baseHeight;
     this.hp = ASSALTANTE_MAX_HP;
     this.state = 'idle';
     this.phaseElapsedMs = 0;
@@ -369,9 +438,9 @@ export class AssaltanteController implements ThreatAssessor {
     }
     const center = { x: this._position.x + this.width / 2, y: this._position.y + this.height / 2 };
     if (this.state === 'attacking' && this.patternKind === 'slam') {
-      return directionalSector(center, this._attackDirection, ELITE.slamRadius + this.width / 2, Math.PI);
+      return directionalSector(center, this._attackDirection, this.slamReach, Math.PI);
     }
-    return directionalSector(center, this._attackDirection, ATTACK_REACH + this.width / 2, ATTACK_HALF_ANGLE_RAD);
+    return directionalSector(center, this._attackDirection, this.swingReach, ATTACK_HALF_ANGLE_RAD);
   }
 
   /**
@@ -387,7 +456,7 @@ export class AssaltanteController implements ThreatAssessor {
     if (this.state === 'lunging') {
       const cx = this._position.x + this.width / 2 - (target.x + target.width / 2);
       const cy = this._position.y + this.height / 2 - (target.y + target.height / 2);
-      if (Math.hypot(cx, cy) > this.lungeMaxTravel + LUNGE.contactDistance) return null;
+      if (Math.hypot(cx, cy) > this.lungeMaxTravel + this.lungeContactDistance) return null;
       if (this.lungeMoving) return 0;
       const remaining = Math.max(0, this.lungeTelegraphMs - this.phaseElapsedMs);
       return remaining <= horizonMs ? remaining : null;
@@ -398,6 +467,9 @@ export class AssaltanteController implements ThreatAssessor {
       position: this._position,
       width: this.width,
       height: this.height,
+      ...(this._bodyScale !== 1
+        ? { anchorOffset: { x: (this.width - this.baseWidth) / 2, y: (this.height - this.baseHeight) / 2 } }
+        : {}),
       attackDirection: this._attackDirection,
       readyInMs:
         this.state === 'idle' || this.state === 'chasing'
@@ -407,12 +479,12 @@ export class AssaltanteController implements ThreatAssessor {
           : 0,
     };
     const config: ChaseTelegraphConfig = {
-      attackRange: ATTACK_RANGE,
+      attackRange: ATTACK_RANGE * this._bodyScale,
       chaseSpeedPxPerSec: this.chaseSpeed,
       telegraphMs: this.state === 'attacking' ? this.strikeTelegraphMs : TELEGRAPH_MS,
       swingMs: SWING_MS,
       recoveryMs: this.state === 'recovering' ? this.recoveryDurationMs : RECOVERY_MS,
-      reach: ATTACK_REACH + this.width / 2,
+      reach: this.swingReach,
       halfAngleRad: ATTACK_HALF_ANGLE_RAD,
       patternPauseMs: ELITE.patternPauseMs,
     };
@@ -437,7 +509,7 @@ export class AssaltanteController implements ThreatAssessor {
     const active = this.strikeActiveMs;
     const toActive = Math.max(0, tele - this.phaseElapsedMs);
     const strikeEnd = tele + active - this.phaseElapsedMs;
-    const radius = this.patternKind === 'slam' ? ELITE.slamRadius + this.width / 2 : ATTACK_REACH + this.width / 2;
+    const radius = this.patternKind === 'slam' ? this.slamReach : this.swingReach;
     const aimed =
       this.patternKind === 'slam'
         ? directionalSector(center, this._attackDirection, radius, Math.PI)
@@ -462,8 +534,9 @@ export class AssaltanteController implements ThreatAssessor {
   }
 
   step(stepMs: number, playerPosition: Vec2): void {
-    const dx = playerPosition.x - this._position.x;
-    const dy = playerPosition.y - this._position.y;
+    const anchor = this.anchor;
+    const dx = playerPosition.x - anchor.x;
+    const dy = playerPosition.y - anchor.y;
     const distanceToPlayer = Math.hypot(dx, dy);
     this.playerPosition = { x: playerPosition.x, y: playerPosition.y };
     this.lungeLandedThisTick = false;
@@ -484,7 +557,7 @@ export class AssaltanteController implements ThreatAssessor {
 
     if ((this.state === 'idle' || this.state === 'chasing') && this.barrageRemaining > 0) {
       // Barrage: no pattern draw (the PRNG is not consumed), no first-attack delay, own pause.
-      if (distanceToPlayer <= ATTACK_RANGE && this.sincePatternMs >= this.barragePauseMs) {
+      if (distanceToPlayer <= ATTACK_RANGE * this._bodyScale && this.sincePatternMs >= this.barragePauseMs) {
         this._activeRuleId = 'assaltante.attack';
         this.barrageRemaining--;
         this.barrageStrikeActive = true;
@@ -500,6 +573,7 @@ export class AssaltanteController implements ThreatAssessor {
         lungeReady: this.lungeCooldownMs <= 0,
         chargeReady: this.chargeCooldownMs <= 0,
         patternReady: this.patternReady,
+        ...(this._bodyScale !== 1 ? { reachScale: this._bodyScale } : {}),
       };
       const rule = choosePatternRule(bb, this.prng);
       this._activeRuleId = rule.id;
@@ -563,7 +637,8 @@ export class AssaltanteController implements ThreatAssessor {
     }
 
     if (this.state === 'recovering') {
-      if (distanceToPlayer <= ATTACK_REACH) {
+      // The player's own reach to this body: a grown body is reached from further, by its extra half width.
+      if (distanceToPlayer <= ATTACK_REACH + (this.width - this.baseWidth) / 2) {
         this.playerWasInRangeDuringPunish = true;
       }
       if (this.phaseElapsedMs >= this.recoveryDurationMs) {
@@ -611,12 +686,13 @@ export class AssaltanteController implements ThreatAssessor {
     );
     const moved = Math.hypot(this._position.x - before.x, this._position.y - before.y);
     this.lungeTravelled += moved;
-    const px = this.playerPosition.x - this._position.x;
-    const py = this.playerPosition.y - this._position.y;
-    const lx = this.lungeLockPlayerPosition.x - this._position.x;
-    const ly = this.lungeLockPlayerPosition.y - this._position.y;
-    this.lungeLandedThisTick =
-      Math.hypot(px, py) <= LUNGE.contactDistance || Math.hypot(lx, ly) <= LUNGE.contactDistance;
+    const anchor = this.anchor;
+    const px = this.playerPosition.x - anchor.x;
+    const py = this.playerPosition.y - anchor.y;
+    const lx = this.lungeLockPlayerPosition.x - anchor.x;
+    const ly = this.lungeLockPlayerPosition.y - anchor.y;
+    const contact = this.lungeContactDistance;
+    this.lungeLandedThisTick = Math.hypot(px, py) <= contact || Math.hypot(lx, ly) <= contact;
 
     const hitWall = moved < intended - 1e-6;
     if (hitWall || this.lungeTravelled >= this.lungeMaxTravel - 1e-6) {

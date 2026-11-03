@@ -49,9 +49,11 @@ export interface FeedbackHooks {
   staminaDenied(): void;
 }
 
-function centre(pos: Vec2): Vec2 {
-  // Entities are square; their centre is a half-size offset from the logic position.
-  return { x: pos.x + ENTITY_SIZE / 2, y: pos.y + ENTITY_SIZE / 2 };
+const PLAYER_BODY = { width: ENTITY_SIZE, height: ENTITY_SIZE } as const;
+
+function centre(pos: Vec2, body: { width: number; height: number } = PLAYER_BODY): Vec2 {
+  // The centre is a half-size offset from the logic position (top-left); the boss body is bigger than ENTITY_SIZE.
+  return { x: pos.x + body.width / 2, y: pos.y + body.height / 2 };
 }
 
 function hitKind(actionId: string): 'light' | 'heavy' {
@@ -106,14 +108,14 @@ export class FeedbackView {
         const s = shakeFor(hitKind(String(e.actionId ?? '')));
         this.hooks.shake(s.px, s.decayMs);
         this.hooks.flash('enemy');
-        if (enc) this.spawnNumber(enc.assaltante.position, Number(e.dmg), '#ffeb3b', now);
+        if (enc) this.spawnNumber(centre(enc.assaltante.position, enc.assaltante.bodySize), Number(e.dmg), '#ffeb3b', now);
         break;
       }
       case 'player.hurt': {
         const s = shakeFor('heavy');
         this.hooks.shake(s.px, s.decayMs);
         this.hooks.flash('player');
-        if (enc) this.spawnNumber(enc.player.position, Number(e.dmg), '#ff5252', now);
+        if (enc) this.spawnNumber(centre(enc.player.position), Number(e.dmg), '#ff5252', now);
         break;
       }
       case 'player.defense':
@@ -252,9 +254,9 @@ export class FeedbackView {
     }
   }
 
-  private spawnNumber(entityPos: Vec2, dmg: number, color: string, now: number): void {
+  private spawnNumber(entityCentre: Vec2, dmg: number, color: string, now: number): void {
     const slot = this.numbers.find((n) => !n.active) ?? this.numbers[0];
-    const at = toScreen(centre(entityPos), GROUND_PROJECTION);
+    const at = toScreen(entityCentre, GROUND_PROJECTION);
     slot.active = true;
     slot.startMs = now;
     slot.x = at.x + (Math.random() - 0.5) * 16;

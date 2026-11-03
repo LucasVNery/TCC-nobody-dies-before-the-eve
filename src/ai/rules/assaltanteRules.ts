@@ -14,7 +14,15 @@ export interface Blackboard {
   chargeReady: boolean;
   /** Mandatory pause since the last pattern is over and the first-attack delay since birth has passed. */
   patternReady: boolean;
+  /**
+   * Boss body scale: the melee decision ranges (ATTACK_RANGE, ELITE.slamMaxDistance) grow with the strike reach.
+   * Absent = 1 (the plain elite). The lunge distances are not scaled.
+   */
+  reachScale?: number;
 }
+
+/** Melee decision range for the blackboard's body: `base` × reachScale (exactly `base` without one). */
+const meleeRange = (bb: Blackboard, base: number): number => (bb.reachScale === undefined ? base : base * bb.reachScale);
 
 export interface Rule {
   id: string;
@@ -31,21 +39,21 @@ export const ASSALTANTE_RULES: Rule[] = [
     archetype: 'assaltante',
     opportunity_tags: { dodge: 1 },
     pattern: 'swing',
-    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= ATTACK_RANGE,
+    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= meleeRange(bb, ATTACK_RANGE),
   },
   {
     id: 'assaltante.combo',
     archetype: 'assaltante',
     opportunity_tags: { dodge: 1 },
     pattern: 'combo',
-    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= ATTACK_RANGE,
+    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= meleeRange(bb, ATTACK_RANGE),
   },
   {
     id: 'assaltante.slam',
     archetype: 'assaltante',
     opportunity_tags: { dodge: 1 },
     pattern: 'slam',
-    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= ELITE.slamMaxDistance,
+    precond: (bb) => bb.patternReady && bb.distanceToPlayer <= meleeRange(bb, ELITE.slamMaxDistance),
   },
   {
     id: 'assaltante.lunge',

@@ -36,6 +36,8 @@ export interface BossConfig {
   passiveWindowMs: number;
   passiveMaxSpeed: number;
   passiveMaxDistance: number;
+  /** Boss body scale: hurtbox and strike reaches × this (UI structure spec §6.1). */
+  bodyScale: number;
 }
 
 export const BOSS_CONFIG: BossConfig = {
@@ -66,6 +68,7 @@ export const BOSS_CONFIG: BossConfig = {
   passiveWindowMs: 1200,
   passiveMaxSpeed: 20,
   passiveMaxDistance: 120,
+  bodyScale: 1.7,
 };
 
 /** Short-run variant for demos and playtests. */
