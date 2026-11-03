@@ -14,6 +14,8 @@ import { FLOOR_TILE_IDS } from '../../visual/floor/floorAssets';
 import { FLASH_MS } from '../../visual/feedbackDefs';
 import { PositionHistory } from '../../visual/stepInterpolation';
 import { FloorView } from './floorView';
+import { rangeEllipseSize } from './debugDraw';
+import { BOSS_BASE_TINT, enemyTint } from '../../visual/enemyTint';
 
 const WALK_FRAME_COUNT = 6;
 
@@ -30,6 +32,7 @@ export class WorldView {
   private readonly assaltanteTrail = new PositionHistory();
   private readonly projectileGraphics: Phaser.GameObjects.Graphics;
   private readonly itemGraphics: Phaser.GameObjects.Graphics;
+  private readonly auraGraphics: Phaser.GameObjects.Graphics;
   private stepped = false;
   private playerFlashUntil = 0;
   private enemyFlashUntil = 0;
@@ -44,6 +47,7 @@ export class WorldView {
     );
     this.floor = new FloorView<Phaser.GameObjects.Image, Phaser.Textures.DynamicTexture>(scene, ARENA_BOUNDS, GROUND_PROJECTION, FLOOR_TILE_IDS);
     this.floor.rebuild(this.floorTracker.initial());
+    this.auraGraphics = scene.add.graphics();
     this.projectileGraphics = scene.add.graphics();
     this.projectileGraphics.setDepth(90000);
     this.itemGraphics = scene.add.graphics();
@@ -90,6 +94,23 @@ export class WorldView {
     this.stepped = true;
   }
 
+  /** Boss aura: a pulsing ground ellipse under the boss body, separate from the sprite (cleared outside boss mode). */
+  private drawAura(encounter: Encounter<ProfileSink>, alpha: number, isBoss: boolean, now: number): void {
+    const g = this.auraGraphics;
+    g.clear();
+    if (!isBoss) return;
+    const body = encounter.assaltante.bodySize;
+    const pos = this.assaltanteTrail.at(alpha);
+    const centre = toScreen({ x: pos.x + body.width / 2, y: pos.y + body.height / 2 }, GROUND_PROJECTION);
+    const pulse = 0.5 + 0.5 * Math.sin(now / 450);
+    const size = rangeEllipseSize((Math.max(body.width, body.height) / 2) * (2 + 0.1 * pulse), GROUND_PROJECTION);
+    g.fillStyle(BOSS_BASE_TINT, 0.35 + 0.15 * pulse);
+    g.fillEllipse(centre.x, centre.y, size.width, size.height);
+    g.lineStyle(2, 0xff5a5a, 0.7 + 0.3 * pulse);
+    g.strokeEllipse(centre.x, centre.y, size.width, size.height);
+    g.setDepth(this.assaltanteSprite.gameObject.depth - 1);
+  }
+
   // Sprites are drawn interpolated (up to one step behind) while debug hitboxes and aim use the logic positions,
   // so hitboxes lead the sprite by up to one step (~4 px walking, ~11 px dashing).
   /** Draws the sprites `alpha` of a step past the previous step (presentation only; logic keeps the step positions). */
@@ -106,12 +127,17 @@ export class WorldView {
       encounter.assaltante.attackDirection,
       encounter.assaltante.state === 'chasing',
     );
-    // Placeholder tints: swing telegraph orange; lunge telegraph cyan, lunge charge red.
-    const lunge = encounter.assaltante.lungePhase;
-    const tint =
-      lunge === 'telegraph' ? 0x00bcd4 : lunge === 'charge' ? 0xf44336 : encounter.assaltante.state === 'attacking' ? 0xff9800 : 0xffffff;
+    const bodyScale = encounter.assaltante.bodyScale;
+    const isBoss = bodyScale > 1;
+    this.assaltanteSprite.setBodyScale(bodyScale);
+    const tint = enemyTint({
+      lunge: encounter.assaltante.lungePhase,
+      attacking: encounter.assaltante.state === 'attacking',
+      boss: isBoss,
+    });
     if (now < this.enemyFlashUntil) this.assaltanteSprite.setTintFill(0xffffff);
     else this.assaltanteSprite.setTint(tint);
+    this.drawAura(encounter, alpha, isBoss, now);
 
     // Placeholder arrows: one small circle per active projectile (logic positions).
     const g = this.projectileGraphics;

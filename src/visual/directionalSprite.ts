@@ -71,6 +71,9 @@ export class DirectionalSprite {
   private readonly textures: DirectionalSpriteTextures;
   private readonly scene: Phaser.Scene;
   private currentAnimKey = '';
+  private readonly baseScale: number;
+  private readonly baseOffset: Vec2;
+  private bodyScale = 1;
 
   constructor(
     scene: Phaser.Scene,
@@ -94,6 +97,8 @@ export class DirectionalSprite {
     // against the tile grid, regardless of the source frame's raw pixels.
     const scale = height / this.sprite.height;
     this.sprite.setScale(scale);
+    this.baseScale = scale;
+    this.baseOffset = centerOffset;
     const initialScreenPos = toScreen(initialPosition, config);
     this.container = scene.add.container(initialScreenPos.x, initialScreenPos.y, [this.sprite]);
     this.container.setDepth(screenDepth(initialPosition, config));
@@ -119,6 +124,14 @@ export class DirectionalSprite {
       this.sprite.play(animKey);
       this.currentAnimKey = animKey;
     }
+  }
+
+  /** Scales the sprite by `k` on top of the base scale and moves its centre offset accordingly. No-op if unchanged. */
+  setBodyScale(k: number): void {
+    if (k === this.bodyScale) return;
+    this.bodyScale = k;
+    this.sprite.setScale(this.baseScale * k);
+    this.sprite.setPosition(this.baseOffset.x * k, this.baseOffset.y * k);
   }
 
   setTint(color: number): void {
