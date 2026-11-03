@@ -85,6 +85,8 @@ export class RunDirector {
   private prng: Prng = createPrng(0);
   private runSeed = 0;
   private bossRoom = false;
+  /** The pending boss entry comes from the playtest shortcut; marked in the boss.entry snapshot. */
+  private forcedBossEntry = false;
   private started = false;
 
   constructor(private readonly opts: RunDirectorOptions) {
@@ -149,6 +151,7 @@ export class RunDirector {
   debugEnterBoss(): void {
     if (!this.started || this.bossRoom || !this.opts.planBoss) return;
     this.encountersCleared = (this.opts.bossAfterEncounters ?? BOSS_AFTER_ENCOUNTERS) - 1;
+    this.forcedBossEntry = true;
     this.endEncounter();
   }
 
@@ -235,8 +238,14 @@ export class RunDirector {
     this.bossRoom = true;
     this.bus.emit('profile.snapshot', {
       partial: false,
-      snapshot: { ...this.opts.snapshots.snapshot('boss.entry'), levels: { ...levels }, applied: { ...applied } },
+      snapshot: {
+        ...this.opts.snapshots.snapshot('boss.entry'),
+        levels: { ...levels },
+        applied: { ...applied },
+        ...(this.forcedBossEntry ? { debug_jump: true as const } : {}),
+      },
     });
+    this.forcedBossEntry = false;
     const assaltante = encounter.assaltante;
     assaltante.configureBoss({ maxHp: cfg.bossMaxHp, advanceMult: applied.advance_mult, bodyScale: cfg.bodyScale });
     encounter.player.setDodgeCooldownMs(applied.dash_cooldown_ms);

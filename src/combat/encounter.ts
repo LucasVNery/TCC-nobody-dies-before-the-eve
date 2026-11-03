@@ -265,7 +265,9 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
     const dy = enemyAnchor.y - this.player.position.y;
     const distance = Math.hypot(dx, dy);
     const stepSeconds = stepMs / 1000;
-    this.profile.record('distance', distance <= ATTACK_REACH ? stepSeconds : 0, stepSeconds);
+    // The boss's bigger body counts as near from the same gap to its edge (0 bonus for the ordinary enemy).
+    const reachBonus = this.assaltante.bodyReachBonus;
+    this.profile.record('distance', distance <= ATTACK_REACH + reachBonus ? stepSeconds : 0, stepSeconds);
 
     const pos = this.player.position;
     const prev = this.prevPlayerPos;
@@ -276,7 +278,7 @@ export class Encounter<P extends ProfileSink = ProfileAccumulator> {
       const bossFree =
         (this.assaltante.state === 'idle' || this.assaltante.state === 'chasing') &&
         !this.assaltante.isBarraging;
-      this.boss.step(stepMs, { playerBlocking: this.player.isBlocking, playerSpeed, distance, bossFree });
+      this.boss.step(stepMs, { playerBlocking: this.player.isBlocking, playerSpeed, distance: distance - reachBonus, bossFree });
     }
   }
 

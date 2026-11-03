@@ -25,6 +25,8 @@ const CALM_STATES: ReadonlySet<string> = new Set(['idle', 'chasing', 'recovering
 interface RunState {
   tally: RunTally;
   inBoss: boolean;
+  /** The run ended 'abandoned' (Esc / closed tab): its boss battle, if any, is invalid. */
+  abandoned: boolean;
   lastDashStartMs: number | null;
 }
 
@@ -34,7 +36,6 @@ export class HabitEvidence {
   private readonly config: BossConfig;
   private readonly sessions = new Map<string, { accepted: boolean; dodgeCooldown: number }>();
   private readonly byRun = new Map<number, RunState>();
-  private faced = false;
 
   constructor(opts: { playerId: string; gameVersion: string; config?: BossConfig }) {
     this.playerId = opts.playerId;
@@ -42,8 +43,10 @@ export class HabitEvidence {
     this.config = opts.config ?? BOSS_CONFIG;
   }
 
+  /** A boss battle counts only if its run was not abandoned; dying or winning in it both count. */
   get facedBoss(): boolean {
-    return this.faced;
+    for (const r of this.byRun.values()) if (r.inBoss && !r.abandoned) return true;
+    return false;
   }
 
   /** Tallies per run, ascending by runIdx (copies). Includes the run in progress and the boss run. */
@@ -71,14 +74,14 @@ export class HabitEvidence {
         this.runOf(e.run_idx);
         for (const r of this.byRun.values()) if (r.tally.runIdx < e.run_idx) r.tally.closed = true;
         return;
-      case 'run.end':
-        this.runOf(e.run_idx).tally.closed = true;
+      case 'run.end': {
+        const run = this.runOf(e.run_idx);
+        run.tally.closed = true;
+        if (e.cause === 'abandoned') run.abandoned = true;
         return;
+      }
       case 'profile.snapshot':
-        if (e.at === 'boss.entry') {
-          this.faced = true;
-          this.runOf(e.run_idx).inBoss = true;
-        }
+        if (e.at === 'boss.entry') this.runOf(e.run_idx).inBoss = true;
         return;
       case 'obs.record': {
         const run = this.runOf(e.run_idx);
@@ -119,6 +122,7 @@ export class HabitEvidence {
       r = {
         tally: { runIdx, nearNum: 0, nearDen: 0, dodge: 0, block: 0, parry: 0, retreat: 0, reflexDashes: 0, closed: false },
         inBoss: false,
+        abandoned: false,
         lastDashStartMs: null,
       };
       this.byRun.set(runIdx, r);

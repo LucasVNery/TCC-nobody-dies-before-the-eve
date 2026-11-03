@@ -31,7 +31,7 @@ export class LogBuilder {
     });
   }
   runStart(runIdx: number, t = 0): this { this.run = runIdx; return this.push('run.start', t); }
-  runEnd(t = 0): this { return this.push('run.end', t, { cause: 'death' }); }
+  runEnd(t = 0, cause: 'death' | 'abandoned' | 'victory' = 'death'): this { return this.push('run.end', t, { cause }); }
   distance(num: number, den: number, t = 0): this { return this.push('obs.record', t, { skill: 'distance', num, den }); }
   record(skill: string, num: number, den: number, t = 0): this { return this.push('obs.record', t, { skill, num, den }); }
   defense(label: string, t = 0): this { return this.push('obs.defense', t, { label }); }

@@ -156,3 +156,42 @@ describe('Encounter boss-room distances (centre-consistent anchor)', () => {
     expect(dists).toEqual([80, 80]);
   });
 });
+
+describe('Encounter boss-room near thresholds include the bigger body', () => {
+  /** Boss centred at (800, 600); player centre `dx` to its right. Returns what the profile and the brain saw. */
+  function seen(bodyScale: number | null, dx: number): { near: number; brain: number; anchorGap: number } {
+    const records: Array<[string, number]> = [];
+    const sink = { record: (s: string, n: number) => void records.push([s, n]) } as unknown as ConstructorParameters<typeof Encounter>[2];
+    const e = new Encounter(
+      { x: 800 + dx - 10, y: 590, width: 20, height: 20 },
+      { x: 790, y: 590, width: 20, height: 20 },
+      sink,
+    );
+    if (bodyScale !== null) e.assaltante.configureBoss({ maxHp: BOSS_CONFIG.bossMaxHp, advanceMult: 1, bodyScale });
+    const views: number[] = [];
+    e.boss = { step: (_ms: number, view: { distance: number }) => void views.push(view.distance) } as unknown as BossBrain;
+    e.step(STEP_MS);
+    const near = records.find(([s]) => s === 'distance');
+    const a = e.assaltante.distanceAnchor;
+    const q = e.player.position;
+    // The boss may have moved during the step: the gap is read after it.
+    return { near: near![1], brain: views[0], anchorGap: Math.hypot(a.x - q.x, a.y - q.y) };
+  }
+
+  it('ordinary enemy: near stays at ATTACK_REACH (45) and the brain sees the plain distance', () => {
+    expect(seen(null, 44).near).toBeGreaterThan(0);
+    expect(seen(null, 50).near).toBe(0);
+  });
+
+  it('boss at 1.7: a gap of 50 to the centre is near (reach 45 + 7 of the bigger body), 60 is not', () => {
+    expect(seen(1.7, 50).near).toBeGreaterThan(0);
+    expect(seen(1.7, 60).near).toBe(0);
+  });
+
+  it('boss at 1.7: the brain sees the distance minus the 7 px of the bigger body', () => {
+    const r = seen(1.7, 100);
+    expect(r.brain).toBeCloseTo(r.anchorGap - 7, 6);
+    const plain = seen(null, 100);
+    expect(plain.brain).toBeCloseTo(plain.anchorGap, 9); // no bonus for the ordinary enemy
+  });
+});

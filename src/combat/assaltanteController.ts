@@ -145,6 +145,14 @@ export class AssaltanteController implements ThreatAssessor {
     return this.anchor;
   }
 
+  /**
+   * How much farther from the centre the boss's body edge is than the ordinary enemy's (0 outside boss mode).
+   * Added to the "near" distances so that reaching the bigger body counts like reaching the normal one.
+   */
+  get bodyReachBonus(): number {
+    return (this.width - this.baseWidth) / 2;
+  }
+
   /** Plain swing / combo strike reach from the centre. */
   private get swingReach(): number {
     return ATTACK_REACH * this._bodyScale + this.width / 2;
@@ -648,7 +656,7 @@ export class AssaltanteController implements ThreatAssessor {
 
     if (this.state === 'recovering') {
       // The player's own reach to this body: a grown body is reached from further, by its extra half width.
-      if (distanceToPlayer <= ATTACK_REACH + (this.width - this.baseWidth) / 2) {
+      if (distanceToPlayer <= ATTACK_REACH + this.bodyReachBonus) {
         this.playerWasInRangeDuringPunish = true;
       }
       if (this.phaseElapsedMs >= this.recoveryDurationMs) {

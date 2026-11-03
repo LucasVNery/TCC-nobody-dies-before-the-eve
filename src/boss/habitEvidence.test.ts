@@ -39,6 +39,30 @@ describe('HabitEvidence', () => {
     expect(r.closed).toBe(false); // abandoned in the boss room
   });
 
+  it('a boss battle in an abandoned run is invalid: it does not open the gate', () => {
+    const b = new LogBuilder().sessionStart().runStart(0).bossEntry().runEnd(0, 'abandoned');
+    const h = make();
+    h.applyAll(b.events);
+    expect(h.facedBoss).toBe(false);
+  });
+
+  it('dying or winning in the boss battle still opens the gate', () => {
+    for (const cause of ['death', 'victory'] as const) {
+      const h = make();
+      h.applyAll(new LogBuilder().sessionStart().runStart(0).bossEntry().runEnd(0, cause).events);
+      expect(h.facedBoss).toBe(true);
+    }
+  });
+
+  it('an abandoned boss run does not cancel a valid boss battle from another run', () => {
+    const b = new LogBuilder().sessionStart()
+      .runStart(0).bossEntry().runEnd(0, 'death')
+      .runStart(1).bossEntry().runEnd(1, 'abandoned');
+    const h = make();
+    h.applyAll(b.events);
+    expect(h.facedBoss).toBe(true);
+  });
+
   it('run.end closes a run; a later run.start closes an unended one', () => {
     const b = new LogBuilder().sessionStart().runStart(0).runEnd().runStart(1).distance(1, 1).runStart(2);
     const h = make();

@@ -16,4 +16,6 @@ export interface ProfileSnapshotPayload {
   levels?: Record<string, number>;
   /** boss.entry only: response totals applied to the fight. */
   applied?: { dash_cooldown_ms: number; advance_mult: number };
+  /** boss.entry only: the boss room was entered by the playtest shortcut (F4), not by clearing the encounters. */
+  debug_jump?: true;
 }

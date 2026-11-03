@@ -402,6 +402,23 @@ describe('RunDirector — playtest shortcuts', () => {
     expect(d.planBoss).toHaveBeenCalledTimes(1);
   });
 
+  it('debugEnterBoss marks the boss.entry snapshot with debug_jump; a natural entry carries no marker', () => {
+    const jumped = makeDirector({ bossAfterEncounters: 3 });
+    jumped.director.start();
+    jumped.director.debugEnterBoss();
+    const entry = payloads<SnapshotEvent & { snapshot: { debug_jump?: true } }>(jumped.events, 'profile.snapshot')
+      .find((e) => e.snapshot.at === 'boss.entry');
+    expect(entry?.snapshot.debug_jump).toBe(true);
+
+    const natural = makeDirector({ bossAfterEncounters: 1 });
+    natural.director.start();
+    killEnemy(natural);
+    const naturalEntry = payloads<SnapshotEvent & { snapshot: { debug_jump?: true } }>(natural.events, 'profile.snapshot')
+      .find((e) => e.snapshot.at === 'boss.entry');
+    expect(naturalEntry).toBeDefined();
+    expect('debug_jump' in (naturalEntry?.snapshot ?? {})).toBe(false);
+  });
+
   it('debugEnterBoss does nothing without a boss plan', () => {
     const d = makeDirector({ noBoss: true });
     d.director.start();
