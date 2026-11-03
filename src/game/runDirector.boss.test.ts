@@ -347,6 +347,50 @@ describe('RunDirector — boss room', () => {
   });
 });
 
+describe('RunDirector — roomEncounterTotal', () => {
+  it('bossAfterEncounters 3: room 1 holds 2 enemies, room 2 holds 1', () => {
+    const d = makeDirector({ plan: plan({}), bossAfterEncounters: 3 });
+    d.director.start();
+    expect(d.director.roomEncounterTotal).toBe(2);
+    killEnemy(d);
+    expect(d.director.encIdx).toBe(1);
+    expect(d.director.roomEncounterTotal).toBe(2);
+    killEnemy(d);
+    expect(d.director.roomIdx).toBe(1);
+    expect(d.director.roomEncounterTotal).toBe(1);
+  });
+
+  it('bossAfterEncounters 1 -> 1, 2 -> 2', () => {
+    const a = makeDirector({ plan: plan({}), bossAfterEncounters: 1 });
+    a.director.start();
+    expect(a.director.roomEncounterTotal).toBe(1);
+    const b = makeDirector({ plan: plan({}), bossAfterEncounters: 2 });
+    b.director.start();
+    expect(b.director.roomEncounterTotal).toBe(2);
+  });
+
+  it('without a boss plan the room size is used', () => {
+    const d = makeDirector({ noBoss: true, bossAfterEncounters: null });
+    d.director.start();
+    expect(d.director.roomEncounterTotal).toBe(2);
+  });
+
+  it('never 0 and never above the room size, in every state, boss room included', () => {
+    for (const after of [1, 2, 3]) {
+      const d = makeDirector({ plan: plan({}), bossAfterEncounters: after });
+      d.director.start();
+      for (let i = 0; i < after + 1; i++) {
+        const t = d.director.roomEncounterTotal;
+        expect(t).toBeGreaterThanOrEqual(1);
+        expect(t).toBeLessThanOrEqual(2);
+        if (!d.director.inBossRoom) killEnemy(d);
+      }
+      expect(d.director.inBossRoom).toBe(true);
+      expect(() => d.director.roomEncounterTotal).not.toThrow();
+    }
+  });
+});
+
 describe('RunDirector — playtest shortcuts', () => {
   it('debugEnterBoss opens the boss room mid-run, once', () => {
     const d = makeDirector({ bossAfterEncounters: 3 });

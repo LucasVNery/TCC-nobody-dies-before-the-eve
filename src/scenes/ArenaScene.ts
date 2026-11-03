@@ -1,7 +1,7 @@
 // src/scenes/ArenaScene.ts
 import Phaser from 'phaser';
 import { createFixedTimestepLoop } from '../core/fixedTimestepLoop';
-import { PLAYER_MAX_HP, ROOM_ENCOUNTER_COUNT } from '../combat/movementDefs';
+import { PLAYER_MAX_HP } from '../combat/movementDefs';
 import { findWeaponAction } from '../combat/actionRegistry';
 import { ASSET_KEYS } from '../visual/assetRegistry';
 import { loadFloorTiles } from '../visual/floor/floorAssets';
@@ -194,7 +194,7 @@ export class ArenaScene extends Phaser.Scene {
       weaponLabel: WEAPON_LABELS[player.equippedWeaponId] ?? player.equippedWeaponId,
       heldItem: encounter.items.held,
       powerActive: encounter.items.powerActive,
-      run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: ROOM_ENCOUNTER_COUNT,
+      run: director.runIdx + 1, room: director.roomIdx + 1, enc: director.encIdx + 1, encTotal: director.roomEncounterTotal,
       bossRoom: director.inBossRoom,
     });
     this.feedback.update(encounter);

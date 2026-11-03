@@ -107,6 +107,17 @@ export class RunDirector {
     return this.bossRoom;
   }
 
+  /**
+   * Enemies the current room holds until the next boundary (end of room or the boss).
+   * Irrelevant in the boss room, where it just returns the room size.
+   */
+  get roomEncounterTotal(): number {
+    if (this.opts.planBoss === undefined || this.bossRoom) return ROOM_ENCOUNTER_COUNT;
+    const bossAfter = this.opts.bossAfterEncounters ?? BOSS_AFTER_ENCOUNTERS;
+    const remaining = Math.max(1, bossAfter - this.encountersCleared);
+    return this._encIdx + Math.min(ROOM_ENCOUNTER_COUNT - this._encIdx, remaining);
+  }
+
   private get bossConfig(): BossConfig {
     return this.opts.bossConfig ?? BOSS_CONFIG;
   }

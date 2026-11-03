@@ -35,7 +35,7 @@ export interface GameplayHudData {
 
 const STAMINA_FLASH_MS = 300;
 
-const HELP_LINES = [
+export const HELP_LINES = [
   'Controls:',
   '  WASD        - move',
   '  Mouse       - mira',
@@ -58,14 +58,20 @@ export function staminaBar(value: number, max: number = STAMINA_MAX, cells: numb
   return `[${'#'.repeat(filled)}${'-'.repeat(cells - filled)}]`;
 }
 
-/** Run line: room and encounter, or just CHEFE in the boss room. */
-export function runLine(m: Pick<GameplayHudData, 'run' | 'room' | 'enc' | 'encTotal' | 'bossRoom'>): string {
-  return m.bossRoom ? `run ${m.run} · CHEFE` : `run ${m.run} · sala ${m.room} · encontro ${m.enc}/${m.encTotal}`;
+/** Encounter indicator: the author's "encontro" is the room, "inimigo" the encounter within it. */
+export function encounterLine(m: Pick<GameplayHudData, 'room' | 'enc' | 'encTotal' | 'bossRoom'>): string {
+  return m.bossRoom ? 'BOSS ROOM' : `ENCONTRO ${m.room} · INIMIGO ${m.enc}/${m.encTotal}`;
 }
 
-/** Player and enemy HP line. */
-export function statusLine(m: Pick<GameplayHudData, 'hp' | 'maxHp' | 'enemyHp' | 'enemyMaxHp'>): string {
-  return `HP: ${m.hp}/${m.maxHp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`;
+/** Small run tag. */
+export function runTag(run: number): string {
+  return `run ${run}`;
+}
+
+/** Player HP line; the enemy part is dropped in the boss room (the boss bar replaces it). */
+export function statusLine(m: Pick<GameplayHudData, 'hp' | 'maxHp' | 'enemyHp' | 'enemyMaxHp' | 'bossRoom'>): string {
+  const hp = `HP: ${m.hp}/${m.maxHp}`;
+  return m.bossRoom ? hp : `${hp} · inimigo: ${m.enemyHp}/${m.enemyMaxHp}`;
 }
 
 /** Minimal player HUD; the help list is hidden until toggled. */
@@ -107,7 +113,7 @@ export class GameplayHud {
     const flashing = performance.now() < this.staminaFlashUntil;
     this.staminaText.setColor(exhausted || flashing ? '#ff5252' : '#ffffff');
     this.staminaText.setBackgroundColor(flashing ? '#7f0000' : '');
-    this.runText.setText(runLine(m));
+    this.runText.setText(`${runTag(m.run)} · ${encounterLine(m)}`);
     const item = m.heldItem ? ITEM_LABELS[m.heldItem] : '-';
     this.weaponText.setText(`Arma: ${m.weaponLabel} · Item: ${item}${m.powerActive ? ' · PODER' : ''}`);
   }
