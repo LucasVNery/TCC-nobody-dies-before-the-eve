@@ -11,10 +11,10 @@ export const SCHEMA_VERSION = 2 as const;
  * Bump whenever gameplay/balance changes make older logs non-comparable
  * (hp, damage, timings, hitbox geometry). Written into every session.start.
  */
-export const GAME_VERSION = '0.0.6';
+export const GAME_VERSION = '0.0.7';
 
 /** Window/timing configuration revision, written into every session.start next to windows_ms. */
-export const CONFIG_VERSION = '0.0.6-c1';
+export const CONFIG_VERSION = '0.0.7-c1';
 
 /** The timing windows (ms) in force, logged so analyses can tell configurations apart. */
 export interface WindowsMs {

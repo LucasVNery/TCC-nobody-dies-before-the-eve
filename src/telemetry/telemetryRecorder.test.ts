@@ -305,8 +305,8 @@ describe('TelemetryRecorder', () => {
 
 describe('game version', () => {
   it('declares the current game version', () => {
-    expect(GAME_VERSION).toBe('0.0.6'); // bumped for the 2.5 s dash cooldown
-    expect(CONFIG_VERSION).toBe('0.0.6-c1');
+    expect(GAME_VERSION).toBe('0.0.7'); // bumped for the 1.7x boss body and 150 ms barrage pause
+    expect(CONFIG_VERSION).toBe('0.0.7-c1'); // bumped for the 1.7x boss body
   });
 
   it('windowsMs carries the nine window values (swing telegraph from ELITE_TELEGRAPH_MS)', () => {
@@ -319,8 +319,8 @@ describe('game version', () => {
 
   it('the shared session.start payload has config_version and windows_ms', () => {
     const p = sessionStartPayload('2026-10-29T00:00:00.000Z', true);
-    expect(p.config_version).toBe('0.0.6-c1'); // bumped for the 2.5 s dash cooldown
-    expect(p.game_version).toBe('0.0.6');
+    expect(p.config_version).toBe('0.0.7-c1'); // bumped for the 1.7x boss body and 150 ms barrage pause
+    expect(p.game_version).toBe('0.0.7');
     expect(p.windows_ms).toEqual(windowsMs());
     expect(p.persistent).toBe(true);
   });

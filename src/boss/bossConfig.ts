@@ -63,7 +63,7 @@ export const BOSS_CONFIG: BossConfig = {
   dashCooldownMaxMs: 4000,
   bossMaxHp: 400,
   barrageBaseStrikes: 3,
-  barragePauseMs: 250,
+  barragePauseMs: 150,
   barrageCooldownMs: 6000,
   passiveWindowMs: 1200,
   passiveMaxSpeed: 20,

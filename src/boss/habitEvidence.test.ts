@@ -4,7 +4,7 @@ import { LogBuilder } from './testing/logBuilder';
 import { DODGE } from '../combat/actionDefs';
 import { BOSS_CONFIG } from './bossConfig';
 
-const V = '0.0.6';
+const V = '0.0.7'; // must equal GAME_VERSION (bumped for the 1.7x boss body)
 const make = (playerId = 'p1') => new HabitEvidence({ playerId, gameVersion: V });
 const END = DODGE.durationMs + DODGE.cooldownMs; // earliest next dash after one at t
 

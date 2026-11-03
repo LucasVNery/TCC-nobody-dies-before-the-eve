@@ -95,7 +95,7 @@ describe('AssaltanteController — boss mode', () => {
 });
 
 describe('AssaltanteController — barrage', () => {
-  const PAUSE = BOSS_CONFIG.barragePauseMs; // 250
+  const PAUSE = BOSS_CONFIG.barragePauseMs; // 150
   const BSTEP = 16;
   const PLAYER = { x: 70, y: 0 };
 
