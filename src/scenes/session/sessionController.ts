@@ -54,6 +54,9 @@ export class SessionController {
   /** Store writes, serialized; the store is closed only after they settle. */
   private writes: Promise<void> = Promise.resolve();
   private unsubscribeHide: (() => void) | null = null;
+  /** The pending start(), if any; shutdown() waits for it before closing the store. */
+  private booting: Promise<void> = Promise.resolve();
+  private stopped = false;
 
   constructor(private readonly opts: SessionControllerOptions) {}
 
@@ -66,13 +69,23 @@ export class SessionController {
     return this._stack;
   }
 
-  /** Never rejects: on any failure the game still starts on an in-memory profile when it can. */
-  async start(opts: StartOptions = {}): Promise<void> {
+  /**
+   * Never rejects: on any failure the game still starts on an in-memory profile when it can.
+   * A shutdown() that arrives while this is still booting (the player left right away) wins:
+   * the game is not started and nothing is logged.
+   */
+  start(opts: StartOptions = {}): Promise<void> {
+    this.booting = this.boot(opts);
+    return this.booting;
+  }
+
+  private async boot(opts: StartOptions): Promise<void> {
     try {
       await opts.after; // after a restart: the previous session's last events are stored
     } catch {
       // a failed predecessor must not block this session
     }
+    if (this.stopped) return; // left before the store was even opened
     const { platform } = this.opts;
     try {
       try {
@@ -84,7 +97,9 @@ export class SessionController {
         this.store = new MemoryEventStore();
         this.storeKind = 'memory';
       }
+      if (this.stopped) return; // shutdown() closes the store once this settles
       const boot = await loadProfileState(this.store, platform.newUuid);
+      if (this.stopped) return;
       this.startGame(boot, opts);
     } catch (err) {
       // The game must still start: fresh in-memory profile, nothing persisted.
@@ -93,6 +108,7 @@ export class SessionController {
         this.store.close();
         this.store = new MemoryEventStore();
         this.storeKind = 'memory';
+        if (this.stopped) return;
         this.startGame(
           {
             accumulator: new ProfileAccumulator(),
@@ -233,15 +249,21 @@ export class SessionController {
     return 'kept';
   }
 
-  /** Final flush, then closes the store only after every in-flight append settled. */
+  /**
+   * Final flush, then closes the store only after every in-flight append settled.
+   * If start() is still booting, waits for it (it then stops before starting the game) and closes the store it opened.
+   */
   shutdown(): Promise<void> {
+    this.stopped = true;
     this.unsubscribeHide?.();
     this.unsubscribeHide = null;
     const wasRunning = this._ready;
     this._ready = false;
     if (wasRunning) this.stack.recording.flushPending();
-    const store = this.store;
-    return this.persist().finally(() => store.close());
+    return this.booting.then(() => {
+      const store = this.store;
+      return this.persist().finally(() => store.close());
+    });
   }
 
   status(): SessionStatus {

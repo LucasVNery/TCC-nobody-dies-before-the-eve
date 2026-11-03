@@ -11,6 +11,7 @@ import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
 import { createBrowserPlatform } from './session/browserPlatform';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindHotkeys } from './input/hotkeys';
+import { claimStore } from './session/storeHandoff';
 import { CameraRig } from './view/cameraRig';
 import { WorldView } from './view/worldView';
 import { FeedbackView } from './view/feedbackView';
@@ -43,8 +44,6 @@ class MovingAverage {
 /** Thin orchestrator: wires the session, input, views, gameplay HUD and analysis panel. */
 export class ArenaScene extends Phaser.Scene {
   private session!: SessionController;
-  /** Settles once the previous scene instance's session has shut down (its store closed). */
-  private previousShutdown: Promise<void> = Promise.resolve();
   private aggregator!: MetricsAggregator;
   private tape!: EventTape;
   private loop!: ReturnType<typeof createFixedTimestepLoop>;
@@ -98,11 +97,13 @@ export class ArenaScene extends Phaser.Scene {
     this.cameraRig = new CameraRig(this);
     this.cameraRig.attach(this.world.playerSprite.gameObject, this.hud.objects);
 
+    // Waits for whoever held the store before (a restarted ArenaScene or the menu's Análise) to close it.
+    const storeClaim = claimStore(this.registry);
     this.playerInput = new PlayerInput(this, () => (session.ready ? this.intents() : null));
     this.panel = new AnalysisPanel(document.body);
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error('Keyboard input plugin not available');
-    bindHotkeys(keyboard, {
+    const unbindHotkeys = bindHotkeys(keyboard, {
       resetProfile: () => { if (session.ready) session.resetProfile(); },
       exportHistory: () => void session.exportHistory(),
       importHistory: () =>
@@ -114,17 +115,22 @@ export class ArenaScene extends Phaser.Scene {
       toggleDebug: () => this.debugDraw.toggle(),
       jumpToBoss: () => { if (session.ready) session.stack.director.debugEnterBoss(); },
       forceBarrage: () => { if (session.ready) session.stack.director.debugBarrage(); },
+      backToMenu: () => this.scene.start('MenuScene'),
     });
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void session.persist() });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      unbindHotkeys();
       this.playerInput.destroy();
+      // PlayerInput's keys were added with capture on; captures are global, so drop them before the next scene.
+      keyboard.clearCaptures();
       this.panel.destroy();
-      this.previousShutdown = session.shutdown();
+      // The next store holder (restart or menu) waits for the final flush and the close.
+      storeClaim.release(session.shutdown());
     });
 
     void session.start({
-      after: this.previousShutdown,
+      after: storeClaim.ready,
       onStackReady: (stack, history) => {
         const { aggregator: agg, tape, world, feedback } = this;
         agg.applyAll(history);

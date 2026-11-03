@@ -42,20 +42,21 @@ const BOSS_BAR_X = (1280 - BOSS_BAR_WIDTH) / 2;
 const BOSS_BAR_Y = 62;
 
 export const HELP_LINES = [
-  'Controls:',
-  '  WASD        - move',
-  '  Mouse       - mira',
-  '  Clique esq  - ataque primario da arma equipada',
-  '  Clique dir  - ataque secundario (sem efeito no arco)',
-  '  Q (segurar) - carregado (sem efeito no arco)',
-  '  1 / 2 / 3   - espada+escudo / arco / arma pesada',
+  'Controles:',
+  '  WASD         - mover',
+  '  Mouse        - mira',
+  '  Clique esq   - ataque primário da arma equipada',
+  '  Clique dir   - ataque secundário (sem efeito no arco)',
+  '  Q (segure)   - carregado (sem efeito no arco)',
+  '  1 / 2 / 3    - espada+escudo / arco / arma pesada',
   '  Shift (segure) - correr (gasta estamina)',
-  '  Espaço     - esquiva (use durante o telegraph do boss pra i-frames)',
-  '  E (segure)  - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
-  '  F           - usar item (cura / poder / bomba)',
-  '  F2 / F8 / F9 - resetar perfil / exportar / importar historico',
-  '  F3          - mostrar/ocultar hitboxes (depuracao)',
-  '  F4 / F6     - pular para a sala do chefe / forcar barragem (teste)',
+  '  Espaço       - esquiva (use durante o telegraph do chefe pra i-frames)',
+  '  E (segure)   - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
+  '  F            - usar item (cura / poder / bomba)',
+  '  Esc          - voltar ao menu (encerra a run; o histórico fica salvo)',
+  '  F2 / F8 / F9 - resetar perfil / exportar / importar histórico',
+  '  F3           - mostrar/ocultar hitboxes (depuração)',
+  '  F4 / F6      - pular para a sala do chefe / forçar barragem (teste)',
 ];
 
 /** Plain-text bar of `cells` cells for 0..max; any value above 0 shows at least one cell. */
@@ -121,7 +122,7 @@ export class GameplayHud {
     this.staminaText = scene.add.text(10, 29, '', line);
     this.runText = scene.add.text(10, 48, '', line);
     this.weaponText = scene.add.text(10, 690, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffeb3b' });
-    this.hintText = scene.add.text(10, 665, 'Tab: painel · H: controles · F3: hitboxes', {
+    this.hintText = scene.add.text(10, 665, 'Esc: menu · Tab: painel · H: controles · F3: hitboxes', {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#aaaaaa',

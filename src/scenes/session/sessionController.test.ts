@@ -317,6 +317,44 @@ describe('SessionController', () => {
     expect(bHistory.length).toBeGreaterThan(0);
   });
 
+  it('a shutdown while start is still booting stops it: no game, no event, the opened store is closed', async () => {
+    const inner = new MemoryEventStore();
+    let closes = 0;
+    const store = wrapStore(inner, { close: () => void closes++ });
+    const { platform, hideListeners } = fakePlatform({ store });
+    let releaseAfter!: () => void;
+    const c = controller(platform);
+    const started = c.start({ after: new Promise<void>((r) => { releaseAfter = r; }) });
+    const closed = c.shutdown();
+    releaseAfter();
+    await started;
+    await closed;
+    expect(c.ready).toBe(false);
+    expect(await inner.readAll()).toEqual([]);
+    expect(closes).toBe(0); // left before the store was opened: it never was
+    expect(hideListeners.size).toBe(0);
+
+    // also when the shutdown lands after the store opened but before the profile loaded
+    const inner2 = new MemoryEventStore();
+    let closes2 = 0;
+    let c2!: SessionController;
+    let closed2: Promise<void> | null = null;
+    const store2 = wrapStore(inner2, { close: () => void closes2++ });
+    const p2 = fakePlatform({ store: store2 }).platform;
+    const opening = p2.openStore;
+    p2.openStore = async () => {
+      const o = await opening();
+      closed2 = c2.shutdown();
+      return o;
+    };
+    c2 = controller(p2);
+    await c2.start();
+    await closed2;
+    expect(c2.ready).toBe(false);
+    expect(await inner2.readAll()).toEqual([]);
+    expect(closes2).toBe(1);
+  });
+
   it('openStore failure falls back to a memory store, and a boot failure starts a fresh in-memory profile (never rejects)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

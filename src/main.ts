@@ -1,5 +1,6 @@
 // src/main.ts
 import Phaser from 'phaser';
+import { MenuScene } from './scenes/MenuScene';
 import { ArenaScene } from './scenes/ArenaScene';
 
 new Phaser.Game({
@@ -12,5 +13,5 @@ new Phaser.Game({
     width: 1280,
     height: 720,
   },
-  scene: [ArenaScene],
+  scene: [MenuScene, ArenaScene],
 });

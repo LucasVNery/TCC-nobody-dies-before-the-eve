@@ -52,7 +52,10 @@ describe('statusLine', () => {
 
 describe('HELP_LINES', () => {
   it('is exported', () => {
-    expect(HELP_LINES[0]).toBe('Controls:');
+    expect(HELP_LINES[0]).toBe('Controles:');
+  });
+  it('mentions Esc for the menu', () => {
+    expect(HELP_LINES.some((l) => l.includes('Esc') && l.includes('menu'))).toBe(true);
   });
 });
 
