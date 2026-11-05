@@ -90,6 +90,7 @@ describe('createSupabaseCloudApi', () => {
     vi.stubGlobal('fetch', fetchSpy);
     const api = createSupabaseCloudApi({ url: 'http://localhost:54321', anonKey: 'test-anon-key' });
     await expect(api.pullEvents()).rejects.toMatchObject({ kind: 'auth' });
+    await expect(api.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'auth' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

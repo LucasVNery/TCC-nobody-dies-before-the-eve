@@ -154,6 +154,13 @@ export function createSupabaseCloudApi(config: CloudConfig): CloudApi {
         check({ error });
       }),
 
+    updatePassword: (newPassword) =>
+      guard(async () => {
+        await requireUser();
+        const { error } = await client.auth.updateUser({ password: newPassword });
+        check({ error });
+      }),
+
     isAdmin: () =>
       guard(async () => {
         const user = await requireUser();
@@ -224,8 +231,9 @@ export function createSupabaseCloudApi(config: CloudConfig): CloudApi {
       }),
 
     onAuthChange: (listener) => {
-      const { data } = client.auth.onAuthStateChange((_event, session) => {
-        listener(toCloudUser(session?.user));
+      // Synchronous: awaiting another client call inside this callback deadlocks supabase-js.
+      const { data } = client.auth.onAuthStateChange((event, session) => {
+        listener(toCloudUser(session?.user), event === 'PASSWORD_RECOVERY' ? 'recovery' : 'other');
       });
       return () => data.subscription.unsubscribe();
     },

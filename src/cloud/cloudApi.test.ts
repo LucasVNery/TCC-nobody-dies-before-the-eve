@@ -138,6 +138,38 @@ describe('FakeCloudApi', () => {
     expect(await api.isAdmin()).toBe(true);
   });
 
+  it('updatePassword changes the signed-in user password and requires a session', async () => {
+    const api = new FakeCloudApi();
+    await expectKind(api.updatePassword('pw-two'), 'auth');
+    await signedIn(api);
+    await api.updatePassword('pw-two');
+    await api.signOut();
+    await expectKind(api.signIn(MAIL_A, PW), 'auth');
+    expect((await api.signIn(MAIL_A, 'pw-two')).email).toBe(MAIL_A);
+  });
+
+  it('updatePassword fails with a network error when asked to', async () => {
+    const api = new FakeCloudApi();
+    await signedIn(api);
+    api.failNext(1);
+    await expectKind(api.updatePassword('pw-two'), 'network');
+    await api.signOut();
+    expect((await api.signIn(MAIL_A, PW)).email).toBe(MAIL_A);
+  });
+
+  it('simulateRecovery signs the account in with a recovery event', async () => {
+    const api = new FakeCloudApi();
+    await api.signUp(MAIL_A, PW);
+    const seen: [string | null, string | undefined][] = [];
+    api.onAuthChange((u, event) => seen.push([u?.email ?? null, event]));
+    api.simulateRecovery(MAIL_A);
+    expect(seen).toEqual([[MAIL_A, 'recovery']]);
+    expect((await api.getUser())?.email).toBe(MAIL_A);
+    await api.signOut();
+    expect(seen[1]).toEqual([null, 'other']);
+    expect(() => api.simulateRecovery(MAIL_B)).toThrow(CloudError);
+  });
+
   it('stores the accepted terms version per user', async () => {
     const api = new FakeCloudApi();
     await signedIn(api);

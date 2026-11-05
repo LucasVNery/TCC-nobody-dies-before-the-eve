@@ -1,5 +1,5 @@
 import type { LoggedEvent } from '../telemetry/schema';
-import { CloudError, type CloudApi, type CloudUser, type EventBatch } from './cloudApi';
+import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser, type EventBatch } from './cloudApi';
 
 interface Account {
   user: CloudUser;
@@ -14,7 +14,7 @@ export class FakeCloudApi implements CloudApi {
   private accounts = new Map<string, Account>(); // by email
   private current: Account | null = null;
   private admins = new Set<string>();
-  private listeners = new Set<(user: CloudUser | null) => void>();
+  private listeners = new Set<(user: CloudUser | null, event?: AuthChangeEvent) => void>();
   private failures = 0;
   private nextId = 1;
 
@@ -64,6 +64,19 @@ export class FakeCloudApi implements CloudApi {
     this.maybeFail();
   }
 
+  async updatePassword(newPassword: string): Promise<void> {
+    this.maybeFail();
+    this.requireAccount().password = newPassword;
+  }
+
+  /** Simulates opening the recovery link sent to `email`: signs that account in with a recovery event. */
+  simulateRecovery(email: string): void {
+    const acc = this.accounts.get(email);
+    if (!acc) throw new CloudError('auth', 'no such account');
+    this.current = acc;
+    this.emit('recovery');
+  }
+
   async isAdmin(): Promise<boolean> {
     return this.current !== null && this.admins.has(this.current.user.id);
   }
@@ -102,7 +115,7 @@ export class FakeCloudApi implements CloudApi {
     acc.terms = null;
   }
 
-  onAuthChange(listener: (user: CloudUser | null) => void): () => void {
+  onAuthChange(listener: (user: CloudUser | null, event?: AuthChangeEvent) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -121,8 +134,8 @@ export class FakeCloudApi implements CloudApi {
     }
   }
 
-  private emit(): void {
+  private emit(event: AuthChangeEvent = 'other'): void {
     const user = this.current?.user ?? null;
-    for (const l of this.listeners) l(user);
+    for (const l of this.listeners) l(user, event);
   }
 }

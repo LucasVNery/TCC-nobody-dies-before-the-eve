@@ -239,6 +239,62 @@ describe('Account', () => {
     expect(account.canSync(user.id)).toBe(true);
   });
 
+  it('a recovery link sets passwordRecovery synchronously; updatePassword clears it and sets the password', async () => {
+    const api = await apiWith('ana');
+    const d = manualDefer();
+    const account = new Account(api, { defer: d.defer });
+    await account.init();
+    const updates = vi.spyOn(api, 'updatePassword');
+    const seen: boolean[] = [];
+    account.onChange(() => seen.push(account.passwordRecovery));
+    api.simulateRecovery(mail('ana'));
+    expect(account.passwordRecovery).toBe(true);
+    expect(account.state.user?.email).toBe(mail('ana'));
+    expect(seen).toEqual([true]);
+    expect(updates).not.toHaveBeenCalled(); // nothing awaited inside the auth callback
+    d.flush();
+    await account.updatePassword('pw-new');
+    expect(account.passwordRecovery).toBe(false);
+    expect(seen[seen.length - 1]).toBe(false);
+    await account.signOut();
+    await account.signIn(mail('ana'), 'pw-new');
+  });
+
+  it('a recovery event for the already signed-in user still notifies; dismiss and sign-out clear it', async () => {
+    const api = await apiWith('ana');
+    const account = new Account(api, { defer: queueMicrotask });
+    await account.init();
+    await account.signIn(mail('ana'), PW);
+    const listener = vi.fn();
+    account.onChange(listener);
+    api.simulateRecovery(mail('ana'));
+    expect(account.passwordRecovery).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    account.dismissPasswordRecovery();
+    expect(account.passwordRecovery).toBe(false);
+    api.simulateRecovery(mail('ana'));
+    await account.signOut();
+    expect(account.passwordRecovery).toBe(false);
+  });
+
+  it('updatePassword needs a signed-in user; a failure keeps the recovery state', async () => {
+    const api = await apiWith('ana');
+    const account = new Account(api, { defer: queueMicrotask });
+    await account.init();
+    await expect(account.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'auth' });
+    api.simulateRecovery(mail('ana'));
+    api.failNext(1);
+    await expect(account.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'network' });
+    expect(account.passwordRecovery).toBe(true);
+    await expect(new Account(null).updatePassword('pw-new')).rejects.toBeInstanceOf(CloudError);
+  });
+
+  it('simulated is set only with a CloudApi and the option', async () => {
+    expect(new Account(null, { simulated: true }).simulated).toBe(false);
+    expect(new Account(await apiWith(), { simulated: true }).simulated).toBe(true);
+    expect(new Account(await apiWith()).simulated).toBe(false);
+  });
+
   it('is found in the game registry', () => {
     const account = new Account(null);
     const values = new Map<string, unknown>([[ACCOUNT_REGISTRY_KEY, account]]);

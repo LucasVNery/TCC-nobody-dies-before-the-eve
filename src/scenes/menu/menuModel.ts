@@ -1,4 +1,4 @@
-export type MenuId = 'login' | 'play' | 'howto' | 'analysis';
+export type MenuId = 'login' | 'play' | 'howto' | 'analysis' | 'logout' | 'deleteData';
 
 export interface MenuItem {
   id: MenuId;
@@ -6,6 +6,7 @@ export interface MenuItem {
   enabled: boolean;
 }
 
+/** The local-mode menu (no cloud configured): Login stays inert. */
 export const MENU_ITEMS: readonly MenuItem[] = [
   { id: 'login', label: 'Login (em breve)', enabled: false },
   { id: 'play', label: 'Jogar', enabled: true },

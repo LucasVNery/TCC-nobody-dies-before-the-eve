@@ -24,6 +24,17 @@ describe('menuModel', () => {
     }
   });
 
+  it('moveSelection works on a dynamic list with the account items', () => {
+    const items: MenuItem[] = [
+      { id: 'play', label: 'a', enabled: true },
+      { id: 'logout', label: 'b', enabled: false },
+      { id: 'deleteData', label: 'c', enabled: true },
+    ];
+    expect(moveSelection(items, 0, 1)).toBe(2);
+    expect(moveSelection(items, 2, 1)).toBe(0);
+    expect(moveSelection(items, 0, -1)).toBe(2);
+  });
+
   it('returns the same index when all items are disabled', () => {
     const items: MenuItem[] = [
       { id: 'login', label: 'a', enabled: false },

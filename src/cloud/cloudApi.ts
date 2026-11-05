@@ -24,6 +24,9 @@ export class CloudError extends Error {
   }
 }
 
+/** 'recovery': the session came from a password-recovery link (the player should set a new password). */
+export type AuthChangeEvent = 'recovery' | 'other';
+
 /** Everything the game needs from the cloud; the real client and the in-memory fake both implement it. */
 export interface CloudApi {
   getUser(): Promise<CloudUser | null>;
@@ -31,6 +34,8 @@ export interface CloudApi {
   signIn(email: string, password: string): Promise<CloudUser>;
   signOut(): Promise<void>;
   resetPassword(email: string): Promise<void>;
+  /** Sets the signed-in user's password (after a recovery link, or any time while signed in). */
+  updatePassword(newPassword: string): Promise<void>;
   isAdmin(): Promise<boolean>;
   acceptedTermsVersion(): Promise<string | null>;
   acceptTerms(version: string): Promise<void>;
@@ -38,6 +43,6 @@ export interface CloudApi {
   /** The signed-in user's own events only, even for an admin. */
   pullEvents(): Promise<LoggedEvent[]>;
   deleteMyData(): Promise<void>;
-  /** Returns the unsubscribe function. */
-  onAuthChange(listener: (user: CloudUser | null) => void): () => void;
+  /** Returns the unsubscribe function. The listener must stay synchronous (no client call awaited inside). */
+  onAuthChange(listener: (user: CloudUser | null, event?: AuthChangeEvent) => void): () => void;
 }

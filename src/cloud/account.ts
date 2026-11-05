@@ -1,4 +1,4 @@
-import { CloudError, type CloudApi, type CloudUser } from './cloudApi';
+import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser } from './cloudApi';
 import { TERMS_VERSION } from './consentText';
 
 export interface AccountState {
@@ -35,6 +35,8 @@ export interface AccountOptions {
    */
   defer?: (run: () => void) => void;
   settleTimeoutMs?: number;
+  /** The CloudApi is the in-memory fake (development `?cloud=fake`); the menu says so. */
+  simulated?: boolean;
 }
 
 const NO_CLOUD = (): CloudError => new CloudError('other', 'cloud mode is off');
@@ -70,9 +72,13 @@ export class Account {
   private readonly background = new Set<Promise<unknown>>();
   /** The user whose data is being deleted: no push for them starts meanwhile. */
   private deleting: string | null = null;
+  /** The session came from a password-recovery link and no new password was set yet. */
+  private recovering = false;
+  readonly simulated: boolean;
 
   constructor(private readonly api: CloudApi | null, opts: AccountOptions = {}) {
     this._state = { mode: api ? 'cloud' : 'local', user: null, isAdmin: false, termsAccepted: false };
+    this.simulated = api !== null && (opts.simulated ?? false);
     this.termsVersion = opts.termsVersion ?? TERMS_VERSION;
     this.idb = opts.idb ?? (() => indexedDB);
     this.defer = opts.defer ?? ((run) => void setTimeout(run, 0));
@@ -101,7 +107,7 @@ export class Account {
   private async restore(): Promise<void> {
     const api = this.api;
     if (!api) return;
-    this.unsubscribeAuth = api.onAuthChange((user) => this.onAuth(user));
+    this.unsubscribeAuth = api.onAuthChange((user, event) => this.onAuth(user, event));
     let user: CloudUser | null = null;
     try {
       user = await api.getUser();
@@ -115,8 +121,15 @@ export class Account {
   }
 
   /** Synchronous on purpose (see AccountOptions.defer): only the state changes here. */
-  private onAuth(user: CloudUser | null): void {
-    if (!this.setUser(user) || !user) return;
+  private onAuth(user: CloudUser | null, event: AuthChangeEvent = 'other'): void {
+    const wasRecovering = this.recovering;
+    if (!user) this.recovering = false;
+    else if (event === 'recovery') this.recovering = true;
+    if (!this.setUser(user)) {
+      if (this.recovering !== wasRecovering) this.update({});
+      return;
+    }
+    if (!user) return;
     const token = this.userToken;
     this.defer(() => void this.loadDetails(token));
   }
@@ -175,11 +188,32 @@ export class Account {
     return this.requireApi().resetPassword(email);
   }
 
+  /** True while the session came from a password-recovery link and no new password was set (the menu asks for one). */
+  get passwordRecovery(): boolean {
+    return this.recovering;
+  }
+
+  /** Sets the signed-in user's new password; ends the recovery state. The password is not kept. */
+  async updatePassword(newPassword: string): Promise<void> {
+    const api = this.requireApi();
+    if (!this._state.user) throw new CloudError('auth', 'not signed in');
+    await api.updatePassword(newPassword);
+    this.dismissPasswordRecovery();
+  }
+
+  /** The player chose not to set a new password now. */
+  dismissPasswordRecovery(): void {
+    if (!this.recovering) return;
+    this.recovering = false;
+    this.update({});
+  }
+
   /** Lets the last pushes go out first (bounded), then ends the session. The account's local database is kept. */
   async signOut(): Promise<void> {
     const api = this.requireApi();
     await this.settle();
     await api.signOut();
+    this.recovering = false;
     this.setUser(null);
   }
 

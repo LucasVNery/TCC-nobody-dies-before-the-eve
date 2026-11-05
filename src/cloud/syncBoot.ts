@@ -164,6 +164,7 @@ class AccountSyncStore implements EventStore {
       signIn: (e, p) => api.signIn(e, p),
       signOut: () => api.signOut(),
       resetPassword: (e) => api.resetPassword(e),
+      updatePassword: (p) => api.updatePassword(p),
       isAdmin: () => api.isAdmin(),
       acceptedTermsVersion: () => api.acceptedTermsVersion(),
       acceptTerms: (v) => api.acceptTerms(v),
