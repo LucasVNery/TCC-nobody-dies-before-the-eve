@@ -38,24 +38,32 @@ No painel, em **Authentication** (procure por "Sign In / Providers" ou "Provider
    - `http://localhost:5173/**`
    - `https://<SEU_PROJETO>.vercel.app/**`
 
-Observação: o envio de e-mails do plano gratuito usa o servidor de e-mail embutido do Supabase, que tem limite baixo de mensagens por hora e serve para testes. Para muitos participantes, procure por "SMTP Settings" em Authentication e configure um SMTP próprio (conferir o limite atual na documentação).
+### 3.1 SMTP próprio: OBRIGATÓRIO antes de chamar participantes
+
+O servidor de e-mail embutido do Supabase só entrega mensagens para endereços de membros da equipe do projeto (da organização no Supabase) e tem limite muito baixo (cerca de 2 e-mails por hora; conferir o valor atual na documentação). Ele serve **só** para a conta de teste do próprio autor. Com ele, um participante comum não recebe o e-mail de confirmação e não consegue criar a conta.
+
+Antes de coletar dados de participantes:
+
+1. Em **Authentication**, procure por **SMTP Settings** e ligue o SMTP próprio (custom SMTP), com os dados de um provedor de e-mail transacional (host, porta, usuário, senha do SMTP e o remetente). A senha do SMTP fica só no painel do Supabase, nunca no repositório.
+2. Depois, em **Authentication**, procure por **Rate Limits** e ajuste o limite de e-mails por hora para o número esperado de cadastros.
+3. Teste criando uma conta com um e-mail que **não** seja de membro da equipe e confira que a confirmação chega.
 
 ## 4. Chaves no ambiente local
 
 1. No painel, procure por **Project Settings > API** (ou "API Keys" / "Data API"). Copie:
    - **Project URL** (`https://<algo>.supabase.co`);
-   - a chave **anon** / **public** (às vezes chamada de "publishable key").
+   - a chave pública. Projetos novos podem mostrar chaves no formato novo: **`sb_publishable_...`** (pública) e **`sb_secret_...`** (secreta), além ou no lugar das antigas **anon** e **service_role**. Use a **publishable** (`sb_publishable_...`) ou, se só houver as antigas, a **anon**. Ela vai em `VITE_SUPABASE_ANON_KEY` (o nome da variável continua o mesmo).
 2. Na raiz do repositório, copie `.env.example` para `.env.local` e preencha:
 
    ```
    VITE_SUPABASE_URL=https://<algo>.supabase.co
-   VITE_SUPABASE_ANON_KEY=<chave anon>
+   VITE_SUPABASE_ANON_KEY=<chave publishable (sb_publishable_...) ou anon>
    ```
 
 3. `.env.local` está no `.gitignore` e nunca vai para o repositório.
 
-A chave `anon` é pública por desenho: ela vai dentro do jogo enviado ao navegador, e a segurança está nas regras de linha (RLS), não em esconder a chave.
-A chave **`service_role`** (ou "secret key") ignora todas as regras: **nunca** a coloque em `.env.local`, na Vercel ou em qualquer arquivo do repositório.
+A chave publishable/`anon` é pública por desenho: ela vai dentro do jogo enviado ao navegador, e a segurança está nas regras de linha (RLS), não em esconder a chave.
+A chave secreta (**`sb_secret_...`** ou a antiga **`service_role`**) ignora todas as regras: o jogo **nunca** a usa, e ela **nunca** vai para `.env.local`, para a Vercel ou para qualquer arquivo do repositório.
 
 Sem `.env.local` o jogo continua no modo local de hoje (sem login, só IndexedDB).
 
@@ -88,7 +96,7 @@ A tabela `admins` só se altera assim, por SQL no painel; o jogo não tem como e
 4. Leia a mensagem: uma linha por verificação com `OK` ou `FALHOU`, e no fim `RESULTADO: TODOS OK` ou `RESULTADO: HA FALHAS`.
 5. Se a mensagem for outra (por exemplo, permissão negada em `auth.users`), o roteiro não conseguiu nem começar; veja o comentário no topo do arquivo, que explica como usar dois usuários criados à mão no projeto de teste.
 
-O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não insere lote em nome de B; A insere e reenvia (upsert) o próprio lote; A não lê `events_flat`; A não se coloca em `admins` nem vê os registros de outros; o administrador B lê todos os lotes, consentimentos e `events_flat` (sem duplicatas de lotes reenviados); `delete_my_data()` apaga só os dados de quem chama e é recusada sem usuário; `anon` (sem login) não lê nem escreve nada.
+O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não insere lote em nome de B; A insere e reenvia (upsert) o próprio lote, e um reenvio menor (desatualizado) não encolhe o lote guardado; lotes acima de 1000 eventos ou 1 MiB são recusados; A não lê `events_flat`; A não se coloca em `admins` nem vê os registros de outros; o administrador B lê todos os lotes, consentimentos e `events_flat` (sem duplicatas de lotes reenviados); `delete_my_data()` apaga só os dados de quem chama e é recusada sem usuário; `anon` (sem login) não lê nem escreve nada.
 
 ## 7. Vercel
 
@@ -96,7 +104,7 @@ O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não inse
 2. Framework: **Vite**. Build command: `npm run build`. Output directory: `dist`. (A Vercel costuma detectar sozinha; confira.)
 3. Em **Settings > Environment Variables** do projeto, crie:
    - `VITE_SUPABASE_URL` = Project URL
-   - `VITE_SUPABASE_ANON_KEY` = chave anon
+   - `VITE_SUPABASE_ANON_KEY` = chave publishable (`sb_publishable_...`) ou anon (nunca a secreta)
    
    As variáveis `VITE_*` entram no pacote no momento do build: depois de criar ou mudar uma, faça um novo deploy (Redeploy).
 4. Depois do primeiro deploy, copie a URL do site (`https://<SEU_PROJETO>.vercel.app`) e volte ao passo 3 (Site URL e Redirect URLs) no Supabase.

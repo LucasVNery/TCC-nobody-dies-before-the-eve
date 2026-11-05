@@ -51,6 +51,13 @@ create table public.event_batches (
     case when jsonb_typeof(events) = 'array'
          then jsonb_array_length(events) <= 1000
          else false end),
+  -- Byte cap (1 MiB, about 7x a full 500-event batch): stops a few huge
+  -- events from filling the free-plan database. Same CASE form as above
+  -- (pg_column_size itself does not error; the guard keeps the checks uniform).
+  constraint event_batches_events_bytes     check (
+    case when jsonb_typeof(events) = 'array'
+         then pg_column_size(events) <= 1048576
+         else false end),
   constraint event_batches_session_id_len   check (char_length(session_id) between 1 and 200)
 );
 
@@ -152,6 +159,30 @@ create policy event_batches_update_own on public.event_batches
 
 -- No delete policy (and no delete privilege): deletion only via delete_my_data().
 
+-- Resends only grow a batch. If an update would make last_seq smaller (a
+-- stale, shorter resend of the same (user_id, session_id, first_seq)), keep
+-- the stored row unchanged by returning OLD. Silent on purpose: the upsert
+-- succeeds and the client needs no special case. Security invoker (default),
+-- empty search_path; touches nothing but the row being updated.
+create function public.event_batches_keep_bigger()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.last_seq < old.last_seq then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.event_batches_keep_bigger() from public, anon, authenticated;
+
+create trigger event_batches_keep_bigger
+  before update on public.event_batches
+  for each row execute function public.event_batches_keep_bigger();
+
 -- consents policies.
 create policy consents_select_own on public.consents
   for select to authenticated
@@ -222,8 +253,8 @@ grant execute on function public.delete_my_data() to authenticated;
 --
 -- Extracted columns use safe casts (null when the JSON value is not a number)
 -- so one malformed event sent by a player cannot break the admin's export.
--- Events without a numeric seq are left out of the view (the raw rows stay in
--- event_batches).
+-- Events without a whole-number seq are left out of the view (the raw rows
+-- stay in event_batches).
 -- ---------------------------------------------------------------------------
 
 create view public.events_flat
@@ -239,9 +270,9 @@ select distinct on (x.user_id, x.session_id, x.seq)
     case when (x.event -> 'run_idx')::text::numeric between -2147483648 and 2147483647
          then (x.event -> 'run_idx')::text::numeric::integer end
   end as run_idx,
-  case when jsonb_typeof(x.event -> 't_ms') = 'number' then
-    case when abs((x.event -> 't_ms')::text::numeric) < 1e300
-         then (x.event -> 't_ms')::text::numeric::double precision end
+  -- numeric, not double precision: exact (no float rounding) and cannot overflow.
+  case when jsonb_typeof(x.event -> 't_ms') = 'number'
+       then (x.event -> 't_ms')::text::numeric
   end as t_ms,
   x.event,
   x.first_seq as batch_first_seq,
@@ -254,8 +285,11 @@ from (
     b.last_seq,
     b.created_at,
     e.event,
+    -- Only whole numbers count as seq: 1.4 and 1.6 would both round to 1
+    -- and collide in the dedup, so non-integers are left out (seq null).
     case when jsonb_typeof(e.event -> 'seq') = 'number' then
       case when (e.event -> 'seq')::text::numeric between 0 and 9223372036854775807
+            and (e.event -> 'seq')::text::numeric = trunc((e.event -> 'seq')::text::numeric)
            then (e.event -> 'seq')::text::numeric::bigint end
     end as seq
   from public.event_batches b

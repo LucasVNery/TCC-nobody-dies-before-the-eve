@@ -13,7 +13,8 @@
 --     client runs it. So the editor will show an ERROR: that is expected; read
 --     the message. The last line says `RESULTADO: TODOS OK` or
 --     `RESULTADO: HA FALHAS`. Any other error means the script itself could
---     not run (see "Users" below).
+--     not run (see "Users" below). The same report is also emitted as a
+--     NOTICE just before the exception (psql shows it).
 --   * Two users are simulated the way PostgREST does it: `set local role
 --     authenticated` plus `request.jwt.claims` with the user's id as `sub`
 --     (auth.uid() reads that claim). `reset role` goes back to the owner.
@@ -70,8 +71,11 @@ begin
     values (a, 'sA', 0, 1, '[{"seq":0,"type":"a0"},{"seq":1,"type":"a1"}]');
     insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
     values (a, 'sA', 0, 2, '[{"seq":0,"type":"a0"},{"seq":1,"type":"a1"},{"seq":2,"type":"a2-old","run_idx":0,"t_ms":12.5}]')
+    -- same statement shape as a PostgREST upsert: every sent column is set
     on conflict (user_id, session_id, first_seq)
-    do update set last_seq = excluded.last_seq, events = excluded.events;
+    do update set user_id = excluded.user_id, session_id = excluded.session_id,
+                  first_seq = excluded.first_seq, last_seq = excluded.last_seq,
+                  events = excluded.events;
     -- a later batch overlapping seq 2 (events_flat must keep this copy of seq 2)
     insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
     values (a, 'sA', 2, 3, '[{"seq":2,"type":"a2-new"},{"seq":3,"type":"a3"}]');
@@ -80,6 +84,60 @@ begin
     r := r || format('%s 02 A insere e faz upsert do proprio lote', case when n = 1 then 'OK    ' else 'FALHOU' end);
   exception when others then
     r := r || format('FALHOU 02 A insere e faz upsert do proprio lote (%s %s)', sqlstate, sqlerrm);
+  end;
+
+  -- stale, shorter resend (upsert) must not shrink the stored batch (trigger)
+  begin
+    insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
+    values (a, 'sA', 0, 1, '[{"seq":0,"type":"stale"},{"seq":1,"type":"stale"}]')
+    on conflict (user_id, session_id, first_seq)
+    do update set user_id = excluded.user_id, session_id = excluded.session_id,
+                  first_seq = excluded.first_seq, last_seq = excluded.last_seq,
+                  events = excluded.events;
+    select count(*) into n from public.event_batches
+     where user_id = a and session_id = 'sA' and first_seq = 0 and last_seq = 2
+       and jsonb_array_length(events) = 3 and events -> 0 ->> 'type' = 'a0';
+    r := r || format('%s 36 upsert menor nao encolhe o lote guardado', case when n = 1 then 'OK    ' else 'FALHOU' end);
+  exception when others then
+    r := r || format('FALHOU 36 upsert menor nao encolhe o lote guardado (%s %s)', sqlstate, sqlerrm);
+  end;
+
+  -- a direct update to a smaller last_seq is ignored too (trigger)
+  begin
+    update public.event_batches set last_seq = 0, events = '[{"seq":0,"type":"stale"}]'
+     where user_id = a and session_id = 'sA' and first_seq = 0;
+    select count(*) into n from public.event_batches
+     where user_id = a and session_id = 'sA' and first_seq = 0 and last_seq = 2
+       and jsonb_array_length(events) = 3;
+    r := r || format('%s 37 update direto para last_seq menor e ignorado', case when n = 1 then 'OK    ' else 'FALHOU' end);
+  exception when others then
+    r := r || format('FALHOU 37 update direto para last_seq menor e ignorado (%s %s)', sqlstate, sqlerrm);
+  end;
+
+  -- a bigger update still goes through (trigger only blocks shrinking); own
+  -- session sGrow (counted in check 20, removed by delete_my_data below)
+  begin
+    insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
+    values (a, 'sGrow', 0, 0, '[{"seq":0}]');
+    update public.event_batches set last_seq = 1, events = '[{"seq":0},{"seq":1}]'
+     where user_id = a and session_id = 'sGrow';
+    select count(*) into n from public.event_batches
+     where user_id = a and session_id = 'sGrow' and last_seq = 1;
+    r := r || format('%s 38 update para last_seq maior e aceito', case when n = 1 then 'OK    ' else 'FALHOU' end);
+  exception when others then
+    r := r || format('FALHOU 38 update para last_seq maior e aceito (%s %s)', sqlstate, sqlerrm);
+  end;
+
+  -- byte cap: a batch over 1 MiB is refused even with few events
+  begin
+    insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
+    values (a, 'huge', 0, 499,
+      (select jsonb_agg(jsonb_build_object('seq', g,
+                'pad', (select string_agg(md5(g::text || ':' || k::text), '') from generate_series(1, 80) k)))
+         from generate_series(0, 499) g));
+    r := r || text 'FALHOU 39 lote acima de 1 MiB e recusado';
+  exception when check_violation then
+    r := r || text 'OK     39 lote acima de 1 MiB e recusado';
   end;
 
   -- A inserts own consent
@@ -183,11 +241,11 @@ begin
 
   r := r || format('%s 19 is_admin() = true para B', case when public.is_admin() then 'OK    ' else 'FALHOU' end);
   select count(*) into n from public.event_batches where user_id in (a, b);
-  r := r || format('%s 20 admin B le todos os lotes (esperado 3, veio %s)', case when n = 3 then 'OK    ' else 'FALHOU' end, n);
+  r := r || format('%s 20 admin B le todos os lotes (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
   select count(*) into n from public.consents where user_id in (a, b);
   r := r || format('%s 21 admin B le todos os consentimentos (esperado 2, veio %s)', case when n = 2 then 'OK    ' else 'FALHOU' end, n);
-  select count(*) into n from public.events_flat where user_id = a;
-  r := r || format('%s 22 admin B le events_flat, sem duplicatas (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
+  select count(*) into n from public.events_flat where user_id = a and session_id = 'sA';
+  r := r || format('%s 22 admin B le events_flat, sem duplicatas na sessao sA (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
   select type into t from public.events_flat where user_id = a and session_id = 'sA' and seq = 2;
   r := r || format('%s 23 events_flat fica com o lote de maior last_seq (veio %s)', case when t = 'a2-new' then 'OK    ' else 'FALHOU' end, coalesce(t, 'nada'));
   select count(*) into n from public.admins where user_id = b;
@@ -284,6 +342,9 @@ begin
   r := r || case when exists (select 1 from unnest(r) x where x like 'FALHOU%')
                  then 'RESULTADO: HA FALHAS'
                  else 'RESULTADO: TODOS OK' end;
+  -- Also as NOTICE (shown by psql and by clients that display notices), then
+  -- the exception that carries the same report and forces the rollback.
+  raise notice E'RLS CHECK\n%', array_to_string(r, E'\n');
   raise exception E'RLS CHECK (tudo foi desfeito; este erro e esperado)\n%',
     array_to_string(r, E'\n');
 end

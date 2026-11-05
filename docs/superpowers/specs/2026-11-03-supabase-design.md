@@ -10,7 +10,7 @@ O jogo precisa deixar de ser uma máquina de um jogador só. Três pedidos do au
 2. **O jogador volta e continua de onde parou**, em qualquer computador, entrando com sua conta.
 3. **O projeto será publicado na Vercel**, aberto a quem receber o link.
 
-Um quarto pedido define quem vê o quê: o autor (`devlucaznery@gmail.com`) é **administrador**. Ver logs, pular para o chefe, forçar ataques e as demais ferramentas de desenvolvimento são só dele; o jogador comum não as tem.
+Um quarto pedido define quem vê o quê: o autor é **administrador**. Ver logs, pular para o chefe, forçar ataques e as demais ferramentas de desenvolvimento são só dele; o jogador comum não as tem.
 
 O sistema de perfil continua sendo o produto da tese. Este projeto só muda **onde** o log de eventos vive e **quem** pode acessá-lo. O perfil continua sendo reconstruído do log, como hoje.
 
