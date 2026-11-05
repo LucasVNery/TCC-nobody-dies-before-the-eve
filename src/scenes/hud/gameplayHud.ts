@@ -1,6 +1,9 @@
 import type Phaser from 'phaser';
 import type { ItemKind } from '../../game/items';
 import { STAMINA_MAX } from '../../combat/stamina';
+import type { HotkeyGates } from '../input/debugKeys';
+
+const NO_DEV_KEYS: HotkeyGates = { toolKeys: false, debugKeys: false };
 
 const STAMINA_BAR_CELLS = 15;
 
@@ -54,16 +57,25 @@ export const HELP_LINES = [
   '  E (segure)   - guarda: aperte bem em cima do golpe = parry, segure de longe = bloqueio',
   '  F            - usar item (cura / poder / bomba)',
   '  Esc          - voltar ao menu (encerra a run; o histórico fica salvo)',
+];
+
+/** Help lines for the development keys F2/F3/F8/F9; shown only when they are enabled (see toolKeysEnabled). */
+export const TOOL_KEYS_HELP_LINES = [
   '  F2 / F8 / F9 - resetar perfil / exportar / importar histórico',
   '  F3           - mostrar/ocultar hitboxes (depuração)',
 ];
 
-/** Help line for the playtest shortcuts; shown only when they are enabled (see debugKeysEnabled). */
+/** Help line for the playtest shortcuts; shown only when they are enabled (see devToolsEnabled). */
 export const DEBUG_KEYS_HELP_LINE = '  F4 / F6      - pular para a sala do chefe / forçar barragem (teste)';
 
-/** The in-game help list: HELP_LINES, plus the F4/F6 line when the playtest shortcuts are on. */
-export function helpLines(debugKeys: boolean): readonly string[] {
-  return debugKeys ? [...HELP_LINES, DEBUG_KEYS_HELP_LINE] : HELP_LINES;
+/** The in-game help list: HELP_LINES, plus the lines of the development keys that are on. */
+export function helpLines(gates: HotkeyGates): readonly string[] {
+  return [...HELP_LINES, ...(gates.toolKeys ? TOOL_KEYS_HELP_LINES : []), ...(gates.debugKeys ? [DEBUG_KEYS_HELP_LINE] : [])];
+}
+
+/** Footer hint; Tab and F3 are listed only when the development keys are on. */
+export function hintLine(gates: Pick<HotkeyGates, 'toolKeys'>): string {
+  return gates.toolKeys ? 'Esc: menu · Tab: painel · H: controles · F3: hitboxes' : 'Esc: menu · H: controles';
 }
 
 /** Plain-text bar of `cells` cells for 0..max; any value above 0 shows at least one cell. */
@@ -123,18 +135,18 @@ export class GameplayHud {
   private readonly hintText: Phaser.GameObjects.Text;
   private readonly helpText: Phaser.GameObjects.Text;
 
-  constructor(scene: Phaser.Scene, opts: { debugKeys?: boolean } = {}) {
+  constructor(scene: Phaser.Scene, gates: HotkeyGates = NO_DEV_KEYS) {
     const line = { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' };
     this.statusText = scene.add.text(10, 10, '', line);
     this.staminaText = scene.add.text(10, 29, '', line);
     this.runText = scene.add.text(10, 48, '', line);
     this.weaponText = scene.add.text(10, 690, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ffeb3b' });
-    this.hintText = scene.add.text(10, 665, 'Esc: menu · Tab: painel · H: controles · F3: hitboxes', {
+    this.hintText = scene.add.text(10, 665, hintLine(gates), {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#aaaaaa',
     });
-    this.helpText = scene.add.text(590, 10, [...helpLines(opts.debugKeys ?? false)], {
+    this.helpText = scene.add.text(590, 10, [...helpLines(gates)], {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#ffffff',
@@ -193,5 +205,11 @@ export class GameplayHud {
 
   toggleHelp(): void {
     this.helpText.setVisible(!this.helpText.visible);
+  }
+
+  /** The development keys changed (the account changed mid-run): the hint and the help list follow. */
+  setGates(gates: HotkeyGates): void {
+    this.hintText.setText(hintLine(gates));
+    this.helpText.setText([...helpLines(gates)]);
   }
 }

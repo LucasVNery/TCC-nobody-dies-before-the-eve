@@ -12,8 +12,8 @@ import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
 import { createBrowserPlatform } from './session/browserPlatform';
 import { accountFromRegistry } from '../cloud/account';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
-import { bindHotkeys } from './input/hotkeys';
-import { debugKeysEnabled } from './input/debugKeys';
+import { bindGatedHotkeys } from './input/hotkeys';
+import { demoBossEnabled, hotkeyGates, LOCAL_ACCESS, type DevToolsAccess, type HotkeyGates } from './input/debugKeys';
 import { claimStore } from './session/storeHandoff';
 import { CameraRig } from './view/cameraRig';
 import { WorldView } from './view/worldView';
@@ -81,14 +81,17 @@ export class ArenaScene extends Phaser.Scene {
     // before Esc never restarts a later Arena (the scene object is reused when the menu comes back here).
     let alive = true;
     this.leaving = false;
-    // Playtest shortcuts (F4/F6) only with ?boss=demo or in a dev build.
-    const debugKeys = debugKeysEnabled(window.location.search, import.meta.env.DEV);
+    // Development keys: cloud mode only for an administrator; local mode as before (F4/F6 only with
+    // ?boss=demo or in a dev build). Read from the account state when asked, never cached for the run.
+    const account = accountFromRegistry(this.registry);
+    const access = (): DevToolsAccess => account?.state ?? LOCAL_ACCESS;
+    const gates = (): HotkeyGates => hotkeyGates(access(), window.location.search, import.meta.env.DEV);
     const session = new SessionController({
-      platform: createBrowserPlatform(accountFromRegistry(this.registry)),
+      platform: createBrowserPlatform(account),
       entitySize: ENTITY_SIZE,
       nextSeed: () => Math.floor(Math.random() * 0x100000000),
-      // playtest: open the game with ?boss=demo for the short-run thresholds
-      bossConfig: new URLSearchParams(window.location.search).get('boss') === 'demo' ? BOSS_CONFIG_DEMO : undefined,
+      // playtest: open the game with ?boss=demo for the short-run thresholds (development tools only)
+      bossConfig: demoBossEnabled(access(), window.location.search, import.meta.env.DEV) ? BOSS_CONFIG_DEMO : undefined,
     });
     this.session = session;
     this.aggregator = new MetricsAggregator();
@@ -104,7 +107,7 @@ export class ArenaScene extends Phaser.Scene {
       flash: (target) => this.world.flash(target),
       staminaDenied: () => this.hud.flashStamina(),
     });
-    this.hud = new GameplayHud(this, { debugKeys });
+    this.hud = new GameplayHud(this, gates());
     this.cameraRig = new CameraRig(this);
     this.cameraRig.attach(this.world.playerSprite.gameObject, this.hud.objects);
 
@@ -115,7 +118,7 @@ export class ArenaScene extends Phaser.Scene {
     const storeClaim = claimStore(this.registry);
     this.playerInput = new PlayerInput(this, () => (session.ready ? this.intents() : null));
     this.panel = new AnalysisPanel(document.body);
-    const unbindHotkeys = bindHotkeys(keyboard, {
+    const hotkeys = bindGatedHotkeys(keyboard, {
       resetProfile: () => { if (session.ready) session.resetProfile(); },
       exportHistory: () => void session.exportHistory(),
       importHistory: () =>
@@ -133,12 +136,24 @@ export class ArenaScene extends Phaser.Scene {
         this.leaving = true;
         this.scene.start('MenuScene');
       },
-    }, { debugKeys });
+    }, gates);
+    // The account can change under a running Arena (a lost session; a sign-in in another tab): the
+    // development keys, the live panel, the hitboxes and the hints follow the current account.
+    const offAccount = account?.onChange(() => {
+      if (!hotkeys.refresh()) return;
+      const now = hotkeys.gates;
+      this.hud.setGates(now);
+      if (!now.toolKeys) {
+        this.panel.setVisible(false);
+        if (this.debugDraw.isVisible) this.debugDraw.toggle();
+      }
+    });
 
     this.time.addEvent({ delay: PERSIST_INTERVAL_MS, loop: true, callback: () => void session.persist() });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       alive = false;
-      unbindHotkeys();
+      offAccount?.();
+      hotkeys.unbind();
       this.playerInput.destroy();
       // PlayerInput's keys were added with capture on; captures are global, so drop them before the next scene.
       keyboard.clearCaptures();

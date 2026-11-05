@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES, helpLines, DEBUG_KEYS_HELP_LINE, bannerAlpha, bossBarFill, bossBarLabel, BANNER_HOLD_MS, BANNER_FADE_MS, BOSS_BAR_WIDTH } from './gameplayHud';
+import { staminaBar, encounterLine, runTag, statusLine, HELP_LINES, helpLines, hintLine, DEBUG_KEYS_HELP_LINE, TOOL_KEYS_HELP_LINES, bannerAlpha, bossBarFill, bossBarLabel, BANNER_HOLD_MS, BANNER_FADE_MS, BOSS_BAR_WIDTH } from './gameplayHud';
 
 describe('staminaBar', () => {
   it('150 of 150 is a full 15-cell bar', () => {
@@ -57,11 +57,29 @@ describe('HELP_LINES', () => {
   it('mentions Esc for the menu', () => {
     expect(HELP_LINES.some((l) => l.includes('Esc') && l.includes('menu'))).toBe(true);
   });
-  it('does not advertise the F4/F6 playtest shortcuts; helpLines adds them only when enabled', () => {
-    expect(HELP_LINES.some((l) => l.includes('F4') || l.includes('F6'))).toBe(false);
-    expect(helpLines(false)).toEqual(HELP_LINES);
-    expect(helpLines(true)).toEqual([...HELP_LINES, DEBUG_KEYS_HELP_LINE]);
+  it('does not advertise any development key; helpLines adds each group only when enabled', () => {
+    expect(HELP_LINES.some((l) => /F\d|Tab/.test(l))).toBe(false);
+    expect(helpLines({ toolKeys: false, debugKeys: false })).toEqual(HELP_LINES);
+    expect(helpLines({ toolKeys: true, debugKeys: false })).toEqual([...HELP_LINES, ...TOOL_KEYS_HELP_LINES]);
+    expect(helpLines({ toolKeys: true, debugKeys: true })).toEqual([...HELP_LINES, ...TOOL_KEYS_HELP_LINES, DEBUG_KEYS_HELP_LINE]);
     expect(DEBUG_KEYS_HELP_LINE).toContain('F4 / F6');
+    expect(TOOL_KEYS_HELP_LINES.join('\n')).toMatch(/F2 \/ F8 \/ F9[\s\S]*F3/);
+  });
+  it('local mode shows the same help list as before the cloud (F2/F8/F9 and F3 at the end)', () => {
+    const lines = helpLines({ toolKeys: true, debugKeys: false });
+    expect(lines.slice(-2)).toEqual([
+      '  F2 / F8 / F9 - resetar perfil / exportar / importar histórico',
+      '  F3           - mostrar/ocultar hitboxes (depuração)',
+    ]);
+  });
+});
+
+describe('hintLine', () => {
+  it('lists Tab and F3 only when the development keys are on', () => {
+    expect(hintLine({ toolKeys: true })).toBe('Esc: menu · Tab: painel · H: controles · F3: hitboxes');
+    const plain = hintLine({ toolKeys: false });
+    expect(plain).toBe('Esc: menu · H: controles');
+    expect(plain).not.toMatch(/Tab|F3/);
   });
 });
 

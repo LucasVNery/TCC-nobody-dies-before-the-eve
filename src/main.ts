@@ -16,8 +16,16 @@ import { FakeCloudApi } from './cloud/fakeCloudApi';
  */
 function devFakeCloud(): CloudApi | null {
   if (!import.meta.env.DEV) return null;
-  if (new URLSearchParams(window.location.search).get('cloud') !== 'fake') return null;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('cloud') !== 'fake') return null;
   const api = new FakeCloudApi();
+  // `&admin=1`: every account that signs in on this page is an administrator (to check the development tools).
+  // Registered before account.init(), so the role is set before the Account asks for it.
+  if (params.get('admin') === '1') {
+    api.onAuthChange((user) => {
+      if (user) api.setAdmin(user.id);
+    });
+  }
   // For manual checks in the console, e.g. opening a recovery link: __tccFakeCloud.simulateRecovery(email).
   (window as unknown as { __tccFakeCloud?: FakeCloudApi }).__tccFakeCloud = api;
   return api;

@@ -2,7 +2,8 @@
 import Phaser from 'phaser';
 import { MENU_ITEMS, firstEnabled, moveSelection, type MenuId, type MenuItem } from './menu/menuModel';
 import { accountStatusLine, buildMenuItems, cloudErrorMessage, keepSelection, playAction } from './menu/menuState';
-import { HOW_TO_PLAY_LINES } from './menu/howToPlay';
+import { howToPlayLines } from './menu/howToPlay';
+import { LOCAL_ACCESS, toolKeysEnabled } from './input/debugKeys';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
 import { createBrowserPlatform } from './session/browserPlatform';
 import { accountFromRegistry, type Account } from '../cloud/account';
@@ -86,7 +87,7 @@ export class MenuScene extends Phaser.Scene {
     const hint = this.add.text(640, 660, '↑/↓ + Enter ou mouse', { fontFamily: FONT, fontSize: '14px', color: '#888888' }).setOrigin(0.5);
     this.mainObjects = [title, version, this.statusText, this.noticeText, hint];
 
-    this.howToText = this.add.text(60, 40, HOW_TO_PLAY_LINES as string[], { fontFamily: FONT, fontSize: '16px', color: '#ffffff', lineSpacing: 4 });
+    this.howToText = this.add.text(60, 40, '', { fontFamily: FONT, fontSize: '16px', color: '#ffffff', lineSpacing: 4 });
     this.analysisText = this.add.text(640, 360, '', { fontFamily: FONT, fontSize: '20px', color: '#ffffff', align: 'center' }).setOrigin(0.5);
     this.backHint = this.add.text(640, 690, 'Esc: voltar', { fontFamily: FONT, fontSize: '16px', color: '#ffeb3b' }).setOrigin(0.5);
 
@@ -366,6 +367,8 @@ export class MenuScene extends Phaser.Scene {
       rect.setVisible(screen === 'main');
       label.setVisible(screen === 'main');
     }
+    // Re-read on every show: the account (and with it the development keys) may have changed.
+    if (screen === 'howto') this.howToText.setText([...howToPlayLines(toolKeysEnabled(this.account?.state ?? LOCAL_ACCESS))]);
     this.howToText.setVisible(screen === 'howto');
     this.analysisText.setVisible(screen === 'analysis').setText(screen === 'analysis' ? 'Carregando histórico...' : '');
     this.backHint.setVisible(screen === 'howto' || screen === 'analysis');
