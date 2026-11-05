@@ -53,8 +53,8 @@ describe('FakeCloudApi', () => {
   it('replaces a batch with the same (sessionId, firstSeq)', async () => {
     const api = new FakeCloudApi();
     const user = await signedIn(api);
-    await api.pushBatches([batch('s1', 0, 2, { tag: 'old' }), batch('s1', 2)]);
-    await api.pushBatches([batch('s1', 0, 3, { tag: 'new' })]);
+    await api.pushBatches([batch('s1', 0, 2, { tag: 'old' }), batch('s1', 2)], user.id);
+    await api.pushBatches([batch('s1', 0, 3, { tag: 'new' })], user.id);
     const stored = api.batchesOf(user.id);
     expect(stored).toHaveLength(2);
     const first = stored.find((b) => b.firstSeq === 0)!;
@@ -65,10 +65,10 @@ describe('FakeCloudApi', () => {
   it('never shrinks a stored batch on a shorter resend, but grows on a larger one', async () => {
     const api = new FakeCloudApi();
     const user = await signedIn(api);
-    await api.pushBatches([batch('s1', 0, 3)]);
-    await api.pushBatches([batch('s1', 0, 2)]);
+    await api.pushBatches([batch('s1', 0, 3)], user.id);
+    await api.pushBatches([batch('s1', 0, 2)], user.id);
     expect(api.batchesOf(user.id)[0].lastSeq).toBe(2);
-    await api.pushBatches([batch('s1', 0, 5)]);
+    await api.pushBatches([batch('s1', 0, 5)], user.id);
     expect(api.batchesOf(user.id)[0].lastSeq).toBe(4);
   });
 
@@ -76,12 +76,12 @@ describe('FakeCloudApi', () => {
     const api = new FakeCloudApi();
     const user = await signedIn(api);
     const b = batch('s1', 0, 2);
-    await api.pushBatches([b]);
+    await api.pushBatches([b], user.id);
     b.events.pop();
     api.batchesOf(user.id)[0].events.pop();
-    (await api.pullEvents()).pop();
+    (await api.pullAll()).pop();
     expect(api.batchesOf(user.id)[0].events).toHaveLength(2);
-    expect(await api.pullEvents()).toHaveLength(2);
+    expect(await api.pullAll()).toHaveLength(2);
   });
 
   it('can require e-mail confirmation on sign-up', async () => {
@@ -91,12 +91,12 @@ describe('FakeCloudApi', () => {
 
   it('pulls only the signed-in user events', async () => {
     const api = new FakeCloudApi();
-    await signedIn(api, MAIL_A);
-    await api.pushBatches([batch('sa', 0)]);
+    const a = await signedIn(api, MAIL_A);
+    await api.pushBatches([batch('sa', 0)], a.id);
     await api.signOut();
-    await signedIn(api, MAIL_B);
-    await api.pushBatches([batch('sb', 0, 3)]);
-    const pulled = await api.pullEvents();
+    const b = await signedIn(api, MAIL_B);
+    await api.pushBatches([batch('sb', 0, 3)], b.id);
+    const pulled = await api.pullAll();
     expect(pulled).toHaveLength(3);
     expect(pulled.every((e) => e.session_id === 'sb')).toBe(true);
   });
@@ -105,28 +105,30 @@ describe('FakeCloudApi', () => {
     const api = new FakeCloudApi();
     const user = await signedIn(api);
     api.failNext(1);
-    await expectKind(api.pushBatches([batch('s1', 0)]), 'network');
+    await expectKind(api.pushBatches([batch('s1', 0)], user.id), 'network');
     expect(api.batchesOf(user.id)).toHaveLength(0);
-    await api.pushBatches([batch('s1', 0)]);
+    await api.pushBatches([batch('s1', 0)], user.id);
     expect(api.batchesOf(user.id)).toHaveLength(1);
   });
 
   it('requires sign-in to push', async () => {
-    await expectKind(new FakeCloudApi().pushBatches([batch('s1', 0)]), 'auth');
+    await expectKind(new FakeCloudApi().pushBatches([batch('s1', 0)], 'user-1'), 'auth');
   });
 
   it('deleteMyData empties only the current user', async () => {
     const api = new FakeCloudApi();
     const a = await signedIn(api, MAIL_A);
-    await api.pushBatches([batch('sa', 0)]);
+    await api.pushBatches([batch('sa', 0)], a.id);
     await api.signOut();
     const b = await signedIn(api, MAIL_B);
-    await api.pushBatches([batch('sb', 0)]);
+    await api.pushBatches([batch('sb', 0)], b.id);
     await api.acceptTerms('t1');
-    await api.deleteMyData();
+    await expectKind(api.deleteMyData(a.id), 'auth'); // not the signed-in user: refused, nothing deleted
+    expect(api.batchesOf(b.id)).toHaveLength(1);
+    await api.deleteMyData(b.id);
     expect(await api.acceptedTermsVersion()).toBeNull();
     expect(api.batchesOf(b.id)).toHaveLength(0);
-    expect(await api.pullEvents()).toEqual([]);
+    expect(await api.pullAll()).toEqual([]);
     expect(api.batchesOf(a.id)).toHaveLength(1);
   });
 
@@ -168,6 +170,26 @@ describe('FakeCloudApi', () => {
     await api.signOut();
     expect(seen[1]).toEqual([null, 'other']);
     expect(() => api.simulateRecovery(MAIL_B)).toThrow(CloudError);
+  });
+
+  it('refuses rows of another user than the session (as RLS WITH CHECK)', async () => {
+    const api = new FakeCloudApi();
+    const user = await signedIn(api);
+    await expectKind(api.pushBatches([batch('s1', 0)], 'someone-else'), 'auth');
+    expect(api.batchesOf(user.id)).toHaveLength(0);
+  });
+
+  it('pulls in pages ordered by (session, firstSeq), each page starting after the cursor', async () => {
+    const api = new FakeCloudApi({ pullPageSize: 2 });
+    const user = await signedIn(api);
+    await api.pushBatches([batch('b', 0), batch('a', 2), batch('a', 0), batch('c', 0, 1)], user.id);
+    const first = await api.pullPage(null);
+    expect(first.events.map((e) => `${e.session_id}${e.seq}`)).toEqual(['a0', 'a1', 'a2', 'a3']);
+    expect(first.next).toEqual({ sessionId: 'a', firstSeq: 2 });
+    const second = await api.pullPage(first.next);
+    expect(second.events.map((e) => `${e.session_id}${e.seq}`)).toEqual(['b0', 'b1', 'c0']);
+    expect(second.next).toEqual({ sessionId: 'c', firstSeq: 0 });
+    expect(await api.pullPage(second.next)).toEqual({ events: [], next: null });
   });
 
   it('stores the accepted terms version per user', async () => {

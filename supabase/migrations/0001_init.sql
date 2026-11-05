@@ -13,7 +13,8 @@
 --     consents       select/insert own rows only; no update, no delete
 --     admins         select own row only (to learn whether it is admin); no writes
 --     events_flat    no rows (admins only)
---     delete_my_data() deletes the caller's batches and consents
+--     delete_my_data(expected) deletes the caller's batches and consents, only
+--       when `expected` is the caller (auth.uid()); otherwise it raises 42501
 --   admin (authenticated, row in admins): additionally reads every row of the
 --     three tables and the events_flat view. Admins do NOT get extra write rights.
 --   anon: no access to any table, view or function defined here.
@@ -157,7 +158,7 @@ create policy event_batches_update_own on public.event_batches
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
--- No delete policy (and no delete privilege): deletion only via delete_my_data().
+-- No delete policy (and no delete privilege): deletion only via delete_my_data(expected).
 
 -- Resends only grow a batch. If an update would make last_seq smaller (a
 -- stale, shorter resend of the same (user_id, session_id, first_seq)), keep
@@ -206,13 +207,18 @@ create policy admins_select_admin on public.admins
   using ((select public.is_admin()));
 
 -- ---------------------------------------------------------------------------
--- delete_my_data(): the player's right to erase (spec section 12).
+-- delete_my_data(expected): the player's right to erase (spec section 12).
 -- security definer because players have no delete privilege/policy; it deletes
 -- only rows of auth.uid() and refuses to run without a signed-in user.
--- The admins row (if any) is kept; remove it by SQL if wanted.
+-- `expected` is the account the game means to erase (the user id it shows as
+-- signed in). If the request's token belongs to anyone else (another account
+-- signed in meanwhile, in another tab), it raises 42501 and deletes nothing,
+-- instead of erasing the wrong account.
+-- The admins row (if any) and the auth user (e-mail) are kept; remove them by
+-- SQL / Authentication > Users if wanted.
 -- ---------------------------------------------------------------------------
 
-create function public.delete_my_data()
+create function public.delete_my_data(expected uuid)
 returns void
 language plpgsql
 volatile
@@ -226,13 +232,17 @@ begin
     raise exception 'delete_my_data: no authenticated user'
       using errcode = '42501';
   end if;
+  if expected is null or expected <> uid then
+    raise exception 'delete_my_data: the signed-in user is not the expected one'
+      using errcode = '42501';
+  end if;
   delete from public.event_batches where user_id = uid;
   delete from public.consents      where user_id = uid;
 end;
 $$;
 
-revoke all on function public.delete_my_data() from public, anon, authenticated;
-grant execute on function public.delete_my_data() to authenticated;
+revoke all on function public.delete_my_data(uuid) from public, anon, authenticated;
+grant execute on function public.delete_my_data(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- events_flat: one row per event, for research queries and export (admins).

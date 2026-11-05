@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { batchToRow, rowToBatch, flattenBatches, toCloudError, createSupabaseCloudApi } from './supabaseCloudApi';
+import { batchToRow, rowToBatch, flattenBatches, toCloudError, createSupabaseCloudApi, afterFilter } from './supabaseCloudApi';
 import { CloudError, type EventBatch } from './cloudApi';
 import type { LoggedEvent } from '../telemetry/schema';
 
@@ -13,11 +13,18 @@ function batch(sessionId: string, firstSeq: number, lastSeq: number, tag = 'x'):
 }
 
 describe('batch <-> row', () => {
-  it('round-trips and writes only client-writable columns', () => {
+  it('round-trips and writes only client-writable columns, user_id included explicitly', () => {
     const b = batch('s1', 3, 5);
-    const row = batchToRow(b);
-    expect(Object.keys(row).sort()).toEqual(['events', 'first_seq', 'last_seq', 'session_id']);
+    const row = batchToRow(b, 'user-bound');
+    expect(Object.keys(row).sort()).toEqual(['events', 'first_seq', 'last_seq', 'session_id', 'user_id']);
+    expect(row.user_id).toBe('user-bound');
     expect(rowToBatch(row)).toEqual(b);
+  });
+
+  it('the pull cursor becomes a keyset filter on (session_id, first_seq), with the session quoted', () => {
+    expect(afterFilter({ sessionId: 's-1', firstSeq: 40 })).toBe('session_id.gt."s-1",and(session_id.eq."s-1",first_seq.gt.40)');
+    expect(afterFilter({ sessionId: 'a"b\\c', firstSeq: 0 })).toBe('session_id.gt."a\\"b\\\\c",and(session_id.eq."a\\"b\\\\c",first_seq.gt.0)');
+    expect(() => afterFilter({ sessionId: 's', firstSeq: 1.5 })).toThrow();
   });
 });
 
@@ -89,7 +96,9 @@ describe('createSupabaseCloudApi', () => {
     const fetchSpy = vi.fn(async () => new Response('{}'));
     vi.stubGlobal('fetch', fetchSpy);
     const api = createSupabaseCloudApi({ url: 'http://localhost:54321', anonKey: 'test-anon-key' });
-    await expect(api.pullEvents()).rejects.toMatchObject({ kind: 'auth' });
+    await expect(api.pullPage(null)).rejects.toMatchObject({ kind: 'auth' });
+    await expect(api.pushBatches([batch('s', 0, 0)], 'user-x')).rejects.toMatchObject({ kind: 'auth' });
+    await expect(api.deleteMyData('user-x')).rejects.toMatchObject({ kind: 'auth' });
     await expect(api.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'auth' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });

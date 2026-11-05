@@ -3,7 +3,7 @@
 import Phaser from 'phaser';
 import { MenuScene } from './scenes/MenuScene';
 import { ArenaScene } from './scenes/ArenaScene';
-import { Account, ACCOUNT_REGISTRY_KEY } from './cloud/account';
+import { Account, ACCOUNT_REGISTRY_KEY, browserAccountChannel } from './cloud/account';
 import type { CloudApi } from './cloud/cloudApi';
 import { readCloudConfig } from './cloud/cloudConfig';
 import { createSupabaseCloudApi } from './cloud/supabaseCloudApi';
@@ -37,9 +37,10 @@ const cloudConfig = readCloudConfig({
   VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined,
 });
 const fake = devFakeCloud();
+// The channel tells the game's other tabs when this account's data was deleted.
 const account = fake
-  ? new Account(fake, { simulated: true })
-  : new Account(cloudConfig ? createSupabaseCloudApi(cloudConfig) : null);
+  ? new Account(fake, { simulated: true, channel: browserAccountChannel() })
+  : new Account(cloudConfig ? createSupabaseCloudApi(cloudConfig) : null, { channel: browserAccountChannel() });
 void account.init();
 
 new Phaser.Game({

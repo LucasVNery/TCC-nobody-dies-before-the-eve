@@ -23,6 +23,69 @@ export function accountDbName(userId: string): string {
 
 /** Longest wait for the last background pushes before signing out or deleting the account's data. */
 const SETTLE_TIMEOUT_MS = 4000;
+/** Longest wait for a local-database deletion that another connection (an old tab) holds up. */
+export const DELETE_BLOCKED_TIMEOUT_MS = 3000;
+
+/** Per-user localStorage key holding only the accepted terms version (lets an offline reload play). */
+export function termsCacheKey(userId: string): string {
+  return `tcc-terms-${userId}`;
+}
+
+/** The slice of Web Storage the terms cache uses. */
+export interface TermsStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/** Messages between tabs of the game (BroadcastChannel in the browser). */
+export interface AccountMessage {
+  kind: 'data-deleted';
+  userId: string;
+}
+export interface AccountChannel {
+  post(message: AccountMessage): void;
+  /** Returns the unsubscribe function. */
+  subscribe(listener: (message: unknown) => void): () => void;
+}
+
+/** The browser's channel between tabs of the game, or undefined where BroadcastChannel is missing. */
+export function browserAccountChannel(): AccountChannel | undefined {
+  try {
+    if (typeof BroadcastChannel === 'undefined') return undefined;
+    const ch = new BroadcastChannel('tcc-account');
+    return {
+      post: (m) => ch.postMessage(m),
+      subscribe: (listener) => {
+        const onMessage = (e: MessageEvent): void => listener(e.data);
+        ch.addEventListener('message', onMessage);
+        return () => ch.removeEventListener('message', onMessage);
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isDeletedMessage(m: unknown): m is AccountMessage {
+  return typeof m === 'object' && m !== null && (m as AccountMessage).kind === 'data-deleted' && typeof (m as AccountMessage).userId === 'string';
+}
+
+/** The local account database could not be deleted because another connection keeps it open. */
+export class LocalDataBlockedError extends Error {
+  constructor() {
+    super('Os dados na nuvem foram apagados, mas os deste navegador não: feche as outras abas do jogo e tente de novo.');
+    this.name = 'LocalDataBlockedError';
+  }
+}
+
+function defaultTermsStorage(): TermsStorage | undefined {
+  try {
+    return typeof window !== 'undefined' && window.localStorage ? window.localStorage : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface AccountOptions {
   /** The consent version an account must have accepted; default TERMS_VERSION. */
@@ -37,16 +100,35 @@ export interface AccountOptions {
   settleTimeoutMs?: number;
   /** The CloudApi is the in-memory fake (development `?cloud=fake`); the menu says so. */
   simulated?: boolean;
+  /** Where the accepted terms version is cached per user; default the browser's localStorage (none outside a browser). */
+  termsStorage?: TermsStorage;
+  /** Channel to the game's other tabs (a data deletion is announced there); default none. */
+  channel?: AccountChannel;
+  deleteBlockedTimeoutMs?: number;
 }
 
 const NO_CLOUD = (): CloudError => new CloudError('other', 'cloud mode is off');
 
-function deleteDatabase(factory: IDBFactory, name: string): Promise<void> {
+/**
+ * Deletes a database. Our own connections close on `versionchange`, so a block means a connection that
+ * does not (another tab running an older build): wait at most `blockedTimeoutMs` after the block, then
+ * reject with LocalDataBlockedError (the request stays queued and completes once that tab closes).
+ */
+function deleteDatabase(factory: IDBFactory, name: string, blockedTimeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const req = factory.deleteDatabase(name);
-    // A blocked delete stays pending until the open connections close; it is not a failure.
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    req.onerror = () => {
+      clearTimeout(timer);
+      reject(req.error);
+    };
+    req.onblocked = () => {
+      if (timer === undefined) timer = setTimeout(() => reject(new LocalDataBlockedError()), blockedTimeoutMs);
+    };
   });
 }
 
@@ -74,6 +156,10 @@ export class Account {
   private deleting: string | null = null;
   /** The session came from a password-recovery link and no new password was set yet. */
   private recovering = false;
+  private readonly termsStorage: TermsStorage | undefined;
+  private readonly channel: AccountChannel | undefined;
+  private unsubscribeChannel: (() => void) | null = null;
+  private readonly deleteBlockedTimeoutMs: number;
   readonly simulated: boolean;
 
   constructor(private readonly api: CloudApi | null, opts: AccountOptions = {}) {
@@ -83,6 +169,49 @@ export class Account {
     this.idb = opts.idb ?? (() => indexedDB);
     this.defer = opts.defer ?? ((run) => void setTimeout(run, 0));
     this.settleTimeoutMs = opts.settleTimeoutMs ?? SETTLE_TIMEOUT_MS;
+    this.termsStorage = 'termsStorage' in opts ? opts.termsStorage : defaultTermsStorage();
+    this.channel = api ? opts.channel : undefined;
+    this.deleteBlockedTimeoutMs = opts.deleteBlockedTimeoutMs ?? DELETE_BLOCKED_TIMEOUT_MS;
+    this.unsubscribeChannel = this.channel?.subscribe((m) => this.onChannel(m)) ?? null;
+  }
+
+  /**
+   * Changes on every change of signed-in user (sign-in, sign-out, another account), not on a token
+   * refresh of the same user: "this sign-in" for work done once per sign-in (the pull).
+   */
+  get signInToken(): number {
+    return this.userToken;
+  }
+
+  /** Another tab deleted this user's data: the consent is gone here too (its open stores were closed by the deletion). */
+  private onChannel(message: unknown): void {
+    if (!isDeletedMessage(message) || this._state.user?.id !== message.userId) return;
+    this.forgetTerms(message.userId);
+    this.update({ termsAccepted: false });
+  }
+
+  private cachedTerms(userId: string): string | null {
+    try {
+      return this.termsStorage?.getItem(termsCacheKey(userId)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private rememberTerms(userId: string, version: string): void {
+    try {
+      this.termsStorage?.setItem(termsCacheKey(userId), version);
+    } catch {
+      // storage full or blocked: the cache is a convenience only
+    }
+  }
+
+  private forgetTerms(userId: string): void {
+    try {
+      this.termsStorage?.removeItem(termsCacheKey(userId));
+    } catch {
+      // see rememberTerms
+    }
   }
 
   get mode(): 'local' | 'cloud' {
@@ -147,20 +276,30 @@ export class Account {
     return true;
   }
 
-  /** One load per user; never rejects (a failed load leaves isAdmin/termsAccepted false). */
+  /**
+   * One load per user; never rejects (a failed load leaves isAdmin false). termsAccepted comes from
+   * the server; only when that check fails for lack of network does the version cached on this
+   * browser count (an offline reload can still play). Any other failure leaves it false.
+   */
   private loadDetails(token: number): Promise<void> {
     if (this.details?.token === token) return this.details.promise;
     const api = this.api;
-    if (!api || token !== this.userToken || !this._state.user) return Promise.resolve();
+    const user = this._state.user;
+    if (!api || token !== this.userToken || !user) return Promise.resolve();
     const promise = (async () => {
       const [admin, terms] = await Promise.allSettled([api.isAdmin(), api.acceptedTermsVersion()]);
       if (admin.status === 'rejected') console.warn('[account] could not check the admin role', admin.reason);
       if (terms.status === 'rejected') console.warn('[account] could not check the consent', terms.reason);
       if (token !== this.userToken) return;
-      this.update({
-        isAdmin: admin.status === 'fulfilled' && admin.value,
-        termsAccepted: terms.status === 'fulfilled' && terms.value === this.termsVersion,
-      });
+      let termsAccepted = false;
+      if (terms.status === 'fulfilled') {
+        termsAccepted = terms.value === this.termsVersion;
+        if (termsAccepted) this.rememberTerms(user.id, this.termsVersion);
+        else this.forgetTerms(user.id);
+      } else if (terms.reason instanceof CloudError && terms.reason.kind === 'network') {
+        termsAccepted = this.cachedTerms(user.id) === this.termsVersion;
+      }
+      this.update({ isAdmin: admin.status === 'fulfilled' && admin.value, termsAccepted });
     })();
     this.details = { token, promise };
     return promise;
@@ -219,16 +358,21 @@ export class Account {
 
   async acceptTerms(): Promise<void> {
     const api = this.requireApi();
-    if (!this._state.user) throw new CloudError('auth', 'not signed in');
+    const user = this._state.user;
+    if (!user) throw new CloudError('auth', 'not signed in');
     const token = this.userToken;
     await api.acceptTerms(this.termsVersion);
+    this.rememberTerms(user.id, this.termsVersion);
     if (token === this.userToken) this.update({ termsAccepted: true });
   }
 
   /**
-   * Deletes the user's cloud data (batches and consents), then the account's local database
-   * (events and sync progress), so nothing is pushed back. No push for this user starts meanwhile.
-   * Call it with no game running (from the menu).
+   * Deletes the user's cloud data (batches and consents; the server refuses unless the session is
+   * this user), then the account's local database (events and sync progress), so nothing is pushed
+   * back. No push for this user starts meanwhile in this tab; other tabs have their connection closed
+   * by the deletion (versionchange), and are told through the channel. The pre-login database is not
+   * touched. Call it with no game running (from the menu). Rejects with LocalDataBlockedError when an
+   * old tab keeps the local database open (the cloud part is done; calling again finishes it).
    */
   async deleteMyData(): Promise<void> {
     const api = this.requireApi();
@@ -239,13 +383,21 @@ export class Account {
     this.update({}); // canSync changed: open stores pause
     try {
       await this.settle();
-      // A last push still running past the wait could land after the server delete.
-      const lingering = this.background.size > 0;
-      await api.deleteMyData();
-      // Resolves only once every connection closed, so every tracked last push has ended.
-      await deleteDatabase(this.idb(), accountDbName(user.id));
-      if (lingering) await api.deleteMyData(); // idempotent: removes whatever such a push brought back
+      await api.deleteMyData(user.id);
+      this.forgetTerms(user.id);
       if (token === this.userToken) this.update({ termsAccepted: false });
+      // Resolves once every connection closed. Connections close themselves on versionchange, so this
+      // no longer means a last push of this tab has ended: it may still be on the wire.
+      await deleteDatabase(this.idb(), accountDbName(user.id), this.deleteBlockedTimeoutMs);
+      // Wait again (bounded) for this tab's last pushes, so the second delete runs after they landed.
+      await this.settle();
+      // Idempotent: removes whatever such a push (or another tab's) brought back.
+      await api.deleteMyData(user.id);
+      try {
+        this.channel?.post({ kind: 'data-deleted', userId: user.id });
+      } catch (err) {
+        console.warn('[account] could not tell the other tabs', err);
+      }
     } finally {
       this.deleting = null;
       this.update({}); // canSync changed back: open stores resume
@@ -292,6 +444,8 @@ export class Account {
   dispose(): void {
     this.unsubscribeAuth?.();
     this.unsubscribeAuth = null;
+    this.unsubscribeChannel?.();
+    this.unsubscribeChannel = null;
     this.listeners.clear();
   }
 

@@ -1,10 +1,10 @@
 import { IndexedDbEventStore, type EventStore } from '../telemetry/eventStore';
 import type { LoggedEvent } from '../telemetry/schema';
-import { CloudError, type CloudApi, type EventBatch } from './cloudApi';
+import { CloudError, type CloudApi, type EventBatch, type PullCursor, type PullPage } from './cloudApi';
 import { accountDbName, type Account } from './account';
-import { SyncingEventStore, SYNC_DELAY_MS } from './syncingEventStore';
+import { SyncingEventStore, SYNC_DELAY_MS, type SyncApi } from './syncingEventStore';
 
-/** Longest the game waits for the account's history before starting on the local copy. */
+/** Longest the game waits for the account's history before starting on the local copy (what arrived by then is kept). */
 export const PULL_TIMEOUT_MS = 5000;
 /** Longest the game waits for the stored session to be restored before starting signed out. */
 export const AUTH_TIMEOUT_MS = 5000;
@@ -33,11 +33,26 @@ export interface CloudStoreDeps {
 const paused = (): CloudError => new CloudError('auth', 'account not signed in; sync paused');
 
 /**
+ * Per Account (one per page load): the signInToken whose pull finished. The history is pulled once
+ * per sign-in per page load; every later store open (Análise, the next Arena) reuses it, unless that
+ * pull did not finish (time limit, network), in which case the next open resumes it.
+ */
+const pullDone = new WeakMap<Account, number>();
+
+/** The time limit of one pull: every page wait rejects once it is over, and late answers are dropped. */
+interface PullGate {
+  givenUp(): boolean;
+  wait<T>(work: Promise<T>): Promise<T>;
+}
+
+/**
  * The account's local store with background sync. Every cloud call is bound to one user:
  * nothing is pushed or pulled while another user (or nobody) is signed in, and only events
- * whose player_id is that user ever leave the browser. A failed push is retried with growing
- * delays, when the network comes back, and when the user is signed in again. close() pushes
- * once more before closing the database (the account waits for that on sign-out and deletion).
+ * whose player_id is that user ever leave the browser (pushed rows carry that user id). A failed
+ * push is retried with growing delays, when the network comes back, and when the user is signed in
+ * again. close() pushes once more before closing the database (the account waits for that on
+ * sign-out and deletion). When the database is deleted from another tab, the store stops: no timer,
+ * no push (its pending buffer would otherwise bring deleted events back).
  */
 class AccountSyncStore implements EventStore {
   private readonly sync: SyncingEventStore;
@@ -47,6 +62,7 @@ class AccountSyncStore implements EventStore {
   private retryTimer: unknown = null;
   private retryMs = 0;
   private couldSync: boolean;
+  private pullGate: PullGate | null = null;
   private readonly unsubscribe: (() => void)[] = [];
 
   constructor(
@@ -101,9 +117,7 @@ class AccountSyncStore implements EventStore {
 
   close(): void {
     if (this.closed) return;
-    this.closed = true;
-    this.cancelTimers();
-    for (const off of this.unsubscribe.splice(0)) off();
+    this.stopTimersAndListeners();
     const last = this.sync
       .syncNow()
       .catch((err: unknown) => console.warn('[cloud] last sync before closing failed', err))
@@ -111,12 +125,46 @@ class AccountSyncStore implements EventStore {
     this.account.track(last);
   }
 
-  /** Never rejects: a failed or slow pull leaves the game on the local copy. */
+  /** The database was closed under us (deleted or upgraded from another tab): stop for good, push nothing more. */
+  closedExternally(): void {
+    this.sync.halt();
+    if (this.closed) return;
+    console.warn('[cloud] the account database was closed by another tab (data deleted?); this store stops syncing');
+    this.stopTimersAndListeners();
+  }
+
+  /**
+   * Never rejects: a failed or slow pull leaves the game on the local copy, with whatever pages
+   * arrived before the time limit. Skipped when this sign-in already pulled to the end in this page load.
+   */
   async pullBeforeStart(): Promise<void> {
+    const token = this.account.signInToken;
+    if (pullDone.get(this.account) === token) return;
+    const ms = this.deps.pullTimeoutMs ?? PULL_TIMEOUT_MS;
+    let givenUp = false;
+    let abort: ((err: Error) => void) | null = null;
+    const timeoutError = (): CloudError => new CloudError('network', `pull timed out after ${ms} ms`);
+    const timer = this.timers.set(() => {
+      givenUp = true;
+      abort?.(timeoutError());
+    }, ms);
+    this.pullGate = {
+      givenUp: () => givenUp,
+      wait: <T>(work: Promise<T>) =>
+        new Promise<T>((resolve, reject) => {
+          if (givenUp) return reject(timeoutError());
+          abort = reject;
+          work.then(resolve, reject);
+        }),
+    };
     try {
       await this.sync.pull();
+      if (this.account.signInToken === token) pullDone.set(this.account, token);
     } catch (err) {
-      console.warn('[cloud] could not download the account history; starting on the local copy', err);
+      console.warn('[cloud] could not download the whole account history; starting on the local copy (the next start continues it)', err);
+    } finally {
+      this.timers.clear(timer);
+      this.pullGate = null;
     }
   }
 
@@ -130,6 +178,15 @@ class AccountSyncStore implements EventStore {
     this.sync.syncNow().catch((err: unknown) => console.error('[cloud] sync failed', err));
   }
 
+  private stopTimersAndListeners(): void {
+    this.closed = true;
+    if (this.syncTimer !== null) this.timers.clear(this.syncTimer);
+    if (this.retryTimer !== null) this.timers.clear(this.retryTimer);
+    this.syncTimer = null;
+    this.retryTimer = null;
+    for (const off of this.unsubscribe.splice(0)) off();
+  }
+
   private onPushFailed(): void {
     if (this.closed) return;
     this.retryMs = this.retryMs === 0 ? RETRY_MIN_MS : Math.min(this.retryMs * 2, RETRY_MAX_MS);
@@ -140,13 +197,6 @@ class AccountSyncStore implements EventStore {
     }, this.retryMs);
   }
 
-  private cancelTimers(): void {
-    if (this.syncTimer !== null) this.timers.clear(this.syncTimer);
-    if (this.retryTimer !== null) this.timers.clear(this.retryTimer);
-    this.syncTimer = null;
-    this.retryTimer = null;
-  }
-
   private async assertOurs(): Promise<void> {
     if (!this.account.canSync(this.userId)) throw paused();
     // The client's own session, checked right before the call (no network on the real client).
@@ -154,51 +204,35 @@ class AccountSyncStore implements EventStore {
     if (current?.id !== this.userId || !this.account.canSync(this.userId)) throw paused();
   }
 
-  /** The CloudApi the SyncingEventStore sees: push and pull restricted to this user. */
-  private boundApi(): CloudApi {
+  /** The push and pull the SyncingEventStore sees: restricted to this user. */
+  private boundApi(): SyncApi {
     const api = this.api;
     const userId = this.userId;
     return {
-      getUser: () => api.getUser(),
-      signUp: (e, p) => api.signUp(e, p),
-      signIn: (e, p) => api.signIn(e, p),
-      signOut: () => api.signOut(),
-      resetPassword: (e) => api.resetPassword(e),
-      updatePassword: (p) => api.updatePassword(p),
-      isAdmin: () => api.isAdmin(),
-      acceptedTermsVersion: () => api.acceptedTermsVersion(),
-      acceptTerms: (v) => api.acceptTerms(v),
-      deleteMyData: () => api.deleteMyData(),
-      onAuthChange: (l) => api.onAuthChange(l),
       pushBatches: async (batches: readonly EventBatch[]) => {
         await this.assertOurs();
         // A session is one player's; a batch with anyone else's events never goes to this account
         // (the SyncingEventStore then counts it as done, so it is not retried either).
         const own = batches.filter((b) => b.events.every((e) => e.player_id === userId));
         try {
-          if (own.length > 0) await api.pushBatches(own);
+          if (own.length > 0) await api.pushBatches(own, userId);
         } catch (err) {
           this.onPushFailed();
           throw err;
         }
         this.retryMs = 0;
       },
-      pullEvents: () => {
-        // The whole pull (session check included) is time-limited. On timeout it rejects, so the
-        // SyncingEventStore writes nothing; the late answer is dropped once the game may have started.
-        let givenUp = false;
+      pullPage: (after: PullCursor | null): Promise<PullPage> => {
+        // Each page (session check included) waits within the pull's time limit; past it the wait
+        // rejects, so the SyncingEventStore stops there, and the late answer is dropped.
+        const gate = this.pullGate;
         const work = (async () => {
           await this.assertOurs();
-          if (givenUp) throw new CloudError('network', 'pull given up after the time limit');
-          const events = await api.pullEvents();
-          if (givenUp) throw new CloudError('network', 'pull answered after the time limit');
-          return events.filter((e) => e.player_id === userId);
+          if (gate?.givenUp()) throw new CloudError('network', 'pull given up after the time limit');
+          const page = await api.pullPage(after);
+          return { events: page.events.filter((e) => e.player_id === userId), next: page.next };
         })();
-        const ms = this.deps.pullTimeoutMs ?? PULL_TIMEOUT_MS;
-        return withTimeout(work, ms, this.timers, () => {
-          givenUp = true;
-          return new CloudError('network', `pull timed out after ${ms} ms`);
-        });
+        return gate ? gate.wait(work) : work;
       },
     };
   }
@@ -223,15 +257,16 @@ function withTimeout<T>(work: Promise<T>, ms: number, timers: SyncTimers, onTime
 
 /**
  * Opens the signed-in account's own database (`tcc-telemetry-<user_id>`), with the order the
- * game relies on: open → meta.player_id = user id → pull (time-limited, failure tolerated) →
- * background push of what is pending. loadProfileState then rebuilds the profile from it.
+ * game relies on: open → meta.player_id = user id → pull (once per sign-in per page load,
+ * time-limited, partial progress kept, failure tolerated) → background push of what is pending.
+ * loadProfileState then rebuilds the profile from it.
  * Resolves null when there is no signed-in user, or the session restore takes longer than
- * AUTH_TIMEOUT_MS (the caller then uses the local store);
+ * AUTH_TIMEOUT_MS (in cloud mode the caller then uses an in-memory store, never the pre-login one);
  * rejects only when the database cannot be opened.
  */
 export async function openAccountStore(account: Account, deps: CloudStoreDeps): Promise<{ store: EventStore; persistent: boolean } | null> {
   try {
-    // Bounded: a slow session restore starts the game signed out (the caller's local store);
+    // Bounded: a slow session restore starts the game signed out;
     // the Account keeps restoring in the background and its auth listener catches up.
     await withTimeout(account.init(), AUTH_TIMEOUT_MS, deps.timers ?? realTimers, () => new Error('session restore timed out'));
   } catch (err) {
@@ -241,14 +276,22 @@ export async function openAccountStore(account: Account, deps: CloudStoreDeps): 
   const api = account.cloud;
   const user = account.state.user;
   if (!api || !user) return null;
-  const local = await IndexedDbEventStore.open(deps.factory, accountDbName(user.id));
+  let store: AccountSyncStore | null = null;
+  let closedEarly = false;
+  const local = await IndexedDbEventStore.open(deps.factory, accountDbName(user.id), {
+    onVersionChange: () => {
+      if (store) store.closedExternally();
+      else closedEarly = true;
+    },
+  });
   try {
     await local.setMeta('player_id', user.id);
   } catch (err) {
     local.close();
     throw err;
   }
-  const store = new AccountSyncStore(local, api, user.id, account, deps);
+  store = new AccountSyncStore(local, api, user.id, account, deps);
+  if (closedEarly) store.closedExternally();
   await store.pullBeforeStart();
   store.kick();
   return { store, persistent: true };

@@ -1,43 +1,44 @@
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import type { LoggedEvent } from '../telemetry/schema';
-import { CloudError, type CloudApi, type CloudUser, type EventBatch } from './cloudApi';
+import { CloudError, type CloudApi, type CloudUser, type EventBatch, type PullCursor } from './cloudApi';
 import type { CloudConfig } from './cloudConfig';
+import { flattenBatches, PULL_PAGE_SIZE } from './batching';
 
-/** Batches fetched per request when pulling (each holds up to ~500 events). */
-const PULL_PAGE_SIZE = 20;
+export { flattenBatches };
 
-/** The writable columns of event_batches (the server fills user_id and created_at). */
+/**
+ * The writable columns of event_batches (the server fills created_at). user_id is sent explicitly
+ * (the user the push was bound to): RLS WITH CHECK refuses it when the session token is someone else's.
+ */
 export interface BatchRow {
+  user_id: string;
   session_id: string;
   first_seq: number;
   last_seq: number;
   events: LoggedEvent[];
 }
 
-export function batchToRow(batch: EventBatch): BatchRow {
-  return { session_id: batch.sessionId, first_seq: batch.firstSeq, last_seq: batch.lastSeq, events: batch.events };
+/** The columns the pull selects. */
+export type PulledRow = Omit<BatchRow, 'user_id'>;
+
+export function batchToRow(batch: EventBatch, userId: string): BatchRow {
+  return { user_id: userId, session_id: batch.sessionId, first_seq: batch.firstSeq, last_seq: batch.lastSeq, events: batch.events };
 }
 
-export function rowToBatch(row: BatchRow): EventBatch {
+export function rowToBatch(row: PulledRow): EventBatch {
   return { sessionId: row.session_id, firstSeq: row.first_seq, lastSeq: row.last_seq, events: row.events };
 }
 
-/**
- * Batches to events, ordered by (session, seq). Resent batches overlap, so an event
- * (session, seq) present in several keeps the copy from the batch with the highest lastSeq.
- */
-export function flattenBatches(batches: readonly EventBatch[]): LoggedEvent[] {
-  const best = new Map<string, { sessionId: string; lastSeq: number; event: LoggedEvent }>();
-  for (const b of batches) {
-    for (const event of b.events) {
-      const key = `${b.sessionId}\u0000${event.seq}`;
-      const cur = best.get(key);
-      if (!cur || b.lastSeq > cur.lastSeq) best.set(key, { sessionId: b.sessionId, lastSeq: b.lastSeq, event });
-    }
-  }
-  return [...best.values()]
-    .sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : a.event.seq - b.event.seq))
-    .map((v) => v.event);
+/** A PostgREST filter value in double quotes (safe for any text in a logic tree). */
+function quoted(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/** PostgREST `or` filter for the rows after `after` in (session_id, first_seq) order (keyset pagination). */
+export function afterFilter(after: PullCursor): string {
+  if (!Number.isInteger(after.firstSeq)) throw new Error(`bad pull cursor first_seq: ${after.firstSeq}`);
+  const s = quoted(after.sessionId);
+  return `session_id.gt.${s},and(session_id.eq.${s},first_seq.gt.${after.firstSeq})`;
 }
 
 interface ErrorLike {
@@ -192,42 +193,46 @@ export function createSupabaseCloudApi(config: CloudConfig): CloudApi {
         check(res);
       }),
 
-    pushBatches: (batches) =>
+    pushBatches: (batches, userId) =>
       guard(async () => {
         if (batches.length === 0) return;
         await requireUser();
+        // user_id is the bound user, not the token's: a mismatched session is refused by RLS ('auth').
         const res = await client
           .from('event_batches')
-          .upsert(batches.map(batchToRow), { onConflict: 'user_id,session_id,first_seq' });
+          .upsert(
+            batches.map((b) => batchToRow(b, userId)),
+            { onConflict: 'user_id,session_id,first_seq' },
+          );
         check(res);
       }),
 
-    pullEvents: () =>
+    pullPage: (after) =>
       guard(async () => {
         const user = await requireUser();
-        const batches: EventBatch[] = [];
-        // Stable pages: (session_id, first_seq) is unique within one user. Admins can read
+        // Keyset pages: (session_id, first_seq) is unique within one user. Admins can read
         // every row through RLS, but the sync pull wants the own account only, so filter.
-        for (let from = 0; ; from += PULL_PAGE_SIZE) {
-          const res = await client
-            .from('event_batches')
-            .select('session_id, first_seq, last_seq, events')
-            .eq('user_id', user.id)
-            .order('session_id', { ascending: true })
-            .order('first_seq', { ascending: true })
-            .range(from, from + PULL_PAGE_SIZE - 1);
-          check(res);
-          const rows = (res.data ?? []) as BatchRow[];
-          batches.push(...rows.map(rowToBatch));
-          if (rows.length < PULL_PAGE_SIZE) break;
-        }
-        return flattenBatches(batches);
+        let query = client.from('event_batches').select('session_id, first_seq, last_seq, events').eq('user_id', user.id);
+        if (after) query = query.or(afterFilter(after));
+        const res = await query
+          .order('session_id', { ascending: true })
+          .order('first_seq', { ascending: true })
+          .limit(PULL_PAGE_SIZE);
+        check(res);
+        const rows = (res.data ?? []) as PulledRow[];
+        const last = rows[rows.length - 1];
+        return {
+          events: flattenBatches(rows.map(rowToBatch)),
+          next: rows.length === PULL_PAGE_SIZE ? { sessionId: last.session_id, firstSeq: last.first_seq } : null,
+        };
       }),
 
-    deleteMyData: () =>
+    deleteMyData: (expectedUserId) =>
       guard(async () => {
-        await requireUser();
-        check(await client.rpc('delete_my_data'));
+        const user = await requireUser();
+        if (user.id !== expectedUserId) throw new CloudError('auth', 'the signed-in user is not the account being deleted');
+        // The server checks it again: delete_my_data(expected) raises 42501 unless expected = auth.uid().
+        check(await client.rpc('delete_my_data', { expected: expectedUserId }));
       }),
 
     onAuthChange: (listener) => {

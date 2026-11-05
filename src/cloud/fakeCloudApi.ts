@@ -1,5 +1,6 @@
 import type { LoggedEvent } from '../telemetry/schema';
-import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser, type EventBatch } from './cloudApi';
+import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser, type EventBatch, type PullCursor, type PullPage } from './cloudApi';
+import { compareRowKey, flattenBatches, PULL_PAGE_SIZE } from './batching';
 
 interface Account {
   user: CloudUser;
@@ -18,7 +19,7 @@ export class FakeCloudApi implements CloudApi {
   private failures = 0;
   private nextId = 1;
 
-  constructor(private readonly opts: { needsEmailConfirmation?: boolean } = {}) {}
+  constructor(private readonly opts: { needsEmailConfirmation?: boolean; pullPageSize?: number } = {}) {}
 
   /** The next n network-bound calls throw a 'network' CloudError. */
   failNext(n: number): void {
@@ -90,9 +91,11 @@ export class FakeCloudApi implements CloudApi {
     this.requireAccount().terms = version;
   }
 
-  async pushBatches(batches: readonly EventBatch[]): Promise<void> {
+  async pushBatches(batches: readonly EventBatch[], userId: string): Promise<void> {
     this.maybeFail();
     const acc = this.requireAccount();
+    // As RLS WITH CHECK on the server: rows of another user than the session's are refused.
+    if (acc.user.id !== userId) throw new CloudError('auth', 'row user_id does not match the session');
     for (const b of batches) {
       const key = `${b.sessionId}:${b.firstSeq}`;
       const old = acc.batches.get(key);
@@ -102,15 +105,38 @@ export class FakeCloudApi implements CloudApi {
   }
 
   /** Own events only, even for an admin (others' events are visible only through the SQL view). */
-  async pullEvents(): Promise<LoggedEvent[]> {
+  async pullPage(after: PullCursor | null): Promise<PullPage> {
     this.maybeFail();
     const acc = this.requireAccount();
-    return [...acc.batches.values()].flatMap((b) => structuredClone(b.events));
+    const size = this.opts.pullPageSize ?? PULL_PAGE_SIZE;
+    const rows = [...acc.batches.values()]
+      .sort(compareRowKey)
+      .filter((b) => !after || compareRowKey(b, after) > 0)
+      .slice(0, size);
+    const last = rows[rows.length - 1];
+    return {
+      events: structuredClone(flattenBatches(rows)),
+      next: rows.length === size ? { sessionId: last.sessionId, firstSeq: last.firstSeq } : null,
+    };
   }
 
-  async deleteMyData(): Promise<void> {
+  /** Test helper: every page of the signed-in user's events, concatenated. */
+  async pullAll(): Promise<LoggedEvent[]> {
+    const out: LoggedEvent[] = [];
+    let after: PullCursor | null = null;
+    for (;;) {
+      const page: PullPage = await this.pullPage(after);
+      out.push(...page.events);
+      if (!page.next) return out;
+      after = page.next;
+    }
+  }
+
+  async deleteMyData(expectedUserId: string): Promise<void> {
     this.maybeFail();
     const acc = this.requireAccount();
+    // As delete_my_data(expected) on the server: refused unless the session is that user.
+    if (acc.user.id !== expectedUserId) throw new CloudError('auth', 'delete_my_data: not the expected user');
     acc.batches.clear();
     acc.terms = null;
   }

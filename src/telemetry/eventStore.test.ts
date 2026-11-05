@@ -57,3 +57,21 @@ describe.each(factories)('%s', (_name, make) => {
     store.close();
   });
 });
+
+describe('IndexedDbEventStore and other connections', () => {
+  it('closes itself when another connection deletes the database, so the deletion is not blocked', async () => {
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    let notified = 0;
+    const store = await IndexedDbEventStore.open(factory, 'tcc-telemetry-x', { onVersionChange: () => notified++ });
+    await store.append([ev('a', 0)]);
+    await new Promise<void>((resolve, reject) => {
+      const req = factory.deleteDatabase('tcc-telemetry-x');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('blocked'));
+    });
+    expect(notified).toBe(1);
+    await expect(store.append([ev('a', 1)])).rejects.toBeDefined(); // closed: every later call fails
+    expect((await factory.databases()).map((d) => d.name)).toEqual([]);
+  });
+});

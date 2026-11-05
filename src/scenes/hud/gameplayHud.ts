@@ -134,6 +134,7 @@ export class GameplayHud {
   private readonly weaponText: Phaser.GameObjects.Text;
   private readonly hintText: Phaser.GameObjects.Text;
   private readonly helpText: Phaser.GameObjects.Text;
+  private readonly noticeText: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene, gates: HotkeyGates = NO_DEV_KEYS) {
     const line = { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' };
@@ -157,7 +158,8 @@ export class GameplayHud {
     this.bannerText = scene.add.text(640, 300, 'BOSS ROOM', { fontFamily: 'monospace', fontSize: '84px', color: '#ff5252', fontStyle: 'bold', stroke: '#000000', strokeThickness: 8 }).setOrigin(0.5).setAlpha(0).setVisible(false);
     this.bossBar = scene.add.graphics().setVisible(false);
     this.bossLabel = scene.add.text(640, BOSS_BAR_Y + BOSS_BAR_HEIGHT / 2, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5).setVisible(false);
-    const all = [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText, this.indicatorText, this.bannerText, this.bossBar, this.bossLabel];
+    this.noticeText = scene.add.text(640, 640, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ff8a80' }).setOrigin(0.5).setVisible(false);
+    const all = [this.statusText, this.staminaText, this.runText, this.weaponText, this.hintText, this.helpText, this.indicatorText, this.bannerText, this.bossBar, this.bossLabel, this.noticeText];
     for (const t of all) t.setScrollFactor(0);
     this.bossBar.setDepth(0);
     this.bannerText.setDepth(10);
@@ -205,6 +207,11 @@ export class GameplayHud {
 
   toggleHelp(): void {
     this.helpText.setVisible(!this.helpText.visible);
+  }
+
+  /** A plain-text warning line for the whole run (e.g. the run is not being saved); '' hides it. */
+  setNotice(text: string): void {
+    this.noticeText.setText(text).setVisible(text !== '');
   }
 
   /** The development keys changed (the account changed mid-run): the hint and the help list follow. */

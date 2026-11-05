@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { Account, accountDbName } from './account';
+import { Account, accountDbName, LocalDataBlockedError, type AccountChannel } from './account';
 import { FakeCloudApi } from './fakeCloudApi';
 import { openAccountStore, AUTH_TIMEOUT_MS, PULL_TIMEOUT_MS, RETRY_MIN_MS, type SyncTimers } from './syncBoot';
 import { CLOUD_SYNCED_KEY } from './syncingEventStore';
-import { IndexedDbEventStore, type EventStore } from '../telemetry/eventStore';
+import { IndexedDbEventStore, MemoryEventStore, type EventStore } from '../telemetry/eventStore';
 import { adoptHistory } from './adoptLocal';
 import { loadProfileState, type BootState } from '../telemetry/bootstrap';
 import type { LoggedEvent } from '../telemetry/schema';
+import type { EventBatch, PullPage } from './cloudApi';
 import { SessionController } from '../scenes/session/sessionController';
 import { createBrowserPlatform } from '../scenes/session/browserPlatform';
 import type { Platform } from '../scenes/session/platform';
@@ -253,6 +254,8 @@ describe('openAccountStore (boot with sync)', () => {
     const local = await IndexedDbEventStore.open(m.factory, accountDbName(ana.id));
     const before = (await local.readAll()).length;
     local.close();
+    await m.account.signOut(); // a new sign-in pulls again (the first one already pulled in this page load)
+    await m.account.signIn(mail('ana'), PW);
 
     api.failNext(5);
     const c = new SessionController({ platform: m.platform, entitySize: 20, nextSeed: () => 4242 });
@@ -270,8 +273,8 @@ describe('openAccountStore (boot with sync)', () => {
     await register(api, 'ana');
     const m = machine(api);
     const ana = await m.account.signIn(mail('ana'), PW);
-    let answer!: (events: LoggedEvent[]) => void;
-    vi.spyOn(api, 'pullEvents').mockImplementation(() => new Promise((r) => (answer = r)));
+    let answer!: (page: PullPage) => void;
+    vi.spyOn(api, 'pullPage').mockImplementation(() => new Promise((r) => (answer = r)));
 
     const c = new SessionController({ platform: m.platform, entitySize: 20, nextSeed: () => 4242 });
     const starting = c.start();
@@ -280,7 +283,7 @@ describe('openAccountStore (boot with sync)', () => {
     await starting;
     expect(c.ready).toBe(true);
 
-    answer([ev(ana.id, 'late', 0)]);
+    answer({ events: [ev(ana.id, 'late', 0)], next: null });
     await new Promise((r) => setTimeout(r, 0));
     await c.shutdown();
     await m.account.signOut();
@@ -304,7 +307,7 @@ describe('openAccountStore (boot with sync)', () => {
       await gate;
       return getUser();
     });
-    const pull = vi.spyOn(api, 'pullEvents').mockResolvedValue([ev(ana.id, 'late', 0)]);
+    const pull = vi.spyOn(api, 'pullPage').mockResolvedValue({ events: [ev(ana.id, 'late', 0)], next: null });
 
     const c = new SessionController({ platform: m.platform, entitySize: 20, nextSeed: () => 4242 });
     const starting = c.start();
@@ -413,17 +416,17 @@ describe('openAccountStore (boot with sync)', () => {
 });
 
 describe('createBrowserPlatform store', () => {
-  async function openWith(account?: Account): Promise<{ store: EventStore; factory: IDBFactory }> {
+  async function openWith(account?: Account): Promise<{ store: EventStore; persistent: boolean; factory: IDBFactory }> {
     const factory = new IDBFactory() as unknown as IDBFactory;
     vi.stubGlobal('indexedDB', factory);
     const { store, persistent } = await createBrowserPlatform(account).openStore();
-    expect(persistent).toBe(true);
-    return { store, factory };
+    return { store, persistent, factory };
   }
 
   it('without credentials (local mode) opens tcc-telemetry, exactly as before accounts', async () => {
     for (const account of [undefined, new Account(null)]) {
-      const { store, factory } = await openWith(account);
+      const { store, persistent, factory } = await openWith(account);
+      expect(persistent).toBe(true);
       expect(store).toBeInstanceOf(IndexedDbEventStore);
       expect(await databases(factory)).toEqual(['tcc-telemetry']);
       expect(await store.getMeta('player_id')).toBeUndefined(); // loadProfileState mints the local id, as before
@@ -431,11 +434,199 @@ describe('createBrowserPlatform store', () => {
     }
   });
 
-  it('in cloud mode with nobody signed in, falls back to the local, unsynced database', async () => {
-    const { store, factory } = await openWith(new Account(new FakeCloudApi(), { defer: queueMicrotask }));
-    expect(store).toBeInstanceOf(IndexedDbEventStore);
-    expect(await databases(factory)).toEqual(['tcc-telemetry']);
+  it('in cloud mode with nobody signed in, never touches the pre-login database: the run is in memory only', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, persistent, factory } = await openWith(new Account(new FakeCloudApi(), { defer: queueMicrotask }));
+    expect(store).toBeInstanceOf(MemoryEventStore);
+    expect(persistent).toBe(false);
+    expect(await databases(factory)).toEqual([]);
     store.close();
+  });
+
+  it('in cloud mode with nobody signed in, an existing pre-login history is neither read nor written by a run', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    vi.stubGlobal('indexedDB', factory);
+    const legacy = await IndexedDbEventStore.open(factory);
+    await legacy.setMeta('player_id', 'browser-uuid');
+    await legacy.append([ev('browser-uuid', 's-old', 0)]);
+    legacy.close();
+    // No DOM in these tests: the page-hide hook is a no-op.
+    const platform = { ...createBrowserPlatform(new Account(new FakeCloudApi(), { defer: queueMicrotask })), onHide: () => () => {} };
+    const c = new SessionController({ platform, entitySize: 20, nextSeed: () => 4242 });
+    await c.start();
+    expect(c.ready).toBe(true);
+    expect(c.status()).toMatchObject({ store: 'memory', persistent: false });
+    expect(c.status().playerId).not.toBe('browser-uuid');
+    c.stack.encounter.player.tryAction('sword_shield.light');
+    for (let i = 0; i < 10; i++) c.stack.step(16);
+    await c.shutdown();
+    const again = await IndexedDbEventStore.open(factory);
+    expect((await again.readAll()).map((e) => e.session_id)).toEqual(['s-old']);
+    again.close();
+  });
+});
+
+describe('pull once per sign-in, with partial progress (I1)', () => {
+  /** n rows of 2 events each, pushed straight to the fake server as `userId`. */
+  async function seedRows(api: FakeCloudApi, userId: string, n: number): Promise<void> {
+    const batches: EventBatch[] = [];
+    for (let i = 0; i < n; i++) {
+      batches.push({ sessionId: 's', firstSeq: i * 2, lastSeq: i * 2 + 1, events: [ev(userId, 's', i * 2), ev(userId, 's', i * 2 + 1)] });
+    }
+    await api.pushBatches(batches, userId);
+  }
+
+  it('a slow pull keeps the pages that arrived before the time limit, and the next open continues from there', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const api = new FakeCloudApi({ pullPageSize: 2 });
+    await register(api, 'ana');
+    const m = machine(api);
+    const ana = await m.account.signIn(mail('ana'), PW);
+    await seedRows(api, ana.id, 6); // 12 events in 3 pages
+
+    const realPage = api.pullPage.bind(api);
+    let calls = 0;
+    const page = vi.spyOn(api, 'pullPage').mockImplementation((after) => {
+      calls++;
+      return calls <= 2 ? realPage(after) : new Promise<PullPage>(() => {}); // the third page never answers
+    });
+    const opening = m.platform.openStore();
+    await vi.waitFor(() => expect(calls).toBe(3));
+    m.clock.fire(PULL_TIMEOUT_MS);
+    const first = await opening;
+    expect((await first.store.readAll()).map((e) => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    first.store.close();
+    await idle();
+
+    page.mockImplementation(realPage);
+    page.mockClear();
+    const second = await m.platform.openStore(); // the previous pull did not finish: retried, resumed
+    expect(page.mock.calls[0][0]).toEqual({ sessionId: 's', firstSeq: 6 });
+    expect((await second.store.readAll()).map((e) => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    second.store.close();
+    await idle();
+
+    page.mockClear();
+    const third = await m.platform.openStore(); // finished in this sign-in: Análise / next Arena reuse it
+    expect(page).not.toHaveBeenCalled();
+    third.store.close();
+    await idle();
+
+    await m.account.signOut();
+    await m.account.signIn(mail('ana'), PW);
+    const fourth = await m.platform.openStore(); // a new sign-in pulls again, from the start
+    expect(page).toHaveBeenCalledTimes(4);
+    expect(page.mock.calls[0][0]).toBeNull();
+    fourth.store.close();
+  });
+
+  it('pushed rows carry the user the store is bound to', async () => {
+    const api = new FakeCloudApi();
+    await register(api, 'ana');
+    const m = machine(api);
+    const ana = await m.account.signIn(mail('ana'), PW);
+    const push = vi.spyOn(api, 'pushBatches');
+    const { store } = await m.platform.openStore();
+    await store.append([ev(ana.id, 's', 0)]);
+    m.clock.fire();
+    await vi.waitFor(() => expect(keys(serverEvents(api, ana.id))).toEqual(['s#0']));
+    expect(push.mock.calls.every((call) => call[1] === ana.id)).toBe(true);
+    store.close();
+  });
+});
+
+describe('two tabs of one account and data deletion (I4)', () => {
+  /** In-memory stand-in for the BroadcastChannel between tabs. */
+  function channelPair(): AccountChannel {
+    const listeners = new Set<(m: unknown) => void>();
+    return {
+      post: (m) => {
+        for (const l of [...listeners]) queueMicrotask(() => l(m));
+      },
+      subscribe: (l) => {
+        listeners.add(l);
+        return () => void listeners.delete(l);
+      },
+    };
+  }
+
+  it("deleting in one tab closes the other tab's store (no blocked delete, nothing pushed back) and tells it", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const api = new FakeCloudApi();
+    await register(api, 'ana');
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    const channel = channelPair();
+    const tabA = new Account(api, { idb: () => factory, defer: queueMicrotask, channel });
+    const tabB = new Account(api, { idb: () => factory, defer: queueMicrotask, channel });
+    await tabA.init();
+    await tabB.init();
+    const ana = await tabA.signIn(mail('ana'), PW);
+    await tabA.acceptTerms();
+    await vi.waitFor(() => expect(tabB.state.user?.id).toBe(ana.id));
+    await tabB.refresh();
+    expect(tabB.state.termsAccepted).toBe(true);
+
+    const clockB = manualTimers();
+    const onlineB = new Set<() => void>();
+    const opened = await openAccountStore(tabB, {
+      factory,
+      timers: clockB.timers,
+      onOnline: (l) => {
+        onlineB.add(l);
+        return () => void onlineB.delete(l);
+      },
+    });
+    const storeB = opened!.store;
+    await storeB.append([ev(ana.id, 's', 0)]);
+    clockB.fire();
+    await vi.waitFor(() => expect(keys(serverEvents(api, ana.id))).toEqual(['s#0']));
+    await storeB.append([ev(ana.id, 's', 1)]); // pending in B's buffer when A deletes
+
+    await tabA.deleteMyData(); // resolves: B's connection closed itself on versionchange
+    expect(api.batchesOf(ana.id)).toEqual([]);
+    expect(await databases(factory)).toEqual([]);
+    await vi.waitFor(() => expect(tabB.state.termsAccepted).toBe(false));
+
+    await expect(storeB.append([ev(ana.id, 's', 2)])).rejects.toBeDefined();
+    clockB.fire();
+    for (const l of onlineB) l();
+    await idle();
+    expect(api.batchesOf(ana.id)).toEqual([]); // B's buffered event was not pushed back
+    expect(clockB.pending.size).toBe(0);
+    storeB.close();
+    await idle();
+    expect(api.batchesOf(ana.id)).toEqual([]);
+  });
+
+  it('a connection that never closes (an old tab) makes the deletion fail with a clear message instead of hanging', async () => {
+    const api = new FakeCloudApi();
+    await register(api, 'ana');
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    const account = new Account(api, { idb: () => factory, defer: queueMicrotask, deleteBlockedTimeoutMs: 20 });
+    const ana = await account.signIn(mail('ana'), PW);
+    const opened = await openAccountStore(account, { factory, timers: manualTimers().timers });
+    opened!.store.close();
+    await idle();
+    // An old build's connection: no versionchange handler.
+    const old = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = factory.open(accountDbName(ana.id));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    await api.pushBatches([{ sessionId: 's', firstSeq: 0, lastSeq: 0, events: [ev(ana.id, 's', 0)] }], ana.id);
+
+    const failed = await account.deleteMyData().catch((err: unknown) => err);
+    expect(failed).toBeInstanceOf(LocalDataBlockedError);
+    expect((failed as Error).message).toMatch(/feche as outras abas/);
+    expect(api.batchesOf(ana.id)).toEqual([]); // the cloud part is done
+    expect(account.state.termsAccepted).toBe(false);
+    expect(account.canSync(ana.id)).toBe(true); // not stuck in "deleting"
+
+    old.close();
+    await idle();
+    await account.deleteMyData(); // finishes once the old tab is gone
+    expect(await databases(factory)).toEqual([]);
   });
 });
 

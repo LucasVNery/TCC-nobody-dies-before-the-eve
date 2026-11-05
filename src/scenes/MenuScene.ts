@@ -6,7 +6,7 @@ import { howToPlayLines } from './menu/howToPlay';
 import { LOCAL_ACCESS, toolKeysEnabled } from './input/debugKeys';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
 import { createBrowserPlatform, openBrowserAccountStore } from './session/browserPlatform';
-import { accountFromRegistry, accountDbName, type Account } from '../cloud/account';
+import { accountFromRegistry, accountDbName, LocalDataBlockedError, type Account } from '../cloud/account';
 import { AuthPanel, NewPasswordPanel } from '../cloud/authPanel';
 import { ConsentPanel } from '../cloud/consentPanel';
 import { ImportPanel } from '../cloud/importPanel';
@@ -407,8 +407,9 @@ export class MenuScene extends Phaser.Scene {
       new ConfirmPanel(document.body, {
         title: 'Apagar meus dados',
         lines: [
-          'Isto apaga todo o seu histórico de jogo na nuvem e neste navegador, e o aceite do termo.',
-          'A conta continua existindo; para jogar de novo será pedido o aceite.',
+          'Isto apaga o histórico de jogo desta conta na nuvem e neste navegador, e o aceite do termo.',
+          'O histórico anterior ao login deste navegador (de antes de entrar na conta) NÃO é apagado.',
+          'A conta e o e-mail continuam existindo; para jogar de novo será pedido o aceite.',
           'Não é possível desfazer.',
         ],
         confirmLabel: 'Apagar tudo',
@@ -423,10 +424,10 @@ export class MenuScene extends Phaser.Scene {
             claim.release();
           }
         },
-        errorMessage: cloudErrorMessage,
+        errorMessage: (err) => (err instanceof LocalDataBlockedError ? err.message : cloudErrorMessage(err)),
         onDone: () => {
           this.closeAccountPanel();
-          this.setNotice('Seus dados foram apagados (nuvem e este navegador).');
+          this.setNotice('Os dados da conta foram apagados (nuvem e este navegador).\nO histórico anterior ao login deste navegador não foi apagado.');
         },
         onCancel: () => this.closeAccountPanel(),
       }),

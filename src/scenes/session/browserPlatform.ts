@@ -1,5 +1,5 @@
 // src/scenes/session/browserPlatform.ts
-import { IndexedDbEventStore, type EventStore } from '../../telemetry/eventStore';
+import { IndexedDbEventStore, MemoryEventStore, type EventStore } from '../../telemetry/eventStore';
 import type { Account } from '../../cloud/account';
 import { openAccountStore, type CloudStoreDeps } from '../../cloud/syncBoot';
 import type { Platform } from './platform';
@@ -64,18 +64,34 @@ export function openBrowserAccountStore(account: Account): Promise<{ store: Even
 }
 
 /**
- * Without an account in cloud mode, the store is the local `tcc-telemetry` database, as before
- * accounts existed. In cloud mode with a signed-in user it is that account's own database, synced
- * (see openAccountStore); with no user signed in it falls back to the local database, which is
- * never synced (pre-login history).
+ * Shown in the Arena when a cloud-mode run is in memory only: no signed-in account at that moment
+ * (see openCloudStore) or the account's database could not be opened. Neutral on purpose (either case).
+ */
+export const UNSAVED_RUN_NOTICE = 'Esta partida não está sendo salva neste navegador. Esc volta ao menu.';
+
+/**
+ * Cloud mode: the signed-in account's own synced database. Without one (nobody signed in at that
+ * moment, or the session restore timed out) the run goes to an in-memory store (persistent: false,
+ * its events are lost when the run ends) and NEVER to the pre-login `tcc-telemetry` database: that
+ * one is not the account's, and writing a cloud-mode run into it would mix the two histories.
+ */
+export async function openCloudStore(account: Account, deps: CloudStoreDeps): Promise<{ store: EventStore; persistent: boolean }> {
+  const opened = await openAccountStore(account, deps);
+  if (opened) return opened;
+  console.warn('[cloud] no signed-in account: this run is kept in memory only and will not be saved');
+  return { store: new MemoryEventStore(), persistent: false };
+}
+
+/**
+ * Local mode (no account, or no credentials): the store is the local `tcc-telemetry` database, as
+ * before accounts existed. Cloud mode: see openCloudStore.
  */
 export function createBrowserPlatform(account?: Account): Platform {
   const openLocal = async () => ({ store: await IndexedDbEventStore.open(), persistent: true });
   return {
     newUuid,
     nowIso: () => new Date().toISOString(),
-    openStore:
-      account?.mode === 'cloud' ? async () => (await openAccountStore(account, browserSyncDeps())) ?? openLocal() : openLocal,
+    openStore: account?.mode === 'cloud' ? () => openCloudStore(account, browserSyncDeps()) : openLocal,
     downloadText,
     pickFile,
     onHide(listener) {

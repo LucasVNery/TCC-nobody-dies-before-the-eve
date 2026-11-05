@@ -28,6 +28,7 @@ export class ImportPanel {
     const text = el('div', 'ao-text');
     const lines = [
       `Este navegador tem um histórico de jogo anterior ao login (${opts.eventCount} eventos em ${opts.sessionCount} sessões).`,
+      'Importe só se foi você quem jogou neste navegador antes de entrar (num computador compartilhado, o histórico pode ser de outra pessoa).',
       'Importar copia esse histórico para a sua conta: ele passa a ser enviado ao servidor e entra na análise do jogo, nos termos que você aceitou.',
       'Descartar não copia nada e não será perguntado de novo. Em ambos os casos o histórico antigo continua neste navegador, sem alteração.',
     ];

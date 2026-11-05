@@ -9,7 +9,7 @@ import { loadFloorTiles } from '../visual/floor/floorAssets';
 import { generatePlaceholderTextures, ENTITY_SIZE } from '../visual/placeholderTextures';
 import { SessionController } from './session/sessionController';
 import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
-import { createBrowserPlatform } from './session/browserPlatform';
+import { createBrowserPlatform, UNSAVED_RUN_NOTICE } from './session/browserPlatform';
 import { accountFromRegistry } from '../cloud/account';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindGatedHotkeys } from './input/hotkeys';
@@ -162,7 +162,7 @@ export class ArenaScene extends Phaser.Scene {
       storeClaim.release(session.shutdown());
     });
 
-    void session.start({
+    const started = session.start({
       after: storeClaim.ready,
       onStackReady: (stack, history) => {
         const { aggregator: agg, tape, world, feedback } = this;
@@ -185,6 +185,13 @@ export class ArenaScene extends Phaser.Scene {
         });
         this.loop = createFixedTimestepLoop(STEP_MS, (ms) => { stack.step(ms); world.recordStep(stack.encounter); });
       },
+    });
+    // Cloud mode never records into the pre-login database: without the account's store the run is
+    // in memory only (see openCloudStore), and the player is told so for the whole run.
+    void started.then(() => {
+      if (alive && account?.mode === 'cloud' && session.ready && session.status().store === 'memory') {
+        this.hud.setNotice(UNSAVED_RUN_NOTICE);
+      }
     });
   }
 

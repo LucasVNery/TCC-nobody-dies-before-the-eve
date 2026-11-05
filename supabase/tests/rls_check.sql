@@ -254,10 +254,27 @@ begin
   -- ------------------------------------------------------------------ delete_my_data as A
   perform set_config('request.jwt.claims',
     json_build_object('sub', a, 'role', 'authenticated')::text, true);
+
+  -- A's token with B as the expected account (the game thinks B is signed in): refused, nothing deleted
   begin
-    perform public.delete_my_data();
+    perform public.delete_my_data(b);
+    r := r || text 'FALHOU 40 delete_my_data(B) com o token de A e recusado';
+  exception when insufficient_privilege then
+    r := r || text 'OK     40 delete_my_data(B) com o token de A e recusado';
+  end;
+  begin
+    perform public.delete_my_data(null);
+    r := r || text 'FALHOU 41 delete_my_data(null) e recusado';
+  exception when insufficient_privilege then
+    r := r || text 'OK     41 delete_my_data(null) e recusado';
+  end;
+  select count(*) into n from public.event_batches where user_id = a;
+  r := r || format('%s 42 lotes de A intactos depois das chamadas recusadas (esperado 3, veio %s)', case when n = 3 then 'OK    ' else 'FALHOU' end, n);
+
+  begin
+    perform public.delete_my_data(a);
   exception when others then
-    r := r || format('FALHOU 25 delete_my_data() como A (%s %s)', sqlstate, sqlerrm);
+    r := r || format('FALHOU 25 delete_my_data(A) como A (%s %s)', sqlstate, sqlerrm);
   end;
 
   reset role;   -- owner again, to see every row
@@ -278,7 +295,7 @@ begin
   set local role authenticated;
   perform set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
   begin
-    perform public.delete_my_data();
+    perform public.delete_my_data(a);
     r := r || text 'FALHOU 27 delete_my_data() sem usuario e recusado';
   exception when insufficient_privilege then
     r := r || text 'OK     27 delete_my_data() sem usuario e recusado';
@@ -321,7 +338,7 @@ begin
     r := r || text 'OK     32 anon nao insere lotes';
   end;
   begin
-    perform public.delete_my_data();
+    perform public.delete_my_data(a);
     r := r || text 'FALHOU 33 anon nao executa delete_my_data()';
   exception when insufficient_privilege then
     r := r || text 'OK     33 anon nao executa delete_my_data()';

@@ -69,10 +69,18 @@ function done(tx: IDBTransaction): Promise<void> {
   });
 }
 
+export interface OpenOptions {
+  /**
+   * Called once when another connection (usually another tab) deletes or upgrades the database:
+   * this connection is closed right away so that operation is not blocked, and every later call fails.
+   */
+  onVersionChange?: () => void;
+}
+
 export class IndexedDbEventStore implements EventStore {
   private constructor(private readonly db: IDBDatabase) {}
 
-  static async open(factory: IDBFactory = indexedDB, name: string = DB_NAME): Promise<IndexedDbEventStore> {
+  static async open(factory: IDBFactory = indexedDB, name: string = DB_NAME, opts: OpenOptions = {}): Promise<IndexedDbEventStore> {
     const req = factory.open(name, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -94,6 +102,15 @@ export class IndexedDbEventStore implements EventStore {
         reject(new Error(`IndexedDB "${name}" open blocked by another connection`));
       };
     });
+    // A deleteDatabase (or upgrade) from another tab waits until every connection closes: never hold it up.
+    db.onversionchange = () => {
+      db.close();
+      try {
+        opts.onVersionChange?.();
+      } catch (err) {
+        console.warn('[telemetry] versionchange listener failed', err);
+      }
+    };
     return new IndexedDbEventStore(db);
   }
 

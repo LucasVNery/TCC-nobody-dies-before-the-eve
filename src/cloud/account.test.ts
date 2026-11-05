@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { Account, accountDbName, accountFromRegistry, ACCOUNT_REGISTRY_KEY, type AccountState } from './account';
+import { Account, accountDbName, accountFromRegistry, ACCOUNT_REGISTRY_KEY, termsCacheKey, type AccountState, type TermsStorage } from './account';
 import { FakeCloudApi } from './fakeCloudApi';
 import { CloudError } from './cloudApi';
 import { TERMS_VERSION } from './consentText';
@@ -194,13 +194,13 @@ describe('Account', () => {
     let releasePush!: () => void;
     const gate = new Promise<void>((r) => (releasePush = r));
     const push = api.pushBatches.bind(api);
-    const pushing = vi.spyOn(api, 'pushBatches').mockImplementation(async (b) => {
+    const pushing = vi.spyOn(api, 'pushBatches').mockImplementation(async (b, u) => {
       await gate;
-      return push(b);
+      return push(b, u);
     });
     const del = api.deleteMyData.bind(api);
-    const deletes = vi.spyOn(api, 'deleteMyData').mockImplementation(async () => {
-      await del();
+    const deletes = vi.spyOn(api, 'deleteMyData').mockImplementation(async (expected) => {
+      await del(expected);
       releasePush(); // the slow push lands right after the first server delete
     });
     await opened!.store.append([ev(user.id, 's', 0)]);
@@ -208,7 +208,43 @@ describe('Account', () => {
     await vi.waitFor(() => expect(pushing).toHaveBeenCalled()); // on the wire before the deletion starts
     await account.deleteMyData();
     expect(deletes).toHaveBeenCalledTimes(2);
+    expect(deletes.mock.calls.every((call) => call[0] === user.id)).toBe(true); // the server checks it is this user
     expect(api.batchesOf(user.id)).toEqual([]);
+    expect(await factory.databases()).toEqual([]);
+  });
+
+  it('a last push that lands after the local database is gone (but within the second wait) is removed by the second delete', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the closed store's progress write fails, as expected
+    const api = await apiWith('ana');
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    let releasePush!: () => void;
+    // The push is released right after the local database is deleted (which no longer waits for it,
+    // since connections close themselves on versionchange): it lands after the first server delete.
+    const deletingFactory = {
+      deleteDatabase: (name: string) => {
+        const req = factory.deleteDatabase(name);
+        req.addEventListener('success', () => setTimeout(() => releasePush(), 0));
+        return req;
+      },
+    } as unknown as IDBFactory;
+    const account = new Account(api, { idb: () => deletingFactory, defer: queueMicrotask, settleTimeoutMs: 60 });
+    const user = await account.signIn(mail('ana'), PW);
+    const opened = await openAccountStore(account, { factory, timers: { set: () => 0, clear: () => {} } });
+    await idle(); // boot push (nothing pending) done
+    const gate = new Promise<void>((r) => (releasePush = r));
+    const push = api.pushBatches.bind(api);
+    const pushing = vi.spyOn(api, 'pushBatches').mockImplementation(async (b, u) => {
+      await gate;
+      return push(b, u);
+    });
+    const deletes = vi.spyOn(api, 'deleteMyData');
+    await opened!.store.append([ev(user.id, 's', 0)]);
+    opened!.store.close(); // the last push hangs past the first wait
+    await vi.waitFor(() => expect(pushing).toHaveBeenCalled());
+    await account.deleteMyData();
+    await idle(); // whatever was still on the wire has landed by now
+    expect(deletes).toHaveBeenCalledTimes(2);
+    expect(api.batchesOf(user.id)).toEqual([]); // the push landed between the deletes, the second one removed it
     expect(await factory.databases()).toEqual([]);
   });
 
@@ -230,7 +266,10 @@ describe('Account', () => {
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
     const user = await account.signIn(mail('ana'), PW);
     let release!: () => void;
-    vi.spyOn(api, 'deleteMyData').mockImplementation(() => new Promise<void>((r) => (release = r)));
+    // The first server delete hangs until released; the second (after the local database) answers at once.
+    vi.spyOn(api, 'deleteMyData')
+      .mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+      .mockResolvedValue(undefined);
     const deleting = account.deleteMyData();
     await idle();
     expect(account.canSync(user.id)).toBe(false);
@@ -300,6 +339,92 @@ describe('Account', () => {
     const values = new Map<string, unknown>([[ACCOUNT_REGISTRY_KEY, account]]);
     expect(accountFromRegistry({ get: (k) => values.get(k) })).toBe(account);
     expect(accountFromRegistry({ get: () => undefined })).toBeUndefined();
+  });
+
+  describe('offline reload: cached terms version (I6)', () => {
+    function memoryStorage(): TermsStorage & { map: Map<string, string> } {
+      const map = new Map<string, string>();
+      return {
+        map,
+        getItem: (k) => map.get(k) ?? null,
+        setItem: (k, v) => void map.set(k, v),
+        removeItem: (k) => void map.delete(k),
+      };
+    }
+
+    /** A reload: a new Account over the same api and storage, with the consent check failing as `kind`. */
+    async function reload(api: FakeCloudApi, storage: TermsStorage, kind?: 'network' | 'other'): Promise<Account> {
+      if (kind) vi.spyOn(api, 'acceptedTermsVersion').mockRejectedValue(new CloudError(kind, 'consent check failed'));
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      await account.init();
+      return account;
+    }
+
+    it('acceptTerms caches only the version, per user; a network failure on reload uses it', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const api = await apiWith('ana');
+      const storage = memoryStorage();
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      const user = await account.signIn(mail('ana'), PW);
+      await account.acceptTerms();
+      expect([...storage.map]).toEqual([[termsCacheKey(user.id), TERMS_VERSION]]);
+      expect(termsCacheKey(user.id)).toBe(`tcc-terms-${user.id}`);
+
+      const offline = await reload(api, storage, 'network');
+      expect(offline.state.user?.id).toBe(user.id);
+      expect(offline.state.termsAccepted).toBe(true);
+      expect(offline.state.isAdmin).toBe(false);
+    });
+
+    it('a successful details load refreshes the cache; any other failure or another version does not count', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const api = await apiWith('ana');
+      const user = await api.signIn(mail('ana'), PW);
+      await api.acceptTerms(TERMS_VERSION);
+      const storage = memoryStorage();
+      expect((await reload(api, storage)).state.termsAccepted).toBe(true);
+      expect(storage.getItem(termsCacheKey(user.id))).toBe(TERMS_VERSION);
+
+      expect((await reload(api, storage, 'other')).state.termsAccepted).toBe(false);
+      vi.restoreAllMocks();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      storage.setItem(termsCacheKey(user.id), 'an-older-version');
+      expect((await reload(api, storage, 'network')).state.termsAccepted).toBe(false);
+      vi.restoreAllMocks();
+
+      await api.deleteMyData(user.id); // consent gone on the server: a successful load clears the cache
+      storage.setItem(termsCacheKey(user.id), TERMS_VERSION);
+      expect((await reload(api, storage)).state.termsAccepted).toBe(false);
+      expect(storage.getItem(termsCacheKey(user.id))).toBeNull();
+    });
+
+    it('deleteMyData clears the cache; a broken storage is ignored', async () => {
+      const api = await apiWith('ana');
+      const factory = new IDBFactory() as unknown as IDBFactory;
+      const storage = memoryStorage();
+      const account = new Account(api, { idb: () => factory, defer: queueMicrotask, termsStorage: storage });
+      const user = await account.signIn(mail('ana'), PW);
+      await account.acceptTerms();
+      await account.deleteMyData();
+      expect(storage.getItem(termsCacheKey(user.id))).toBeNull();
+
+      const broken: TermsStorage = {
+        getItem: () => {
+          throw new Error('denied');
+        },
+        setItem: () => {
+          throw new Error('denied');
+        },
+        removeItem: () => {
+          throw new Error('denied');
+        },
+      };
+      const other = new Account(api, { defer: queueMicrotask, termsStorage: broken });
+      await other.init();
+      await other.acceptTerms();
+      expect(other.state.termsAccepted).toBe(true);
+    });
   });
 
   it('events recorded offline stay in the account database and go out on the next boot', async () => {

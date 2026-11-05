@@ -13,6 +13,18 @@ export interface EventBatch {
   events: LoggedEvent[];
 }
 
+/** Position in the pull order (session_id, first_seq): the next page starts after this row. */
+export interface PullCursor {
+  sessionId: string;
+  firstSeq: number;
+}
+
+/** One page of the pull: the events of up to PULL_PAGE_SIZE rows, and where the next page starts (null: last page). */
+export interface PullPage {
+  events: LoggedEvent[];
+  next: PullCursor | null;
+}
+
 export type CloudErrorKind = 'network' | 'auth' | 'other';
 
 export class CloudError extends Error {
@@ -39,10 +51,18 @@ export interface CloudApi {
   isAdmin(): Promise<boolean>;
   acceptedTermsVersion(): Promise<string | null>;
   acceptTerms(version: string): Promise<void>;
-  pushBatches(batches: readonly EventBatch[]): Promise<void>;
-  /** The signed-in user's own events only, even for an admin. */
-  pullEvents(): Promise<LoggedEvent[]>;
-  deleteMyData(): Promise<void>;
+  /**
+   * Upserts the batches as rows of `userId` (sent explicitly in every row): when the session belongs to
+   * someone else the server refuses them (RLS), which surfaces as an 'auth' CloudError.
+   */
+  pushBatches(batches: readonly EventBatch[], userId: string): Promise<void>;
+  /**
+   * One page of the signed-in user's own rows (even for an admin), in (session_id, first_seq) order,
+   * starting after `after` (null: from the start). Events are deduplicated within the page.
+   */
+  pullPage(after: PullCursor | null): Promise<PullPage>;
+  /** Deletes the signed-in user's batches and consents; refused ('auth') unless that user is `expectedUserId`. */
+  deleteMyData(expectedUserId: string): Promise<void>;
   /** Returns the unsubscribe function. The listener must stay synchronous (no client call awaited inside). */
   onAuthChange(listener: (user: CloudUser | null, event?: AuthChangeEvent) => void): () => void;
 }
