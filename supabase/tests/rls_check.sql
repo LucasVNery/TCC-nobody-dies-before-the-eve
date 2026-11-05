@@ -8,46 +8,39 @@
 -- How it works
 --   * The whole check is ONE `do` block. It ends by raising an exception whose
 --     message is the report, one line per check, `OK` or `FALHOU`. Raising an
---     exception makes Postgres roll back everything the block did (the two
---     throwaway users, their batches, consents and the admins row), whatever
---     client runs it. So the editor will show an ERROR: that is expected; read
---     the message. The last line says `RESULTADO: TODOS OK` or
+--     exception makes Postgres roll back everything the block did (the
+--     simulated users' batches, consents and the admins row), whatever client
+--     runs it. So the editor will show an ERROR: that is expected; read the
+--     message. The last line says `RESULTADO: TODOS OK` or
 --     `RESULTADO: HA FALHAS`. Any other error means the script itself could
---     not run (see "Users" below). The same report is also emitted as a
---     NOTICE just before the exception (psql shows it).
---   * Two users are simulated the way PostgREST does it: `set local role
---     authenticated` plus `request.jwt.claims` with the user's id as `sub`
---     (auth.uid() reads that claim). `reset role` goes back to the owner.
+--     not run. The same report is also emitted as a NOTICE just before the
+--     exception (psql shows it).
+--   * Users are simulated the way PostgREST does it for a Clerk session token
+--     (Supabase third-party auth): `set local role authenticated` (the role
+--     named by the token's `role` claim) plus `request.jwt.claims` with the
+--     Clerk user id as `sub` (auth.jwt() reads that setting). `reset role`
+--     goes back to the owner (`postgres`, the editor's default role).
+--   * Also simulated: a token without `sub`, a token with an empty `sub`, and
+--     the `anon` role (a request without a signed-in user).
 --
 -- Users
---   event_batches/consents/admins have a foreign key to auth.users, so real
---   auth.users rows are needed. The script creates two throwaway users inside
---   the block with a minimal insert into auth.users (id, instance_id, aud,
---   role, email); the other columns have defaults or are nullable. This is the
---   approach used by common Supabase test helpers and needs the editor to run
---   as `postgres` (its default). They disappear with the rollback.
---   NOT VERIFIED here (no Supabase/Postgres available when this was written):
---   if Supabase ever restricts inserts into auth.users for `postgres`, the
---   block fails with a permission error on auth.users. Then create two users
---   in Authentication > Users of the TEST project, and replace the two
---   `insert into auth.users` lines and the gen_random_uuid() values of
---   `a`/`b` below with their ids.
+--   The tables store the Clerk user id as text, with no foreign key, so no
+--   real user is needed (and nothing is inserted into Supabase's own user
+--   table). The two ids below are fake placeholders that no Clerk account
+--   uses; Clerk does not even need to be configured in the test project.
+--   The counts below assume the test project has no rows for these two ids
+--   (true unless someone inserted them by hand).
 
 do $rls_check$
 declare
-  a  uuid := gen_random_uuid();   -- player A (not admin)
-  b  uuid := gen_random_uuid();   -- player B (made admin below)
+  a  text := 'user_test_a';       -- player A (not admin)
+  b  text := 'user_test_b';       -- player B (made admin below)
   r  text[] := array[]::text[];   -- report lines
   n  bigint;
   t  text;
   ok boolean;
 begin
   -- ------------------------------------------------------------------ setup (owner)
-  insert into auth.users (id, instance_id, aud, role, email)
-  values (a, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-          'rls-check-a-' || a || '@example.invalid'),
-         (b, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-          'rls-check-b-' || b || '@example.invalid');
   insert into public.admins (user_id) values (b);
 
   -- ------------------------------------------------------------------ as B: own data
@@ -63,7 +56,7 @@ begin
   perform set_config('request.jwt.claims',
     json_build_object('sub', a, 'role', 'authenticated')::text, true);
 
-  r := r || format('%s 01 A ve o proprio auth.uid()', case when auth.uid() = a then 'OK    ' else 'FALHOU' end);
+  r := r || format('%s 01 A ve o proprio sub no token', case when nullif(auth.jwt() ->> 'sub', '') = a then 'OK    ' else 'FALHOU' end);
 
   -- A inserts and upserts own batch
   begin
@@ -138,6 +131,22 @@ begin
     r := r || text 'FALHOU 39 lote acima de 1 MiB e recusado';
   exception when check_violation then
     r := r || text 'OK     39 lote acima de 1 MiB e recusado';
+  end;
+
+  -- user_id omitted: the column default fills it from the token's sub; own
+  -- session sDefault and consent test-default (counted in checks 20, 21, 42,
+  -- removed by delete_my_data below)
+  begin
+    insert into public.event_batches (session_id, first_seq, last_seq, events)
+    values ('sDefault', 0, 0, '[{"seq":0}]');
+    insert into public.consents (terms_version) values ('test-default');
+    select count(*) into n from public.event_batches where user_id = a and session_id = 'sDefault';
+    ok := n = 1;
+    select count(*) into n from public.consents where user_id = a and terms_version = 'test-default';
+    ok := ok and n = 1;
+    r := r || format('%s 43 sem user_id, o padrao usa o sub do token (lote e consentimento)', case when ok then 'OK    ' else 'FALHOU' end);
+  exception when others then
+    r := r || format('FALHOU 43 sem user_id, o padrao usa o sub do token (%s %s)', sqlstate, sqlerrm);
   end;
 
   -- A inserts own consent
@@ -216,10 +225,11 @@ begin
     r := r || text 'OK     13 lote com mais de 1000 eventos e recusado';
   end;
 
-  -- A is not admin, sees nothing in events_flat, cannot touch admins
+  -- A is not admin, sees nothing in events_flat (although A has events in
+  -- event_batches), cannot touch admins
   r := r || format('%s 14 is_admin() = false para A', case when public.is_admin() = false then 'OK    ' else 'FALHOU' end);
   select count(*) into n from public.events_flat;
-  r := r || format('%s 15 A nao le events_flat (0 linhas)', case when n = 0 then 'OK    ' else 'FALHOU' end);
+  r := r || format('%s 15 A (nao administrador) nao le events_flat (0 linhas)', case when n = 0 then 'OK    ' else 'FALHOU' end);
   select count(*) into n from public.admins;
   r := r || format('%s 16 A nao le registros de admins de outros', case when n = 0 then 'OK    ' else 'FALHOU' end);
   begin
@@ -241,15 +251,66 @@ begin
 
   r := r || format('%s 19 is_admin() = true para B', case when public.is_admin() then 'OK    ' else 'FALHOU' end);
   select count(*) into n from public.event_batches where user_id in (a, b);
-  r := r || format('%s 20 admin B le todos os lotes (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
+  r := r || format('%s 20 admin B le todos os lotes (esperado 5, veio %s)', case when n = 5 then 'OK    ' else 'FALHOU' end, n);
   select count(*) into n from public.consents where user_id in (a, b);
-  r := r || format('%s 21 admin B le todos os consentimentos (esperado 2, veio %s)', case when n = 2 then 'OK    ' else 'FALHOU' end, n);
+  r := r || format('%s 21 admin B le todos os consentimentos (esperado 3, veio %s)', case when n = 3 then 'OK    ' else 'FALHOU' end, n);
   select count(*) into n from public.events_flat where user_id = a and session_id = 'sA';
   r := r || format('%s 22 admin B le events_flat, sem duplicatas na sessao sA (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
   select type into t from public.events_flat where user_id = a and session_id = 'sA' and seq = 2;
   r := r || format('%s 23 events_flat fica com o lote de maior last_seq (veio %s)', case when t = 'a2-new' then 'OK    ' else 'FALHOU' end, coalesce(t, 'nada'));
   select count(*) into n from public.admins where user_id = b;
   r := r || format('%s 24 B le o proprio registro em admins', case when n = 1 then 'OK    ' else 'FALHOU' end);
+
+  -- ------------------------------------------------------------------ token without sub
+  -- role authenticated, but no user in the token: sees and writes nothing
+  perform set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
+
+  r := r || format('%s 44 is_admin() = false sem sub', case when public.is_admin() = false then 'OK    ' else 'FALHOU' end);
+  select count(*) into n from public.event_batches;
+  ok := n = 0;
+  select count(*) into n from public.consents;
+  ok := ok and n = 0;
+  select count(*) into n from public.admins;
+  ok := ok and n = 0;
+  r := r || format('%s 45 sem sub nao le event_batches, consents nem admins', case when ok then 'OK    ' else 'FALHOU' end);
+  select count(*) into n from public.events_flat;
+  r := r || format('%s 46 sem sub nao le events_flat (0 linhas)', case when n = 0 then 'OK    ' else 'FALHOU' end);
+  begin
+    insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
+    values (a, 'nosub', 0, 0, '[{"seq":0}]');
+    r := r || text 'FALHOU 47 sem sub nao insere lote com user_id = A';
+  exception when insufficient_privilege then
+    r := r || text 'OK     47 sem sub nao insere lote com user_id = A';
+  end;
+  -- without user_id the default is null: refused by RLS or by NOT NULL
+  begin
+    insert into public.event_batches (session_id, first_seq, last_seq, events)
+    values ('nosub', 0, 0, '[{"seq":0}]');
+    r := r || text 'FALHOU 48 sem sub nao insere lote sem user_id';
+  exception when insufficient_privilege or not_null_violation then
+    r := r || text 'OK     48 sem sub nao insere lote sem user_id';
+  end;
+  begin
+    insert into public.consents (terms_version) values ('nosub');
+    r := r || text 'FALHOU 49 sem sub nao grava consentimento';
+  exception when insufficient_privilege or not_null_violation then
+    r := r || text 'OK     49 sem sub nao grava consentimento';
+  end;
+  update public.event_batches set events = '[]', last_seq = 99;
+  get diagnostics n = row_count;
+  r := r || format('%s 50 sem sub nao altera nenhum lote', case when n = 0 then 'OK    ' else 'FALHOU' end);
+
+  -- empty sub counts as no user
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', '', 'role', 'authenticated')::text, true);
+  select count(*) into n from public.event_batches;
+  r := r || format('%s 51 sub vazio nao le lotes e nao e administrador', case when n = 0 and public.is_admin() = false then 'OK    ' else 'FALHOU' end);
+  begin
+    perform public.delete_my_data('');
+    r := r || text 'FALHOU 52 delete_my_data('''') com sub vazio e recusado';
+  exception when insufficient_privilege then
+    r := r || text 'OK     52 delete_my_data('''') com sub vazio e recusado';
+  end;
 
   -- ------------------------------------------------------------------ delete_my_data as A
   perform set_config('request.jwt.claims',
@@ -269,7 +330,15 @@ begin
     r := r || text 'OK     41 delete_my_data(null) e recusado';
   end;
   select count(*) into n from public.event_batches where user_id = a;
-  r := r || format('%s 42 lotes de A intactos depois das chamadas recusadas (esperado 3, veio %s)', case when n = 3 then 'OK    ' else 'FALHOU' end, n);
+  r := r || format('%s 42 lotes de A intactos depois das chamadas recusadas (esperado 4, veio %s)', case when n = 4 then 'OK    ' else 'FALHOU' end, n);
+
+  reset role;   -- owner, to see B's rows (A cannot)
+  select count(*) into n from public.event_batches where user_id = b;
+  ok := n = 1;
+  select count(*) into n from public.consents where user_id = b;
+  ok := ok and n = 1;
+  r := r || format('%s 53 o sub de A nao apaga dados de B via delete_my_data(B)', case when ok then 'OK    ' else 'FALHOU' end);
+  set local role authenticated;   -- claims still A's
 
   begin
     perform public.delete_my_data(a);
@@ -303,8 +372,9 @@ begin
   reset role;
 
   -- ------------------------------------------------------------------ as anon
+  -- role anon, even with B's sub (B is admin and has data): no access at all
   set local role anon;
-  perform set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', b, 'role', 'anon')::text, true);
 
   begin
     select count(*) into n from public.event_batches;
@@ -332,13 +402,13 @@ begin
   end;
   begin
     insert into public.event_batches (user_id, session_id, first_seq, last_seq, events)
-    values (a, 'anon', 0, 0, '[{"seq":0}]');
+    values (b, 'anon', 0, 0, '[{"seq":0}]');
     r := r || text 'FALHOU 32 anon nao insere lotes';
   exception when insufficient_privilege then
     r := r || text 'OK     32 anon nao insere lotes';
   end;
   begin
-    perform public.delete_my_data(a);
+    perform public.delete_my_data(b);
     r := r || text 'FALHOU 33 anon nao executa delete_my_data()';
   exception when insufficient_privilege then
     r := r || text 'OK     33 anon nao executa delete_my_data()';
@@ -354,6 +424,11 @@ begin
   -- ------------------------------------------------------------------ owner (SQL editor export)
   select count(*) into n from public.events_flat where user_id = b;
   r := r || format('%s 35 dono (SQL editor) le events_flat para exportar (esperado 2, veio %s)', case when n = 2 then 'OK    ' else 'FALHOU' end, n);
+  select count(*) into n from public.event_batches where user_id = b;
+  ok := n = 1;
+  select count(*) into n from public.consents where user_id = b;
+  ok := ok and n = 1;
+  r := r || format('%s 54 dados de B intactos depois das tentativas como anon', case when ok then 'OK    ' else 'FALHOU' end);
 
   -- ------------------------------------------------------------------ report + rollback
   r := r || case when exists (select 1 from unnest(r) x where x like 'FALHOU%')

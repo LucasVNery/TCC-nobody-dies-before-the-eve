@@ -25,6 +25,8 @@ O roteiro de verificação desfaz tudo o que faz, mas mesmo assim ele não deve 
 2. Cole o conteúdo inteiro de `supabase/migrations/0001_init.sql` e execute.
 3. Deve terminar sem erro. Confira em **Table Editor** (ou procure por "Database > Tables") que existem `event_batches`, `consents` e `admins`, com RLS ligada (o painel mostra um aviso quando uma tabela está **sem** RLS; aqui as três têm).
 
+O banco identifica cada jogador pelo **id do usuário no Clerk** (texto como `user_...`), que chega no token da sessão como `sub`. As três tabelas guardam esse id na coluna `user_id` (texto), sem ligação com a lista de usuários do próprio Supabase. As regras de linha (RLS) comparam `user_id` com o `sub` do token: um token sem `sub` não vê nem grava nada, e o papel `anon` (sem login) não tem acesso a nenhuma tabela, visão ou função do jogo. Por isso o token precisa chegar ao Supabase com o papel `authenticated`.
+
 A migração roda uma vez só. Rodar de novo dá erro de "já existe"; isso é esperado e não estraga nada (ela está dentro de uma transação).
 
 ## 3. Autenticação
@@ -69,37 +71,33 @@ Sem `.env.local` o jogo continua no modo local de hoje (sem login, só IndexedDB
 
 ## 5. Tornar-se administrador
 
-1. Rode o jogo (`npm run dev`, em `http://localhost:5173`) e crie a sua conta pelo menu Login, com o seu e-mail. Confirme o e-mail pelo link recebido.
-2. No painel, em **Authentication > Users**, confira que a sua conta aparece e anote o **UID** (um UUID).
-3. No **SQL Editor**, rode **uma** das duas formas (troque o parâmetro; o e-mail não é gravado em nenhum arquivo):
+1. Rode o jogo (`npm run dev`, em `http://localhost:5173`) e crie a sua conta pelo menu do jogo.
+2. No painel do **Clerk**, na lista de usuários (procure por "Users"), abra a sua conta e copie o **id do usuário** (um texto que começa com `user_`).
+3. No **SQL Editor** do Supabase, rode (troque o parâmetro pelo id copiado; o id não é gravado em nenhum arquivo do repositório):
 
    ```sql
-   -- pelo e-mail
-   insert into public.admins (user_id)
-   select id from auth.users where email = '<SEU_EMAIL>';
-
-   -- ou pelo UID copiado da lista de usuários
-   insert into public.admins (user_id) values ('<SEU_UID>');
+   insert into public.admins (user_id) values ('<ID_DO_CLERK>');
    ```
 
-4. Confira: `select * from public.admins;` deve mostrar uma linha com o seu UID.
+   O administrador é sempre inserido pelo id do Clerk, nunca pelo e-mail: o banco não guarda e-mails.
+4. Confira: `select * from public.admins;` deve mostrar uma linha com o seu id do Clerk.
 5. Saia e entre de novo no jogo para que ele perceba que você é administrador (ferramentas F2, F3, F4, F6, F8/F9, Tab e `?boss=demo`).
 
-Para tirar alguém da lista: `delete from public.admins where user_id = '<UID>';`.
+Para tirar alguém da lista: `delete from public.admins where user_id = '<ID_DO_CLERK>';`.
 A tabela `admins` só se altera assim, por SQL no painel; o jogo não tem como escrever nela.
 
 ## 6. Verificar as regras de acesso (só no projeto de TESTE)
 
 1. No projeto de **teste**, rode antes a migração (passo 2).
 2. No **SQL Editor**, cole o conteúdo inteiro de `supabase/tests/rls_check.sql` e execute.
-3. **O editor vai mostrar um ERRO.** Isso é proposital: o roteiro termina levantando um erro cuja mensagem é o relatório, e o erro faz o banco desfazer tudo o que o roteiro criou (dois usuários descartáveis, lotes, consentimentos e a linha em `admins`).
-4. Leia a mensagem: uma linha por verificação com `OK` ou `FALHOU`, e no fim `RESULTADO: TODOS OK` ou `RESULTADO: HA FALHAS`.
-5. Se a mensagem for outra (por exemplo, permissão negada em `auth.users`), o roteiro não conseguiu nem começar. **Alternativa:** em **Authentication > Users** do projeto de teste, crie dois usuários à mão, copie os dois UIDs e, no arquivo `rls_check.sql`, apague as duas linhas `insert into auth.users` e troque os `gen_random_uuid()` de `a` e `b` por esses UIDs (o comentário no topo do arquivo descreve isso). Rode de novo. Depois, apague os dois usuários de teste.
+3. **O editor vai mostrar um ERRO.** Isso é proposital: o roteiro termina levantando um erro cuja mensagem é o relatório, e o erro faz o banco desfazer tudo o que o roteiro criou (lotes, consentimentos e a linha em `admins` de dois usuários simulados).
+4. Leia a mensagem: uma linha por verificação com `OK` ou `FALHOU`, e no fim `RESULTADO: TODOS OK` ou `RESULTADO: HA FALHAS`. Se a mensagem for outra, o roteiro não conseguiu nem começar (por exemplo, a migração não foi aplicada nesse projeto).
+5. Não é preciso criar usuários: o roteiro simula dois jogadores (`user_test_a` e `user_test_b`, ids falsos) colocando o `sub` direto nas claims do token, como o PostgREST faz com o token do Clerk. O Clerk nem precisa estar configurado no projeto de teste.
 6. Só considere a verificação concluída com `RESULTADO: TODOS OK`. Qualquer `FALHOU` bloqueia a coleta de dados até ser entendido.
 
 Este roteiro **não foi executado** durante o desenvolvimento (não havia projeto Supabase disponível); rodá-lo num projeto real é uma verificação que só o autor pode fazer (seção 11).
 
-O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não insere lote em nome de B; A insere e reenvia (upsert) o próprio lote, e um reenvio menor (desatualizado) não encolhe o lote guardado; lotes acima de 1000 eventos ou 1 MiB são recusados; A não lê `events_flat`; A não se coloca em `admins` nem vê os registros de outros; o administrador B lê todos os lotes, consentimentos e `events_flat` (sem duplicatas de lotes reenviados); `delete_my_data(expected)` apaga só os dados de quem chama, é recusada sem usuário e é recusada (sem apagar nada) quando `expected` não é quem está logado; `anon` (sem login) não lê nem escreve nada.
+O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não insere lote em nome de B; A insere e reenvia (upsert) o próprio lote, e um reenvio menor (desatualizado) não encolhe o lote guardado; sem `user_id`, o lote e o consentimento ficam com o `sub` do token; lotes acima de 1000 eventos ou 1 MiB são recusados; A não lê `events_flat`; A não se coloca em `admins` nem vê os registros de outros; o administrador B lê todos os lotes, consentimentos e `events_flat` (sem duplicatas de lotes reenviados); um token sem `sub` (ou com `sub` vazio) não lê nem grava nada; `delete_my_data(expected)` apaga só os dados de quem chama, é recusada sem usuário e é recusada (sem apagar nada) quando `expected` não é quem está logado, de modo que o `sub` de A nunca apaga dados de B; `anon` (sem login), mesmo com o `sub` de outro usuário no token, não lê nem escreve nada.
 
 ## 7. Vercel
 
@@ -156,13 +154,13 @@ select event::text from public.events_flat order by user_id, session_id, seq;
 
 Para baixar: no resultado do SQL Editor há uma opção de exportar/baixar (procure por "Export" / "Download CSV"); no **Table Editor** também há exportação em CSV por tabela. Resultados muito grandes podem ser cortados pelo editor: exporte por partes (por participante ou por sessão, com `where user_id = '...'`) ou use `psql` com a string de conexão do projeto (procure por "Connect" no painel) e `\copy (select ...) to 'arquivo.csv' csv header`.
 
-Os participantes aparecem pelo `user_id` (UUID), não pelo e-mail; o e-mail fica só no Supabase Auth.
+Os participantes aparecem pelo `user_id` (o id do Clerk, texto como `user_...`), não pelo e-mail; o banco não guarda e-mails.
 
 ## 9. Direitos do participante
 
 - **Apagar meus dados:** o jogo chama `public.delete_my_data(<id da conta>)`, que apaga todos os lotes e consentimentos de quem está logado (e só dele). O servidor recusa (erro 42501, nada é apagado) se o token da requisição não for dessa conta, por exemplo se outra conta entrou em outra aba nesse meio-tempo. Depois o jogo apaga o banco local da conta neste navegador.
-  - **Não apaga:** o usuário em Authentication (o **e-mail continua guardado** no Supabase Auth), a linha em `admins` (se houver) e o histórico anterior ao login deste navegador (o banco `tcc-telemetry`, de antes de entrar na conta). O jogo diz isso na tela de confirmação.
-- **Apagar a conta inteira (apagamento completo, inclusive o e-mail):** em Authentication > Users, apague o usuário; os lotes e consentimentos dele são apagados junto (chave estrangeira com `on delete cascade`). Só o autor pode fazer isso, pelo painel.
+  - **Não apaga:** a conta de login (o **e-mail continua guardado** no serviço de login), a linha em `admins` (se houver) e o histórico anterior ao login deste navegador (o banco `tcc-telemetry`, de antes de entrar na conta). O jogo diz isso na tela de confirmação.
+- **Apagar a conta inteira (apagamento completo, inclusive o e-mail):** apagar a conta de login **não** apaga nada no banco (não há ligação entre as tabelas e a lista de usuários). Primeiro apague os dados (pelo jogo, "Apagar meus dados", ou por SQL no painel: `delete from public.event_batches where user_id = '<ID_DO_CLERK>';` e o mesmo em `public.consents` e, se for o caso, `public.admins`); depois apague o usuário no painel do serviço de login. Só o autor pode fazer a parte do painel.
 
 ## 10. Plano gratuito: limites e cuidados
 
@@ -199,21 +197,21 @@ Nada abaixo foi (nem poderia ser) verificado no desenvolvimento, que usou só si
 - [ ] Layout em celular (login, termo, menu de conta).
 - [ ] O banco legado do painel de navegador (o IndexedDB de antes das contas) continua intacto.
 - [ ] **Antes de enviar o repositório ao GitHub (para a Vercel):** o e-mail do autor continua no histórico do git, no commit `46c7836` (a especificação). Decidir se reescreve o histórico ou aceita que ele fique público.
-- [ ] Confirmar que "Apagar meus dados" mantém o usuário e o e-mail no Supabase Auth (esperado); para apagar tudo, apagar o usuário em Authentication > Users (seção 9).
+- [ ] Confirmar que "Apagar meus dados" apaga os lotes e consentimentos da conta e mantém a conta de login (esperado); para apagar tudo, seguir a seção 9.
 - [ ] Confirmar no navegador que, depois do link de confirmação e do link de recuperação, o supabase-js remove os tokens da URL (a barra de endereço não deve ficar com `#access_token=...` ou `?code=...`).
 - [ ] Medir, com uma conta com cerca de 1 hora de histórico (1000 a 1800 linhas), quanto tempo leva o download num navegador novo (limite de 5 s; deve continuar nas aberturas seguintes) e se há travadas no jogo durante o envio em segundo plano e durante a Análise.
 - [ ] Recarregar a página sem internet com a sessão válida e conferir que Jogar funciona; com o token já vencido offline, conferir o que acontece (provavelmente pede para entrar de novo; ver seção 13).
 - [ ] Medir o tempo do download na abertura do banco da conta: o limite de 5 s inclui também a leitura completa do banco local que o jogo faz antes de baixar (para saber o que já tem). Com muito histórico local, essa leitura sozinha pode gastar parte dos 5 s.
 - [ ] Conferir no painel que o limite de linhas por resposta do PostgREST (`max_rows`, em Project Settings > API / Data API) **não é menor que 100**: se for, cada página volta com menos de 100 linhas e o jogo entende que o histórico acabou (o download termina cedo, sem erro).
 - [ ] Acompanhar o tráfego de saída (Usage > Egress) durante a coleta (estimativa na seção 13).
-- [ ] Rodar de novo `rls_check.sql` depois desta revisão (`delete_my_data(expected)` e as verificações 40 a 42 são novas).
+- [ ] Rodar de novo `rls_check.sql` depois desta revisão (o esquema passou a usar o id do Clerk em texto; as verificações 43 a 54 são novas).
 
 ## 13. Limites conhecidos
 
 - **Capacidade do plano gratuito:** cerca de 14 horas-participante no total (seção 10). Acima disso, é preciso exportar e apagar, reduzir eventos ou mudar de plano.
 - **Duas abas na mesma conta** usam o mesmo banco local. Cada aba envia os eventos das próprias sessões (as sessões não se misturam); se uma aba fechar sem conseguir enviar, o que ficou pendente dela é enviado na próxima vez que o banco da conta for aberto numa página nova. Reenvios duplicados são inofensivos (upsert; `events_flat` não repete eventos). Ao **apagar os dados** numa aba, a outra aba tem a conexão com o banco fechada na hora (não bloqueia a exclusão), para de enviar e passa a pedir o aceite do termo de novo; o que ela gravar depois disso se perde (o banco foi apagado). Uma aba aberta com uma versão **antiga** do jogo (anterior a esta correção) não fecha a conexão: nesse caso "Apagar meus dados" apaga a nuvem e mostra "feche as outras abas do jogo e tente de novo" para terminar a parte local. Um envio que já estava a caminho na outra aba no instante da exclusão é coberto por uma segunda exclusão no servidor logo depois; um envio que chegue depois disso (rede muito lenta) não é coberto.
 - **Reenvio menor nunca encolhe** um lote já guardado (a regra mantém o maior); se um lote foi enviado com mais eventos, ele permanece assim.
-- **"Apagar meus dados" não apaga o banco legado** do navegador (o de antes das contas), só os dados da conta na nuvem e o banco local da conta. Também não apaga o usuário nem o e-mail no Supabase Auth (seção 9).
+- **"Apagar meus dados" não apaga o banco legado** do navegador (o de antes das contas), só os dados da conta na nuvem e o banco local da conta. Também não apaga a conta de login nem o e-mail (seção 9).
 - **Token vencido sem internet:** o aceite guardado no navegador permite jogar offline, mas a conta (sessão) continua obrigatória. Se o token da sessão venceu enquanto não havia rede, o jogo pode não conseguir restaurar a sessão e pedir para entrar de novo, o que exige internet. Não verificado com o Supabase real.
 - **Linhas por hora:** como o envio vai a cada ~2 s, cada linha tem cerca de 30 a 60 eventos (1000 a 1800 linhas por hora de jogo). O espaço total quase não muda (seção 10), mas o download num navegador novo tem muitas linhas; ele é feito em páginas de 100 linhas e continua nas aberturas seguintes se não terminar em 5 s.
 - **Download completo a cada carregamento da página:** em cada carregamento (e entrada na conta) o histórico inteiro é baixado de novo para conferir o que falta. Com muito histórico isso custa tempo e dados; as páginas que já estão no navegador são apenas conferidas, não regravadas.

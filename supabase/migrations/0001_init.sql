@@ -4,20 +4,34 @@
 -- the admin list, and the access rules (row-level security).
 --
 -- Run once, as the project owner (the Supabase SQL editor runs as `postgres`).
--- Spec: docs/superpowers/specs/2026-11-03-supabase-design.md, sections 7, 8, 12.
+-- Spec: docs/superpowers/specs/2026-11-03-supabase-design.md, sections 7, 8, 12,
+-- with the identity changes of docs/superpowers/specs/2026-11-05-clerk-auth-design.md
+-- (section 5): users sign in with Clerk, and Supabase is only the database.
 -- Setup guide: docs/supabase-setup.md. RLS check: supabase/tests/rls_check.sql.
+--
+-- Who is the caller: Supabase accepts the Clerk session token (third-party
+-- auth). PostgREST switches to the database role named by the token's `role`
+-- claim (`authenticated` for a signed-in Clerk user) and exposes the verified
+-- claims through auth.jwt(). The caller's id is the `sub` claim: the Clerk
+-- user id, a text such as 'user_...'. Every rule below reads
+-- nullif(auth.jwt() ->> 'sub', ''): a token without `sub` (or with an empty
+-- one) is no user at all and matches no row.
+-- user_id is text and has no foreign key: users live in Clerk, not in the
+-- Supabase Auth user table. Deleting a user in Clerk deletes nothing here; the
+-- only way rows are deleted is delete_my_data(expected) (or SQL by the owner).
 --
 -- Access summary (enforced below by privileges + RLS, both must allow):
 --   player (authenticated, not admin):
---     event_batches  select/insert/update own rows only (user_id = auth.uid()); no delete
+--     event_batches  select/insert/update own rows only (user_id = sub); no delete
 --     consents       select/insert own rows only; no update, no delete
 --     admins         select own row only (to learn whether it is admin); no writes
 --     events_flat    no rows (admins only)
 --     delete_my_data(expected) deletes the caller's batches and consents, only
---       when `expected` is the caller (auth.uid()); otherwise it raises 42501
+--       when `expected` is the caller (the token's sub); otherwise it raises 42501
 --   admin (authenticated, row in admins): additionally reads every row of the
 --     three tables and the events_flat view. Admins do NOT get extra write rights.
---   anon: no access to any table, view or function defined here.
+--   anon: no access to any table, view or function defined here (no grants,
+--     whatever claims its token carries).
 --   admins table: written only by SQL as the owner (postgres), never by the API.
 --
 -- Deviation from spec section 8 ("player only inserts"): players may UPDATE their
@@ -32,14 +46,14 @@ begin;
 -- ---------------------------------------------------------------------------
 
 create table public.event_batches (
-  user_id    uuid        not null default auth.uid()
-                         references auth.users (id) on delete cascade,
+  user_id    text        not null default (nullif(auth.jwt() ->> 'sub', '')),
   session_id text        not null,
   first_seq  integer     not null,
   last_seq   integer     not null,
   events     jsonb       not null,
   created_at timestamptz not null default now(),
   primary key (user_id, session_id, first_seq),
+  constraint event_batches_user_id_len      check (char_length(user_id) between 1 and 200),
   constraint event_batches_first_seq_nonneg check (first_seq >= 0),
   constraint event_batches_seq_order        check (last_seq >= first_seq),
   constraint event_batches_events_is_array  check (jsonb_typeof(events) = 'array'),
@@ -66,11 +80,11 @@ comment on table public.event_batches is
   'One row per batch of NDJSON events (jsonb array, same shape as the local log). Resending the same (user_id, session_id, first_seq) upserts.';
 
 create table public.consents (
-  user_id       uuid        not null default auth.uid()
-                            references auth.users (id) on delete cascade,
+  user_id       text        not null default (nullif(auth.jwt() ->> 'sub', '')),
   terms_version text        not null,
   accepted_at   timestamptz not null default now(),
   primary key (user_id, terms_version),
+  constraint consents_user_id_len       check (char_length(user_id) between 1 and 200),
   constraint consents_terms_version_len check (char_length(terms_version) between 1 and 100)
 );
 
@@ -78,11 +92,12 @@ comment on table public.consents is
   'One row per accepted version of the consent terms. accepted_at is set by the server (clients cannot write it).';
 
 create table public.admins (
-  user_id uuid primary key references auth.users (id) on delete cascade
+  user_id text primary key,
+  constraint admins_user_id_len check (char_length(user_id) between 1 and 200)
 );
 
 comment on table public.admins is
-  'Users listed here are administrators. Filled only by SQL as the owner, never by the game.';
+  'Users listed here are administrators (user_id = Clerk user id). Filled only by SQL as the owner, never by the game.';
 
 -- ---------------------------------------------------------------------------
 -- Privileges
@@ -98,7 +113,7 @@ revoke all on table public.admins        from public, anon, authenticated;
 -- event_batches: created_at is not writable by clients (server default only).
 -- UPDATE lists the key columns too because an upsert (insert ... on conflict
 -- do update) from PostgREST sets every column it was sent; RLS WITH CHECK keeps
--- user_id = auth.uid() on the new row.
+-- user_id = the token's sub on the new row.
 grant select on table public.event_batches to authenticated;
 grant insert (user_id, session_id, first_seq, last_seq, events)
   on table public.event_batches to authenticated;
@@ -120,7 +135,8 @@ alter table public.event_batches enable row level security;
 alter table public.consents      enable row level security;
 alter table public.admins        enable row level security;
 
--- is_admin(): true when the caller (auth.uid()) has a row in admins.
+-- is_admin(): true when the caller (the token's sub) has a row in admins;
+-- false without a token or without sub.
 -- security definer so it can read admins without going through admins' own
 -- RLS (avoids recursion); search_path is empty and every name is qualified.
 -- It takes no argument, so it can only answer about the caller.
@@ -132,18 +148,19 @@ security definer
 set search_path = ''
 as $$
   select exists (
-    select 1 from public.admins a where a.user_id = auth.uid()
+    select 1 from public.admins a where a.user_id = nullif(auth.jwt() ->> 'sub', '')
   );
 $$;
 
 revoke all on function public.is_admin() from public, anon, authenticated;
 grant execute on function public.is_admin() to authenticated;
 
--- event_batches policies. `(select auth.uid())` is evaluated once per query
--- (Supabase's recommended form), same meaning as auth.uid().
+-- event_batches policies. `(select nullif(auth.jwt() ->> 'sub', ''))` is
+-- evaluated once per query (Supabase's recommended form). When it is null (no
+-- token, no sub, empty sub) `user_id = null` is never true: no rows.
 create policy event_batches_select_own on public.event_batches
   for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 create policy event_batches_select_admin on public.event_batches
   for select to authenticated
@@ -151,12 +168,12 @@ create policy event_batches_select_admin on public.event_batches
 
 create policy event_batches_insert_own on public.event_batches
   for insert to authenticated
-  with check (user_id = (select auth.uid()));
+  with check (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 create policy event_batches_update_own on public.event_batches
   for update to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
+  using (user_id = (select nullif(auth.jwt() ->> 'sub', '')))
+  with check (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 -- No delete policy (and no delete privilege): deletion only via delete_my_data(expected).
 
@@ -187,7 +204,7 @@ create trigger event_batches_keep_bigger
 -- consents policies.
 create policy consents_select_own on public.consents
   for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 create policy consents_select_admin on public.consents
   for select to authenticated
@@ -195,12 +212,12 @@ create policy consents_select_admin on public.consents
 
 create policy consents_insert_own on public.consents
   for insert to authenticated
-  with check (user_id = (select auth.uid()));
+  with check (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 -- admins policies: read only, never write.
 create policy admins_select_own on public.admins
   for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select nullif(auth.jwt() ->> 'sub', '')));
 
 create policy admins_select_admin on public.admins
   for select to authenticated
@@ -209,16 +226,19 @@ create policy admins_select_admin on public.admins
 -- ---------------------------------------------------------------------------
 -- delete_my_data(expected): the player's right to erase (spec section 12).
 -- security definer because players have no delete privilege/policy; it deletes
--- only rows of auth.uid() and refuses to run without a signed-in user.
--- `expected` is the account the game means to erase (the user id it shows as
--- signed in). If the request's token belongs to anyone else (another account
--- signed in meanwhile, in another tab), it raises 42501 and deletes nothing,
--- instead of erasing the wrong account.
--- The admins row (if any) and the auth user (e-mail) are kept; remove them by
--- SQL / Authentication > Users if wanted.
+-- only rows of the token's sub and refuses to run without one (no token, no
+-- sub, empty sub).
+-- `expected` is the account the game means to erase (the Clerk user id it
+-- shows as signed in). If the request's token belongs to anyone else (another
+-- account signed in meanwhile, in another tab), it raises 42501 and deletes
+-- nothing, instead of erasing the wrong account.
+-- The admins row (if any) is kept (remove it by SQL if wanted). The Clerk
+-- account (e-mail) is outside this database; deleting it in Clerk does not
+-- delete these rows (there is no foreign key), so this function is the only
+-- way a player's rows are erased.
 -- ---------------------------------------------------------------------------
 
-create function public.delete_my_data(expected uuid)
+create function public.delete_my_data(expected text)
 returns void
 language plpgsql
 volatile
@@ -226,7 +246,7 @@ security definer
 set search_path = ''
 as $$
 declare
-  uid uuid := auth.uid();
+  uid text := nullif(auth.jwt() ->> 'sub', '');
 begin
   if uid is null then
     raise exception 'delete_my_data: no authenticated user'
@@ -241,8 +261,8 @@ begin
 end;
 $$;
 
-revoke all on function public.delete_my_data(uuid) from public, anon, authenticated;
-grant execute on function public.delete_my_data(uuid) to authenticated;
+revoke all on function public.delete_my_data(text) from public, anon, authenticated;
+grant execute on function public.delete_my_data(text) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- events_flat: one row per event, for research queries and export (admins).
@@ -307,7 +327,7 @@ from (
   -- current_user here is the CALLER (security_invoker). The allowlisted roles
   -- already bypass RLS and can read event_batches directly, so they gain
   -- nothing new; they are listed so the dashboard SQL editor (runs as
-  -- postgres, where auth.uid() is null) can export. API users (anon,
+  -- postgres, with no token, so is_admin() is false) can export. API users (anon,
   -- authenticated) get rows only through is_admin().
   where public.is_admin()
      or current_user in ('postgres', 'service_role', 'supabase_admin')
