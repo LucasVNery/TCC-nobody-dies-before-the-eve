@@ -8,14 +8,19 @@ export interface ClerkSessionUser {
 
 /**
  * The game's view of Clerk: who is signed in and the session token for Supabase. Never throws to
- * callers except load() (CloudError('network'), retryable) and signOut() (the Clerk error).
+ * callers except load() (CloudError('network'), retryable), getToken() (CloudError('network') when offline)
+ * and signOut() (the Clerk error).
  */
 export interface ClerkSession {
   /** Loads Clerk once; a failed load rejects with CloudError('network') and the next call tries again. */
   load(): Promise<void>;
   /** null while Clerk is not loaded or nobody is signed in. */
   getUser(): ClerkSessionUser | null;
-  /** The current session token (Clerk caches and refreshes it); null when unavailable, never rejects. */
+  /**
+   * The current session token (Clerk caches and refreshes it); null when there is no session or Clerk
+   * refuses one. Rejects only with CloudError('network'), when the token could not be fetched for lack of
+   * network (clerk-js's ClerkOfflineError, or any failure while the browser reports itself offline).
+   */
   getToken(): Promise<string | null>;
   /** Opens Clerk's sign-in window; does nothing while Clerk is not loaded. */
   openSignIn(): void;
@@ -32,8 +37,22 @@ export interface ClerkLike {
   readonly session: { getToken(): Promise<string | null> } | null | undefined;
   load(options: ClerkLoadOptions): Promise<void>;
   openSignIn(): void;
-  signOut(): Promise<void>;
+  /** With a callback, clerk-js calls it after signing out instead of navigating to its after-sign-out URL. */
+  signOut(callback?: () => void | Promise<unknown>): Promise<void>;
   addListener(listener: () => void): () => void;
+}
+
+/** clerk-js's ClerkOfflineError code (`ClerkOfflineError.is` checks it too, across bundles). */
+const CLERK_OFFLINE_CODE = 'clerk_offline';
+
+/** A token failure caused by the connection: Clerk's offline error, or any failure while the browser is offline. */
+function isOfflineError(err: unknown): boolean {
+  if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === CLERK_OFFLINE_CODE) return true;
+  try {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+  } catch {
+    return false;
+  }
 }
 
 /** The options the game passes to Clerk's load(). */
@@ -164,6 +183,8 @@ export function createClerkSession(publishableKey: string, loader: ClerkLoader =
         return (await session.getToken()) || null;
       } catch (err) {
         console.warn('[clerk] could not get the session token', err);
+        // The connection, not the session: callers must see 'network' (an offline reload uses the saved terms).
+        if (isOfflineError(err)) throw new CloudError('network', 'could not get the session token: offline');
         return null;
       }
     },
@@ -180,7 +201,9 @@ export function createClerkSession(publishableKey: string, loader: ClerkLoader =
 
     async signOut() {
       if (!clerk) return;
-      await clerk.signOut();
+      // With a callback clerk-js runs it instead of navigating to its after-sign-out URL (a full reload
+      // to '/'): the page stays, with the menu's "Você saiu da conta." notice and the path and query.
+      await clerk.signOut(() => {});
     },
 
     onChange(listener) {

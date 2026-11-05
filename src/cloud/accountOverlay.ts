@@ -1,4 +1,4 @@
-// DOM base of the account panels (login, consent, confirmations), in the AnalysisPanel style.
+// DOM base of the account panels (consent, import offer, confirmations), in the AnalysisPanel style.
 // Each panel is created when opened and destroyed when closed: no element, style or listener outlives it.
 
 const CSS = `
@@ -190,7 +190,7 @@ export class AccountOverlay {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    // Typed passwords leave the DOM with the inputs; clear them first anyway.
+    // No panel has inputs now (sign-in is Clerk's window); any typed text would be cleared before leaving the DOM.
     this.box.querySelectorAll('input').forEach((input) => {
       input.value = '';
     });

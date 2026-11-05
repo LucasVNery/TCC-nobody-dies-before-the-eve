@@ -111,7 +111,7 @@ export function createSupabaseCloudApi(config: CloudConfig, session: ClerkSessio
 
   /**
    * The signed-in user, for a data call: refused ('auth', no request made) when Clerk has no user or
-   * no token right now.
+   * no token right now; 'network' (no request either) when the token could not be fetched offline.
    */
   async function requireUser(): Promise<CloudUser> {
     const user = toCloudUser(session.getUser());

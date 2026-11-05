@@ -6,24 +6,40 @@ import { MENU_ITEMS, firstEnabled, type MenuId, type MenuItem } from './menuMode
 
 /** Longest e-mail shown in full on the Sair button; longer ones are cut with an ellipsis. */
 export const EMAIL_LABEL_MAX = 24;
-/** Supabase's default minimum password length. */
-export const MIN_PASSWORD_LENGTH = 6;
 
 export function shortEmail(email: string, max = EMAIL_LABEL_MAX): string {
   return email.length <= max ? email : `${email.slice(0, max - 1)}…`;
 }
 
 /**
- * Local mode: the current menu. Cloud mode without a session: Entrar/Criar conta and Como jogar; Jogar and
- * Análise disabled (the game never plays into, nor shows, the pre-login database in cloud mode). With a session: Jogar (leads to the
- * consent term until it is accepted), Sair (<e-mail>) and Apagar meus dados.
+ * Where the account service is, beyond AccountState (cloud mode, nobody signed in): Clerk still loading,
+ * or it failed (could not load, or its sign-in window never showed up) and a retry is offered.
  */
-export function buildMenuItems(state: AccountState): MenuItem[] {
+export interface CloudStatus {
+  loading?: boolean;
+  failed?: boolean;
+  /** The user is this browser's last one, restored because Clerk could not load: plays, nothing syncs. */
+  offline?: boolean;
+}
+
+/**
+ * Local mode: the current menu. Cloud mode without a session: Entrar / Criar conta (opens Clerk's window)
+ * and Como jogar; Jogar and Análise disabled (the game never plays into, nor shows, the pre-login database in
+ * cloud mode). While Clerk loads, a disabled "carregando conta…" stands in for Entrar; after a failure, a
+ * retry entry. With a session: Jogar (leads to the consent term until it is accepted), Sair (<e-mail>) and
+ * Apagar meus dados (the status flags no longer matter then).
+ */
+export function buildMenuItems(state: AccountState, status: CloudStatus = {}): MenuItem[] {
   if (state.mode === 'local') return MENU_ITEMS.map((i) => ({ ...i }));
   if (!state.user) {
+    const first: MenuItem = status.loading
+      ? { id: 'login', label: 'carregando conta…', enabled: false }
+      : status.failed
+        ? { id: 'retry', label: 'sem conexão — tentar de novo', enabled: true }
+        : { id: 'login', label: 'Entrar / Criar conta', enabled: true };
     // Análise needs an owner too: signed out it would show the pre-login history.
     return [
-      { id: 'login', label: 'Entrar / Criar conta', enabled: true },
+      first,
       { id: 'play', label: 'Jogar (entre primeiro)', enabled: false },
       { id: 'howto', label: 'Como jogar', enabled: true },
       { id: 'analysis', label: 'Análise (entre primeiro)', enabled: false },
@@ -33,7 +49,8 @@ export function buildMenuItems(state: AccountState): MenuItem[] {
     { id: 'play', label: 'Jogar', enabled: true },
     { id: 'howto', label: 'Como jogar', enabled: true },
     { id: 'analysis', label: 'Análise', enabled: true },
-    { id: 'logout', label: `Sair (${shortEmail(state.user.email)})`, enabled: true },
+    // A Clerk account may have no e-mail (it is '' then).
+    { id: 'logout', label: state.user.email ? `Sair (${shortEmail(state.user.email)})` : 'Sair', enabled: true },
     { id: 'deleteData', label: 'Apagar meus dados', enabled: true },
   ];
 }
@@ -53,39 +70,22 @@ export function keepSelection(items: readonly MenuItem[], id: MenuId | undefined
   return i < 0 ? firstEnabled(items) : i;
 }
 
-/** One line under the title saying where the history goes. */
-export function accountStatusLine(state: AccountState, simulated: boolean): string {
+/** One line under the title saying where the history goes (and, signed out, how the account service is doing). */
+export function accountStatusLine(state: AccountState, simulated: boolean, status: CloudStatus = {}): string {
   if (state.mode === 'local') return 'modo local (sem conta)';
   const where = simulated ? 'nuvem simulada' : 'nuvem';
-  if (!state.user) return `${where} · entre para jogar`;
-  return `${where} · ${shortEmail(state.user.email, 40)}${state.termsAccepted ? '' : ' · termo pendente'}`;
+  if (!state.user) {
+    if (status.loading) return `${where} · carregando conta…`;
+    if (status.failed) return `${where} · sem conexão com o serviço de contas`;
+    return `${where} · entre para jogar`;
+  }
+  const who = state.user.email ? shortEmail(state.user.email, 40) : 'conta conectada';
+  return `${where} · ${who}${state.termsAccepted ? '' : ' · termo pendente'}${status.offline ? ' · offline (sem envio)' : ''}`;
 }
-
-/** Which action failed: sign-up and new password have their own texts (a session cannot be "expired" there). */
-export type ErrorContext = 'default' | 'signUp' | 'newPassword';
 
 /** The message shown for a failed cloud call, from CloudError.kind (any other error counts as 'other'). */
-export function cloudErrorMessage(err: unknown, context: ErrorContext = 'default'): string {
+export function cloudErrorMessage(err: unknown): string {
   const kind = err instanceof CloudError ? err.kind : 'other';
   if (kind === 'network') return 'Sem conexão com o servidor. Verifique a internet e tente novamente.';
-  if (context === 'signUp') {
-    return 'Não foi possível criar a conta. Confira o e-mail e use uma senha de pelo menos 6 caracteres, ou entre se já tem conta.';
-  }
-  if (context === 'newPassword') return 'Não foi possível trocar a senha. Use uma senha nova de pelo menos 6 caracteres.';
-  return kind === 'auth' ? 'E-mail ou senha inválidos, ou sessão expirada.' : 'Algo deu errado. Tente novamente.';
-}
-
-/** A problem with the typed e-mail, or null. */
-export function emailProblem(email: string): string | null {
-  const e = email.trim();
-  if (!e) return 'Digite o e-mail.';
-  if (!/^[^\s@]+@[^\s@]+$/.test(e)) return 'E-mail inválido.';
-  return null;
-}
-
-/** A problem with a new password (sign-up, new password), or null. */
-export function newPasswordProblem(password: string, confirm?: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) return `A senha precisa de pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`;
-  if (confirm !== undefined && confirm !== password) return 'As senhas não conferem.';
-  return null;
+  return kind === 'auth' ? 'Sessão expirada. Entre na conta de novo.' : 'Algo deu errado. Tente novamente.';
 }

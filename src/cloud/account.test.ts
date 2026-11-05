@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { Account, accountDbName, accountFromRegistry, ACCOUNT_REGISTRY_KEY, termsCacheKey, type AccountState, type TermsStorage } from './account';
+import { Account, accountDbName, accountFromRegistry, ACCOUNT_REGISTRY_KEY, LAST_USER_KEY, SIGNOUT_PENDING_KEY, termsCacheKey, type AccountState, type TermsStorage } from './account';
+import { createClerkSession, type ClerkLike, type ClerkLoader, type ClerkLoadOptions } from './clerkSession';
+import { createSupabaseCloudApi } from './supabaseCloudApi';
+import { playAction } from '../scenes/menu/menuState';
 import { FakeCloudApi } from './fakeCloudApi';
 import { CloudError, type CloudUser } from './cloudApi';
 import { TERMS_VERSION } from './consentText';
@@ -402,7 +405,7 @@ describe('Account', () => {
       const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
       const user = await signIn(account, mail('ana'));
       await account.acceptTerms();
-      expect([...storage.map]).toEqual([[termsCacheKey(user.id), TERMS_VERSION]]);
+      expect([...storage.map].filter(([k]) => k !== LAST_USER_KEY)).toEqual([[termsCacheKey(user.id), TERMS_VERSION]]);
       expect(termsCacheKey(user.id)).toBe(`tcc-terms-${user.id}`);
 
       const offline = await reload(api, storage, 'network');
@@ -459,6 +462,413 @@ describe('Account', () => {
       await other.init();
       await other.acceptTerms();
       expect(other.state.termsAccepted).toBe(true);
+    });
+  });
+
+  describe('offline reload: last signed-in user (I1)', () => {
+    function memoryStorage(): TermsStorage & { map: Map<string, string> } {
+      const map = new Map<string, string>();
+      return {
+        map,
+        getItem: (k) => map.get(k) ?? null,
+        setItem: (k, v) => void map.set(k, v),
+        removeItem: (k) => void map.delete(k),
+      };
+    }
+
+    /** Signs `email` in, accepts the terms, and returns the user (the browser now remembers them). */
+    async function playedOnce(api: FakeCloudApi, storage: TermsStorage, email: string): Promise<CloudUser> {
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      const user = await signIn(account, email);
+      await account.acceptTerms();
+      account.dispose();
+      return user;
+    }
+
+    /** A reload while Clerk cannot load (offline, or Clerk down). */
+    async function offlineReload(api: FakeCloudApi, storage: TermsStorage, idb?: IDBFactory): Promise<Account> {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(api, 'getUser').mockRejectedValue(new CloudError('network', 'could not load Clerk'));
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage, ...(idb ? { idb: () => idb } : {}) });
+      await account.init();
+      return account;
+    }
+
+    it('every sign-in remembers the user (id and e-mail) under tcc-last-user', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      const ana = await signIn(account, mail('ana'));
+      expect(LAST_USER_KEY).toBe('tcc-last-user');
+      expect(JSON.parse(storage.getItem(LAST_USER_KEY)!)).toEqual({ id: ana.id, email: ana.email });
+      const bia = await signIn(account, mail('bia'));
+      expect(JSON.parse(storage.getItem(LAST_USER_KEY)!)).toEqual({ id: bia.id, email: bia.email });
+    });
+
+    it('a reload with Clerk unreachable restores the last user with the saved terms: the player can play, nothing syncs', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const factory = new IDBFactory() as unknown as IDBFactory;
+      const ana = await playedOnce(api, storage, mail('ana'));
+      const pushes = vi.spyOn(api, 'pushBatches');
+      const terms = vi.spyOn(api, 'acceptedTermsVersion');
+
+      const account = await offlineReload(api, storage, factory);
+      expect(account.state).toEqual({ mode: 'cloud', user: ana, isAdmin: false, termsAccepted: true });
+      expect(playAction(account.state)).toBe('start');
+      expect(account.loadError?.kind).toBe('network');
+      expect(account.canSync(ana.id)).toBe(false);
+      expect(terms).not.toHaveBeenCalled(); // no session: the server is not asked
+
+      // The game plays on the account's own database; nothing leaves the browser.
+      const opened = await openAccountStore(account, { factory, timers: { set: () => 0, clear: () => {} } });
+      expect(opened?.persistent).toBe(true);
+      await opened!.store.append([ev(ana.id, 's', 0)]);
+      opened!.store.close();
+      await idle();
+      expect(pushes).not.toHaveBeenCalled();
+      expect((await factory.databases()).map((d) => d.name)).toEqual([accountDbName(ana.id)]);
+    });
+
+    it('the cached user never enables the admin tools, nor server actions', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      api.setAdmin(ana.id);
+      const isAdmin = vi.spyOn(api, 'isAdmin');
+      const account = await offlineReload(api, storage);
+      expect(account.state.user?.id).toBe(ana.id);
+      expect(account.state.isAdmin).toBe(false);
+      expect(isAdmin).not.toHaveBeenCalled();
+      await expect(account.acceptTerms()).rejects.toMatchObject({ kind: 'network' });
+      await expect(account.deleteMyData()).rejects.toMatchObject({ kind: 'network' });
+      expect(api.batchesOf(ana.id)).toEqual([]); // untouched
+    });
+
+    it('without saved terms the cached user still needs the term (which needs the network)', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      storage.removeItem(termsCacheKey(ana.id));
+      const account = await offlineReload(api, storage);
+      expect(account.state.user?.id).toBe(ana.id);
+      expect(playAction(account.state)).toBe('terms');
+    });
+
+    it('once Clerk loads, the same user is confirmed: details from the server, sync resumes', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      api.setAdmin(ana.id);
+      const account = await offlineReload(api, storage);
+      const token = account.signInToken;
+      vi.mocked(api.getUser).mockRestore();
+      await account.retry();
+      await account.whenReady();
+      expect(account.loadError).toBeNull();
+      expect(account.state).toEqual({ mode: 'cloud', user: ana, isAdmin: true, termsAccepted: true });
+      expect(account.canSync(ana.id)).toBe(true);
+      expect(account.signInToken).toBe(token); // the same sign-in
+    });
+
+    it('when the network comes back, Clerk is loaded again by itself (only after a failed load)', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      let online!: () => void;
+      const onOnline = vi.fn((l: () => void) => {
+        online = l;
+        return () => {};
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const getUser = vi.spyOn(api, 'getUser').mockRejectedValueOnce(new CloudError('network', 'could not load Clerk'));
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage, onOnline });
+      await account.init();
+      expect(account.offline).toBe(true);
+      online();
+      await vi.waitFor(() => expect(account.offline).toBe(false));
+      await account.whenReady();
+      expect(account.canSync(ana.id)).toBe(true);
+      expect(getUser).toHaveBeenCalledTimes(2);
+      online(); // loaded: nothing more to do
+      await idle();
+      expect(getUser).toHaveBeenCalledTimes(2);
+      account.dispose();
+    });
+
+    it('once Clerk reports another user, the cached one is dropped and replaced', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      const account = await offlineReload(api, storage);
+      const bia = api.signInAs(mail('bia')); // Clerk loaded (another tab signed bia in): its session wins
+      expect(account.state.user).toEqual(bia);
+      expect(account.state.termsAccepted).toBe(false);
+      expect(account.canSync(ana.id)).toBe(false);
+      expect(JSON.parse(storage.getItem(LAST_USER_KEY)!)).toEqual({ id: bia.id, email: bia.email });
+      vi.mocked(api.getUser).mockRestore();
+      await account.retry();
+      await account.whenReady();
+      expect(account.state.user).toEqual(bia);
+      expect(account.canSync(bia.id)).toBe(true);
+    });
+
+    it('once Clerk loads with nobody signed in, the cached user is dropped and forgotten', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const ana = await playedOnce(api, storage, mail('ana'));
+      await api.signOut(); // ended in Clerk meanwhile (expired, another device)
+      const account = await offlineReload(api, storage);
+      expect(account.state.user?.id).toBe(ana.id);
+      vi.mocked(api.getUser).mockRestore();
+      await account.retry();
+      expect(account.state.user).toBeNull();
+      expect(account.canSync(ana.id)).toBe(false);
+      expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+      expect(storage.getItem(termsCacheKey(ana.id))).toBe(TERMS_VERSION); // the saved acceptance stays for a later sign-in
+    });
+
+    it('signOut forgets the last user, online and offline', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      await signIn(account, mail('ana'));
+      await account.signOut();
+      expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+
+      const ana = await playedOnce(api, storage, mail('ana'));
+      const offline = await offlineReload(api, storage);
+      expect(offline.state.user?.id).toBe(ana.id);
+      await offline.signOut();
+      expect(offline.state.user).toBeNull();
+      expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+      const again = await offlineReload(api, storage);
+      expect(again.state.user).toBeNull();
+    });
+
+    describe('Sair while Clerk is not loaded (R1), with the real ClerkSession', () => {
+      const CONFIG = { supabaseUrl: 'http://localhost:54321', anonKey: 'test-anon-key', clerkPublishableKey: 'test-clerk-key' };
+
+      /** A Clerk stand-in shaped like clerk-js: its session survives until its own signOut runs. */
+      class FakeClerk implements ClerkLike {
+        loaded = true;
+        user: ClerkLike['user'];
+        private readonly listeners = new Set<() => void>();
+        readonly signOut = vi.fn(async (callback?: () => unknown) => {
+          this.user = null;
+          for (const l of this.listeners) l();
+          if (callback) await callback();
+        });
+        readonly openSignIn = vi.fn();
+        constructor(user: CloudUser | null) {
+          this.user = user ? { id: user.id, primaryEmailAddress: { emailAddress: user.email } } : null;
+        }
+        get session(): ClerkLike['session'] {
+          return this.user ? { getToken: async () => 'token' } : null;
+        }
+        async load(_options: ClerkLoadOptions): Promise<void> {}
+        addListener(listener: () => void): () => void {
+          this.listeners.add(listener);
+          listener(); // as clerk-js: an initial emit on registration
+          return () => void this.listeners.delete(listener);
+        }
+      }
+
+      /** Clerk's loader: offline (rejects) until `goOnline(clerk)`; `hold()` keeps the next load in flight. */
+      function network() {
+        let clerk: FakeClerk | null = null;
+        let gate: Promise<void> | null = null;
+        let release = (): void => {};
+        const loader: ClerkLoader = async () => {
+          if (gate) await gate;
+          if (!clerk) throw new Error('offline');
+          return clerk;
+        };
+        return {
+          loader,
+          goOnline: (c: FakeClerk) => void (clerk = c),
+          hold: () => void (gate = new Promise<void>((r) => (release = r))),
+          release: () => {
+            gate = null;
+            release();
+          },
+        };
+      }
+
+      const ANA: CloudUser = { id: 'user_ana', email: mail('ana') };
+
+      /** A browser where ANA signed in and accepted the terms earlier. */
+      function rememberedAna(): TermsStorage & { map: Map<string, string> } {
+        const storage = memoryStorage();
+        storage.setItem(LAST_USER_KEY, JSON.stringify(ANA));
+        storage.setItem(termsCacheKey(ANA.id), TERMS_VERSION);
+        return storage;
+      }
+
+      async function boot(net: ReturnType<typeof network>, storage: TermsStorage) {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })));
+        let online = (): void => {};
+        const api = createSupabaseCloudApi(CONFIG, createClerkSession(CONFIG.clerkPublishableKey, net.loader));
+        const account = new Account(api, {
+          defer: queueMicrotask,
+          termsStorage: storage,
+          onOnline: (l) => {
+            online = l;
+            return () => {};
+          },
+        });
+        await account.init();
+        return { account, online: () => online() };
+      }
+
+      afterEach(() => vi.unstubAllGlobals());
+
+      it('the network coming back does not sign the user back in: Clerk is signed out first', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const { account, online } = await boot(net, storage);
+        expect(account.offline).toBe(true);
+        await account.signOut();
+        expect(account.state.user).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).not.toBeNull();
+
+        const clerk = new FakeClerk(ANA); // Clerk's own session is still there
+        net.goOnline(clerk);
+        online();
+        await vi.waitFor(() => expect(clerk.signOut).toHaveBeenCalledTimes(1));
+        await account.whenReady();
+        expect(typeof clerk.signOut.mock.calls[0][0]).toBe('function'); // no navigation
+        expect(account.state.user).toBeNull();
+        expect(account.canSync(ANA.id)).toBe(false);
+        expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull();
+        account.dispose();
+      });
+
+      it('the pending sign-out survives a reload', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const first = await boot(net, storage);
+        await first.account.signOut();
+        first.account.dispose();
+
+        const clerk = new FakeClerk(ANA);
+        net.goOnline(clerk);
+        const { account } = await boot(net, storage); // reloaded, online now
+        await account.whenReady();
+        expect(clerk.signOut).toHaveBeenCalledTimes(1);
+        expect(account.state.user).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull();
+        expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+      });
+
+      it('a Sair clicked while a Clerk load is in flight is not undone by that load', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const { account } = await boot(net, storage);
+        const clerk = new FakeClerk(ANA);
+        net.goOnline(clerk);
+        net.hold();
+        const retrying = account.retry(); // e.g. the menu's retry on return
+        await account.signOut();
+        net.release();
+        await retrying;
+        await account.whenReady();
+        expect(clerk.signOut).toHaveBeenCalledTimes(1);
+        expect(account.state.user).toBeNull();
+        expect(storage.getItem(LAST_USER_KEY)).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull();
+      });
+
+      it('Clerk loading with nobody signed in just clears the pending sign-out', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const { account, online } = await boot(net, storage);
+        await account.signOut();
+        const clerk = new FakeClerk(null);
+        net.goOnline(clerk);
+        online();
+        await vi.waitFor(() => expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull());
+        expect(clerk.signOut).not.toHaveBeenCalled();
+        expect(account.state.user).toBeNull();
+        expect(account.loadError).toBeNull();
+      });
+
+      it('a pending sign-out that Clerk refuses stays pending and keeps the user out', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const { account } = await boot(net, storage);
+        await account.signOut();
+        const clerk = new FakeClerk(ANA);
+        clerk.signOut.mockRejectedValueOnce(new Error('clerk refused'));
+        net.goOnline(clerk);
+        await account.retry();
+        expect(account.state.user).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).not.toBeNull();
+        expect(account.loadError).not.toBeNull(); // retryable
+        await account.retry();
+        expect(clerk.signOut).toHaveBeenCalledTimes(2);
+        expect(account.state.user).toBeNull();
+        expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull();
+      });
+
+      it('after the pending sign-out is done, a new sign-in is followed normally', async () => {
+        const net = network();
+        const storage = rememberedAna();
+        const { account, online } = await boot(net, storage);
+        await account.signOut();
+        const clerk = new FakeClerk(ANA);
+        net.goOnline(clerk);
+        online();
+        await vi.waitFor(() => expect(storage.getItem(SIGNOUT_PENDING_KEY)).toBeNull());
+        const bia = { id: 'user_bia', primaryEmailAddress: { emailAddress: mail('bia') } };
+        clerk.user = bia;
+        clerk.signOut.mockClear();
+        (clerk as unknown as { listeners: Set<() => void> }).listeners.forEach((l) => l());
+        expect(account.state.user?.id).toBe('user_bia');
+        expect(clerk.signOut).not.toHaveBeenCalled();
+      });
+    });
+
+    it('a failed sign-out keeps the last user remembered', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      const ana = await signIn(account, mail('ana'));
+      vi.spyOn(api, 'signOut').mockRejectedValueOnce(new CloudError('network', 'offline'));
+      await expect(account.signOut()).rejects.toBeInstanceOf(CloudError);
+      expect(JSON.parse(storage.getItem(LAST_USER_KEY)!).id).toBe(ana.id);
+    });
+
+    it('a non-network load failure, a broken storage or a malformed entry restore nobody', async () => {
+      const api = new FakeCloudApi();
+      const storage = memoryStorage();
+      await playedOnce(api, storage, mail('ana'));
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(api, 'getUser').mockRejectedValue(new CloudError('other', 'bad key'));
+      const other = new Account(api, { defer: queueMicrotask, termsStorage: storage });
+      await other.init();
+      expect(other.state.user).toBeNull();
+      vi.restoreAllMocks();
+
+      storage.setItem(LAST_USER_KEY, '{not json');
+      expect((await offlineReload(api, storage)).state.user).toBeNull();
+      storage.setItem(LAST_USER_KEY, JSON.stringify({ id: 42 }));
+      expect((await offlineReload(api, storage)).state.user).toBeNull();
+
+      const broken: TermsStorage = {
+        getItem: () => {
+          throw new Error('denied');
+        },
+        setItem: () => {
+          throw new Error('denied');
+        },
+        removeItem: () => {
+          throw new Error('denied');
+        },
+      };
+      expect((await offlineReload(api, broken)).state.user).toBeNull();
     });
   });
 

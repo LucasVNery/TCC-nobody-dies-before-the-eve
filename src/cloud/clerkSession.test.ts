@@ -17,7 +17,7 @@ class FakeClerk implements ClerkLike {
   tokenError: Error | null = null;
   readonly listeners = new Set<() => void>();
   readonly openSignIn = vi.fn();
-  readonly signOut = vi.fn(async () => {
+  readonly signOut = vi.fn(async (_callback?: () => unknown) => {
     this.setUser(null);
   });
 
@@ -122,7 +122,7 @@ describe('createClerkSession', () => {
     expect(session.getUser()).toEqual({ id: 'user_bia', email: null });
   });
 
-  it('getToken asks Clerk on every call and resolves null instead of throwing', async () => {
+  it('getToken asks Clerk on every call and resolves null on a failure that is not the network', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const clerk = new FakeClerk();
     clerk.user = { id: 'user_ana' };
@@ -134,8 +134,42 @@ describe('createClerkSession', () => {
     expect(await session.getToken()).toBe('token-2');
     clerk.token = '';
     expect(await session.getToken()).toBeNull();
-    clerk.tokenError = new Error('network down');
+    clerk.tokenError = new Error('session revoked');
     expect(await session.getToken()).toBeNull();
+  });
+
+  it('getToken rejects with a network CloudError when the token failed for lack of network (M2)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const clerk = new FakeClerk();
+    clerk.user = { id: 'user_ana' };
+    const session = createClerkSession(KEY, async () => clerk);
+    await session.load();
+    // clerk-js's ClerkOfflineError (matched by its code, as ClerkOfflineError.is does across bundles)
+    clerk.tokenError = Object.assign(new Error('offline'), { code: 'clerk_offline', clerkRuntimeError: true });
+    await expect(session.getToken()).rejects.toSatisfy((e: unknown) => e instanceof CloudError && e.kind === 'network');
+    // Any failure while the browser says it is offline
+    clerk.tokenError = new Error('Failed to fetch');
+    vi.stubGlobal('navigator', { onLine: false });
+    try {
+      await expect(session.getToken()).rejects.toMatchObject({ kind: 'network' });
+      // A signed-out session stays null (auth), offline or not
+      clerk.setUser(null);
+      expect(await session.getToken()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('signOut tells Clerk not to navigate, so the page (and its notice, path and query) stays (M1)', async () => {
+    const clerk = new FakeClerk();
+    const session = createClerkSession(KEY, async () => clerk);
+    await session.load();
+    clerk.setUser({ id: 'user_ana' });
+    await session.signOut();
+    expect(clerk.signOut).toHaveBeenCalledTimes(1);
+    const [callback] = clerk.signOut.mock.calls[0];
+    expect(typeof callback).toBe('function'); // clerk-js runs the callback instead of navigating
+    await expect(Promise.resolve(callback!())).resolves.toBeUndefined();
   });
 
   it('every session change reaches the listeners (the initial one included) until unsubscribed', async () => {

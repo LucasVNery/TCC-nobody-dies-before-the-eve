@@ -34,7 +34,22 @@ export function termsCacheKey(userId: string): string {
   return `tcc-terms-${userId}`;
 }
 
-/** The slice of Web Storage the terms cache uses. */
+/**
+ * localStorage key holding the last signed-in user of this browser (`{"id","email"}`): when Clerk cannot
+ * load (offline, Clerk down) the Account restores that user, unconfirmed, so the saved terms and the
+ * account's local database still let the player play. Written on every sign-in, removed on sign-out and
+ * when Clerk loads with nobody signed in.
+ */
+export const LAST_USER_KEY = 'tcc-last-user';
+
+/**
+ * localStorage key set when Sair is clicked while Clerk is not loaded (offline, or still loading): Clerk's
+ * own session (its cookie) is still there, so once Clerk loads it is signed out before any user is adopted.
+ * Survives a reload; removed once Clerk has signed out, or loaded with nobody signed in.
+ */
+export const SIGNOUT_PENDING_KEY = 'tcc-signout-pending';
+
+/** The slice of Web Storage the terms cache, the last-user entry and the pending sign-out use. */
 export interface TermsStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -103,11 +118,29 @@ export interface AccountOptions {
   settleTimeoutMs?: number;
   /** The CloudApi is the in-memory fake (development `?cloud=fake`); the menu says so. */
   simulated?: boolean;
-  /** Where the accepted terms version is cached per user; default the browser's localStorage (none outside a browser). */
+  /**
+   * Where the accepted terms version (per user) and the last signed-in user are kept; default the
+   * browser's localStorage (none outside a browser).
+   */
   termsStorage?: TermsStorage;
   /** Channel to the game's other tabs (a data deletion is announced there); default none. */
   channel?: AccountChannel;
   deleteBlockedTimeoutMs?: number;
+  /**
+   * Subscribes to "the network is back" (default: the browser's `online` event); returns the unsubscribe
+   * function. After a failed load the Account then loads the auth provider again by itself.
+   */
+  onOnline?: (listener: () => void) => () => void;
+}
+
+function browserOnOnline(listener: () => void): () => void {
+  try {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return () => {};
+    window.addEventListener('online', listener);
+    return () => window.removeEventListener('online', listener);
+  } catch {
+    return () => {};
+  }
 }
 
 const NO_CLOUD = (): CloudError => new CloudError('other', 'cloud mode is off');
@@ -164,7 +197,19 @@ export class Account {
   private readonly termsStorage: TermsStorage | undefined;
   private readonly channel: AccountChannel | undefined;
   private unsubscribeChannel: (() => void) | null = null;
+  private readonly onOnline: (listener: () => void) => () => void;
+  private unsubscribeOnline: (() => void) | null = null;
   private readonly deleteBlockedTimeoutMs: number;
+  /**
+   * The user came from this browser's last-user entry because Clerk could not load: not a session.
+   * No server call is made for them (no admin role, no sync) until Clerk loads and confirms or replaces them.
+   */
+  private unconfirmed = false;
+  /** The auth provider has loaded at least once in this page (it reported a session, or nobody). */
+  private providerLoaded = false;
+  /** Sair was clicked while the provider was not loaded: it must sign out once it loads (see SIGNOUT_PENDING_KEY). */
+  private pendingSignOut: boolean;
+  private completingSignOut: Promise<CloudError | null> | null = null;
   readonly simulated: boolean;
 
   constructor(private readonly api: CloudApi | null, opts: AccountOptions = {}) {
@@ -178,6 +223,8 @@ export class Account {
     this.termsStorage = 'termsStorage' in opts ? opts.termsStorage : defaultTermsStorage();
     this.channel = api ? opts.channel : undefined;
     this.deleteBlockedTimeoutMs = opts.deleteBlockedTimeoutMs ?? DELETE_BLOCKED_TIMEOUT_MS;
+    this.onOnline = opts.onOnline ?? browserOnOnline;
+    this.pendingSignOut = api !== null && this.storedPendingSignOut();
     this.unsubscribeChannel = this.channel?.subscribe((m) => this.onChannel(m)) ?? null;
   }
 
@@ -218,6 +265,95 @@ export class Account {
     } catch {
       // see rememberTerms
     }
+  }
+
+  private lastUser(): CloudUser | null {
+    try {
+      const raw = this.termsStorage?.getItem(LAST_USER_KEY);
+      if (!raw) return null;
+      const v: unknown = JSON.parse(raw);
+      if (typeof v !== 'object' || v === null) return null;
+      const { id, email } = v as { id?: unknown; email?: unknown };
+      if (typeof id !== 'string' || !id || typeof email !== 'string') return null;
+      return { id, email };
+    } catch {
+      return null;
+    }
+  }
+
+  private rememberUser(user: CloudUser): void {
+    try {
+      this.termsStorage?.setItem(LAST_USER_KEY, JSON.stringify({ id: user.id, email: user.email }));
+    } catch {
+      // see rememberTerms
+    }
+  }
+
+  private forgetUser(): void {
+    try {
+      this.termsStorage?.removeItem(LAST_USER_KEY);
+    } catch {
+      // see rememberTerms
+    }
+  }
+
+  private storedPendingSignOut(): boolean {
+    try {
+      return this.termsStorage?.getItem(SIGNOUT_PENDING_KEY) != null;
+    } catch {
+      return false;
+    }
+  }
+
+  private setPendingSignOut(): void {
+    this.pendingSignOut = true;
+    try {
+      this.termsStorage?.setItem(SIGNOUT_PENDING_KEY, '1');
+    } catch {
+      // the in-memory flag still covers this page
+    }
+  }
+
+  private clearPendingSignOut(): void {
+    this.pendingSignOut = false;
+    try {
+      this.termsStorage?.removeItem(SIGNOUT_PENDING_KEY);
+    } catch {
+      // see rememberTerms
+    }
+  }
+
+  /**
+   * Signs the loaded provider out for a Sair clicked while it was not loaded; shared by concurrent callers.
+   * Resolves null when done (the pending sign-out cleared), or the error (still pending, retried on the next load).
+   */
+  private finishPendingSignOut(): Promise<CloudError | null> {
+    const api = this.api;
+    if (!api || !this.pendingSignOut) return Promise.resolve(null);
+    if (!this.completingSignOut) {
+      this.completingSignOut = (async () => {
+        try {
+          await api.signOut();
+          this.clearPendingSignOut();
+          this.forgetUser();
+          return null;
+        } catch (err) {
+          console.warn('[account] could not end the session of a sign-out made offline; trying again on the next load', err);
+          return err instanceof CloudError ? err : new CloudError('network', String(err));
+        } finally {
+          this.completingSignOut = null;
+        }
+      })();
+    }
+    return this.completingSignOut;
+  }
+
+  /**
+   * True while the user is this browser's last signed-in user, restored because Clerk could not load
+   * (offline or Clerk down): the game plays on their local database with the saved terms, nothing syncs.
+   */
+  get offline(): boolean {
+    return this.unconfirmed;
   }
 
   get mode(): 'local' | 'cloud' {
@@ -273,6 +409,10 @@ export class Account {
     const api = this.api;
     if (!api) return;
     this.unsubscribeAuth = api.onAuthChange((user) => this.onAuth(user));
+    // Network back after a failed load (e.g. an offline reload playing as the cached user): load again.
+    this.unsubscribeOnline = this.onOnline(() => {
+      if (this._loadError) void this.retry();
+    });
     await this.restoreSession();
   }
 
@@ -291,11 +431,31 @@ export class Account {
         error = err instanceof CloudError ? err : new CloudError('other', String(err));
       }
       this.restoring = null;
-      this.setLoading(false, error);
-      if (user) {
-        this.setUser(user);
-        await this.loadDetails(this.userToken);
+      if (!error && this.pendingSignOut) {
+        // Clerk loaded with a sign-out still owed: nobody is adopted until Clerk itself has signed out.
+        this.providerLoaded = true;
+        if (user) error = await this.finishPendingSignOut();
+        else this.clearPendingSignOut();
+        if (!error) this.adopt(null);
+        this.setLoading(false, error);
+        return;
       }
+      if (error) {
+        // Clerk could not load: the last user of this browser plays offline (unconfirmed, see `offline`).
+        const cached = error.kind === 'network' && !this._state.user && !this.pendingSignOut ? this.lastUser() : null;
+        if (cached) {
+          this.unconfirmed = true;
+          this.setUser(cached);
+        }
+        this.setLoading(false, error);
+        if (cached) await this.loadDetails(this.userToken);
+        return;
+      }
+      this.providerLoaded = true;
+      this.setLoading(false, null);
+      // Clerk loaded: its state wins over a cached user (the same one is confirmed, another replaces it).
+      this.adopt(user);
+      if (user) await this.loadDetails(this.userToken);
     })();
     this.restoring = restoring;
     return restoring;
@@ -310,10 +470,36 @@ export class Account {
 
   /** Synchronous on purpose (see AccountOptions.defer): only the state changes here. */
   private onAuth(user: CloudUser | null): void {
-    if (!this.setUser(user)) return;
-    if (!user) return;
+    this.providerLoaded = true; // only a loaded provider reports sessions
+    if (this.pendingSignOut) {
+      // A Sair clicked while Clerk was not loaded: Clerk's old session is not adopted, it is signed out.
+      if (user) {
+        // A load in progress signs out itself (restoreSession), before adopting anyone.
+        if (!this.restoring) this.defer(() => void this.finishPendingSignOut());
+        return;
+      }
+      this.clearPendingSignOut();
+    }
+    if (!this.adopt(user) || !user) return;
     const token = this.userToken;
     this.defer(() => void this.loadDetails(token));
+  }
+
+  /**
+   * The user Clerk reports (it loaded): remembered as this browser's last user, or forgotten when nobody
+   * is signed in. A cached user is confirmed (same id: details reloaded from the server, sync resumes)
+   * or replaced. True when the details must be (re)loaded.
+   */
+  private adopt(user: CloudUser | null): boolean {
+    const wasCached = this.unconfirmed;
+    this.unconfirmed = false;
+    if (user) this.rememberUser(user);
+    else this.forgetUser();
+    if (this.setUser(user)) return true;
+    if (!wasCached) return false;
+    this.details = null; // the cached details were not the server's
+    this.update({}); // canSync changed: open stores resume
+    return user !== null;
   }
 
   /** True when the user changed (not just a token refresh of the same one). */
@@ -339,6 +525,13 @@ export class Account {
     const api = this.api;
     const user = this._state.user;
     if (!api || token !== this.userToken || !user) return Promise.resolve();
+    if (this.unconfirmed) {
+      // No session: the server is not asked. Only the terms saved on this browser count; never admin.
+      this.update({ isAdmin: false, termsAccepted: this.cachedTerms(user.id) === this.termsVersion });
+      const done = Promise.resolve();
+      this.details = { token, promise: done };
+      return done;
+    }
     const promise = (async () => {
       const [admin, terms] = await Promise.allSettled([api.isAdmin(), api.acceptedTermsVersion()]);
       if (admin.status === 'rejected') console.warn('[account] could not check the admin role', admin.reason);
@@ -376,14 +569,37 @@ export class Account {
   async signOut(): Promise<void> {
     const api = this.requireApi();
     await this.settle();
-    await api.signOut();
+    const user = this._state.user;
+    // Forgotten first: Clerk may leave the page before its signOut resolves.
+    this.forgetUser();
+    if (!this.providerLoaded) {
+      // Clerk is not loaded (offline cached user, or a load in flight): its signOut would do nothing and
+      // its session would come back on the next load. Owe the sign-out instead (kept across reloads).
+      this.setPendingSignOut();
+      this.unconfirmed = false;
+      this.setUser(null);
+      return;
+    }
+    try {
+      await api.signOut();
+    } catch (err) {
+      if (user && this._state.user?.id === user.id) this.rememberUser(user);
+      throw err;
+    }
+    this.unconfirmed = false;
     this.setUser(null);
+  }
+
+  /** A server action needs a session: a cached (offline) user has none, so it fails as a network error. */
+  private requireSession(): void {
+    if (this.unconfirmed) throw new CloudError('network', 'the account service is not loaded (offline)');
   }
 
   async acceptTerms(): Promise<void> {
     const api = this.requireApi();
     const user = this._state.user;
     if (!user) throw new CloudError('auth', 'not signed in');
+    this.requireSession();
     const token = this.userToken;
     await api.acceptTerms(this.termsVersion);
     this.rememberTerms(user.id, this.termsVersion);
@@ -402,6 +618,7 @@ export class Account {
     const api = this.requireApi();
     const user = this._state.user;
     if (!user) throw new CloudError('auth', 'not signed in');
+    this.requireSession();
     const token = this.userToken;
     this.deleting = user.id;
     this.update({}); // canSync changed: open stores pause
@@ -428,9 +645,12 @@ export class Account {
     }
   }
 
-  /** Whether events of `userId` may be pushed now: that user is signed in and not deleting their data. */
+  /**
+   * Whether events of `userId` may be pushed now: that user is signed in (confirmed by Clerk, not
+   * restored offline) and not deleting their data.
+   */
   canSync(userId: string): boolean {
-    return this._state.user?.id === userId && this.deleting !== userId;
+    return this._state.user?.id === userId && !this.unconfirmed && this.deleting !== userId;
   }
 
   /** Registers background work that sign-out and data deletion wait for. */
@@ -468,6 +688,8 @@ export class Account {
   dispose(): void {
     this.unsubscribeAuth?.();
     this.unsubscribeAuth = null;
+    this.unsubscribeOnline?.();
+    this.unsubscribeOnline = null;
     this.unsubscribeChannel?.();
     this.unsubscribeChannel = null;
     this.listeners.clear();

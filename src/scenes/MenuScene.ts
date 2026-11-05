@@ -1,7 +1,7 @@
 // src/scenes/MenuScene.ts
 import Phaser from 'phaser';
 import { MENU_ITEMS, firstEnabled, moveSelection, type MenuId, type MenuItem } from './menu/menuModel';
-import { accountStatusLine, buildMenuItems, cloudErrorMessage, keepSelection, playAction } from './menu/menuState';
+import { accountStatusLine, buildMenuItems, cloudErrorMessage, keepSelection, playAction, type CloudStatus } from './menu/menuState';
 import { howToPlayLines } from './menu/howToPlay';
 import { LOCAL_ACCESS, toolKeysEnabled } from './input/debugKeys';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
@@ -11,6 +11,14 @@ import { ConsentPanel } from '../cloud/consentPanel';
 import { ImportPanel } from '../cloud/importPanel';
 import { adoptHistory, readLocalGuestHistory, readLegacyMarker, writeLegacyMarker, LEGACY_IMPORT_KEY, type LegacyImportAnswer } from '../cloud/adoptLocal';
 import { ConfirmPanel } from '../cloud/accountOverlay';
+import {
+  SignInWindowWatch,
+  browserSignInWindowDeps,
+  holdKeyboard,
+  holdsKeyboard,
+  shouldShieldKeyTarget,
+  type SignInWindowPhase,
+} from '../cloud/clerkWindow';
 import { claimStore } from './session/storeHandoff';
 import { IndexedDbEventStore, type EventStore } from '../telemetry/eventStore';
 import { GAME_VERSION, type LoggedEvent } from '../telemetry/schema';
@@ -21,6 +29,14 @@ type Screen = 'main' | 'howto' | 'analysis' | 'panel';
 type PanelKind = 'consent' | 'deleteData' | 'import';
 
 const FONT = 'monospace';
+const OPENING_NOTICE = 'abrindo a janela de login…';
+const SHIELDED_KEY_EVENTS = ['keydown', 'keyup', 'keypress'] as const;
+const MENU_KEYS = [
+  Phaser.Input.Keyboard.KeyCodes.UP,
+  Phaser.Input.Keyboard.KeyCodes.DOWN,
+  Phaser.Input.Keyboard.KeyCodes.ENTER,
+  Phaser.Input.Keyboard.KeyCodes.ESC,
+];
 const BUTTON_W = 480;
 const BUTTON_H = 48;
 const BUTTON_GAP = 16;
@@ -39,17 +55,12 @@ const COLOR = {
  * Análise is read-only: it reads the stored history (after the previous store holder released it),
  * closes the store right away and never logs an event.
  * The items follow the Account (see buildMenuItems) and are rebuilt whenever it changes. In cloud
- * mode the account screens (login, consent, new password, delete confirmation) are DOM panels created
- * on open and destroyed on close; while one is open the menu ignores its own keys.
+ * mode, Entrar / Criar conta opens Clerk's own sign-in window; the consent, the import offer and the
+ * delete confirmation are our DOM panels, created on open and destroyed on close; while one is open
+ * the menu ignores its own keys. While Clerk's window is open (seen in the DOM, see SignInWindowWatch)
+ * the game's keyboard is switched off and the menu's key captures are released, so Clerk's form gets
+ * every key (Enter included) and nothing reaches Phaser.
  */
-/** The status line, with the auth provider's loading and failure (interim, until the menu redesign). */
-function statusLine(account: Account): string {
-  if (account.mode === 'cloud' && !account.state.user) {
-    if (account.loading) return 'nuvem · carregando conta…';
-    if (account.loadError) return 'nuvem · sem conexão com o serviço de contas · Entrar: tentar de novo';
-  }
-  return accountStatusLine(account.state, account.simulated);
-}
 
 export class MenuScene extends Phaser.Scene {
   private screen: Screen = 'main';
@@ -75,6 +86,16 @@ export class MenuScene extends Phaser.Scene {
   private importCheckedFor: string | null = null;
   /** False after shutdown: late async results must not touch destroyed objects. */
   private alive = false;
+  /** The sign-in attempt in progress (Clerk's window asked for, on screen, or late), if any. */
+  private signInWatch: SignInWindowWatch | null = null;
+  /** Clerk's window did not show up in time: the menu offers to try again. */
+  private signInStalled = false;
+  /** The keyboard is left to Clerk's window: menu keys ignored, captures released, Phaser's keyboard off. */
+  private clerkHolding = false;
+  /** Gives the keyboard back (set while clerkHolding). */
+  private releaseKeyboard: ((recapture?: boolean) => void) | null = null;
+  /** The notice line shows OPENING_NOTICE (cleared once the window shows up, or the attempt ends). */
+  private openingNotice = false;
 
   constructor() {
     super('MenuScene');
@@ -91,6 +112,11 @@ export class MenuScene extends Phaser.Scene {
     this.starting = false; // the scene object is reused when the Arena comes back here
     this.accountBusy = false;
     this.importCheckedFor = null;
+    this.signInWatch = null;
+    this.signInStalled = false;
+    this.clerkHolding = false;
+    this.releaseKeyboard = null;
+    this.openingNotice = false;
     this.alive = true;
 
     const title = this.add.text(640, 120, 'TCC · arena adaptativa', { fontFamily: FONT, fontSize: '40px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
@@ -106,24 +132,40 @@ export class MenuScene extends Phaser.Scene {
 
     const keyboard = this.input.keyboard;
     if (!keyboard) throw new Error('Keyboard input plugin not available');
-    const KC = Phaser.Input.Keyboard.KeyCodes;
-    keyboard.addCapture([KC.UP, KC.DOWN, KC.ENTER, KC.ESC]);
+    keyboard.addCapture(MENU_KEYS);
+    // Belt and braces: Phaser's keyboard is off while Clerk's window is open, so these do not fire then.
     keyboard.on('keydown-UP', () => this.move(-1));
     keyboard.on('keydown-DOWN', () => this.move(1));
     keyboard.on('keydown-ENTER', () => {
-      if (this.screen === 'main') this.activate(this.items[this.selected].id);
+      if (this.screen === 'main' && !this.clerkHolding) this.activate(this.items[this.selected].id);
     });
     keyboard.on('keydown-ESC', () => {
       // Account panels handle their own Esc (their key events never reach Phaser).
+      if (this.clerkHolding) return;
       if (this.screen === 'howto' || this.screen === 'analysis') this.showMain();
     });
 
     const offAccount = this.account?.onChange(() => this.onAccountChange());
+    // Playing as the last user restored offline (Clerk could not load): each return to the menu tries Clerk again.
+    if (this.account?.offline && this.account.loadError) void this.account.retry();
+
+    // Keys typed into any DOM UI (Clerk's window, whatever its markup; any focused control) never reach the
+    // game: stopped on the document, after the target's own handlers ran and before Phaser's window listener.
+    // No preventDefault, so Clerk's form still gets Enter. Independent of the DOM watch below.
+    const canvas = this.game.canvas;
+    const shield = (e: Event): void => {
+      if (shouldShieldKeyTarget(e.target, canvas)) e.stopPropagation();
+    };
+    for (const type of SHIELDED_KEY_EVENTS) document.addEventListener(type, shield);
 
     // Phaser drops the plugin's listeners on shutdown, but captures are global and the panels are DOM.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.alive = false;
       offAccount?.();
+      for (const type of SHIELDED_KEY_EVENTS) document.removeEventListener(type, shield);
+      this.signInWatch?.stop();
+      this.signInWatch = null;
+      this.setClerkHolding(false); // Phaser's keyboard is the game's, not the scene's: give it back
       this.closeAccountPanel();
       this.leaveAnalysis();
       keyboard.clearCaptures();
@@ -135,7 +177,12 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private currentItems(): MenuItem[] {
-    return this.account ? buildMenuItems(this.account.state) : MENU_ITEMS.map((i) => ({ ...i }));
+    return this.account ? buildMenuItems(this.account.state, this.cloudStatus(this.account)) : MENU_ITEMS.map((i) => ({ ...i }));
+  }
+
+  /** Clerk loading, or a failure to retry (it could not load, or its window never showed up). */
+  private cloudStatus(account: Account): CloudStatus {
+    return { loading: account.loading, failed: account.loadError !== null || this.signInStalled, offline: account.offline };
   }
 
   /** (Re)creates the buttons for this.items. */
@@ -162,15 +209,18 @@ export class MenuScene extends Phaser.Scene {
     this.select(this.selected);
   }
 
-  /** The account changed (sign-in/out, consent, deletion, recovery link): rebuild the items, follow with the panels. */
+  /** The account changed (sign-in/out, consent, deletion, Clerk loading): rebuild the items, follow with the panels. */
   private onAccountChange(): void {
     if (!this.alive) return;
+    if (this.account?.state.user) this.signInStalled = false;
+    // A sign-in ends the attempt once Clerk's window is gone (it may report back here, harmlessly).
+    this.signInWatch?.sessionChanged(this.account?.state.user != null);
     const prevId = this.items[this.selected]?.id;
     this.items = this.currentItems();
     this.selected = keepSelection(this.items, prevId);
     this.buildButtons();
     const account = this.account;
-    this.statusText.setText(account ? statusLine(account) : '');
+    this.statusText.setText(account ? accountStatusLine(account.state, account.simulated, this.cloudStatus(account)) : '');
     if (!account || account.mode !== 'cloud') return;
     const signedIn = account.state.user !== null;
     const kind = this.accountPanel?.kind;
@@ -187,7 +237,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private move(delta: 1 | -1): void {
-    if (this.screen === 'main') this.select(moveSelection(this.items, this.selected, delta));
+    if (this.screen === 'main' && !this.clerkHolding) this.select(moveSelection(this.items, this.selected, delta));
   }
 
   private select(i: number): void {
@@ -201,7 +251,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private activate(id: MenuId): void {
-    if (this.screen !== 'main' || this.starting || this.accountBusy) return;
+    if (this.screen !== 'main' || this.starting || this.accountBusy || this.clerkHolding) return;
     const item = this.items.find((i) => i.id === id);
     if (!item?.enabled) return;
     this.setNotice('');
@@ -222,10 +272,12 @@ export class MenuScene extends Phaser.Scene {
         return;
       case 'login':
         // Clerk's own window signs in or creates the account; the result arrives as an account change.
-        // Interim wiring: the menu redesign (next task) gives the loading and retry states their own items.
-        if (account?.mode !== 'cloud') return; // local mode: no accounts
-        if (account.loadError) void account.retry();
-        else account.openSignIn(); // nothing happens while Clerk is still loading
+        if (account?.mode === 'cloud') this.openSignIn(account); // local mode: no accounts (the item is inert)
+        return;
+      case 'retry':
+        if (account?.mode !== 'cloud') return;
+        if (account.loadError) void account.retry(); // Clerk could not load: load it again (the menu shows "carregando")
+        else this.openSignIn(account); // Clerk loaded but its window never showed up: ask again
         return;
       case 'logout':
         if (account) void this.signOut(account);
@@ -233,6 +285,54 @@ export class MenuScene extends Phaser.Scene {
       case 'deleteData':
         if (account) this.openDeleteData(account);
         return;
+    }
+  }
+
+  // --- Clerk's sign-in window ---------------------------------------------------
+
+  /** Opens Clerk's window, following it in the DOM; the keyboard is Clerk's until it closes (or fails to show up). */
+  private openSignIn(account: Account): void {
+    this.signInWatch?.stop();
+    this.signInStalled = false;
+    this.setClerkHolding(true);
+    this.setNotice(OPENING_NOTICE);
+    this.openingNotice = true;
+    // Created before openSignIn: the simulated cloud signs in synchronously, inside that call.
+    this.signInWatch = new SignInWindowWatch(browserSignInWindowDeps(), (phase) => this.onSignInPhase(phase));
+    try {
+      account.openSignIn();
+    } catch (err) {
+      console.warn('[menu] could not open the sign-in window', err); // the timeout offers a retry
+    }
+  }
+
+  private onSignInPhase(phase: SignInWindowPhase): void {
+    if (!this.alive) return;
+    if (phase === 'ended') this.signInWatch = null;
+    // A window closed without signing in leaves the menu as it was, with no message.
+    if (phase === 'stalled') this.signInStalled = true;
+    if (phase === 'open') this.signInStalled = false; // a late window: no retry entry left once it closes
+    if (phase !== 'waiting' && this.openingNotice) {
+      this.openingNotice = false;
+      this.setNotice('');
+    }
+    this.setClerkHolding(holdsKeyboard(phase));
+    this.onAccountChange(); // the items (retry entry) and the import offer, which waits for the window to close
+  }
+
+  /**
+   * Leaves the keyboard to Clerk's window (true) or takes it back (false), see holdKeyboard: Phaser's keyboard
+   * manager ignores events while disabled, before its preventDefault, so Clerk's form gets Enter; the captures
+   * are released too, and come back on release (not after shutdown).
+   */
+  private setClerkHolding(hold: boolean): void {
+    if (hold === this.clerkHolding) return;
+    this.clerkHolding = hold;
+    if (hold) {
+      this.releaseKeyboard = holdKeyboard(this.input.keyboard, this.input.manager.keyboard, MENU_KEYS);
+    } else {
+      this.releaseKeyboard?.(this.alive);
+      this.releaseKeyboard = null;
     }
   }
 
@@ -288,6 +388,7 @@ export class MenuScene extends Phaser.Scene {
       this.alive &&
       !this.starting &&
       !this.accountBusy &&
+      !this.clerkHolding &&
       this.screen === 'main' &&
       this.accountPanel === null &&
       account.state.user?.id === userId &&

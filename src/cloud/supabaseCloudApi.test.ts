@@ -180,6 +180,16 @@ describe('createSupabaseCloudApi', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it('a token that could not be fetched for lack of network is a network error (the saved terms then count)', async () => {
+    const { spy } = stubFetch();
+    const f = fakeSession(ANA, 'token-1');
+    const api = createSupabaseCloudApi(CONFIG, f.session);
+    f.session.getToken.mockRejectedValue(new CloudError('network', 'offline'));
+    await expect(api.acceptedTermsVersion()).rejects.toMatchObject({ kind: 'network' });
+    await expect(api.isAdmin()).rejects.toMatchObject({ kind: 'network' });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('asks Clerk for the token on every data call and sends it as the bearer', async () => {
     const { seen } = stubFetch();
     const f = fakeSession(ANA, 'token-1');

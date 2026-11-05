@@ -7,16 +7,14 @@ import {
   accountStatusLine,
   buildMenuItems,
   cloudErrorMessage,
-  emailProblem,
   keepSelection,
-  newPasswordProblem,
   playAction,
   shortEmail,
 } from './menuState';
 
 // Built at runtime: no e-mail literals in the repo.
 const mail = (name: string): string => [name, 'test.invalid'].join('@');
-const user = { id: 'user-1', email: mail('ana') };
+const user = { id: 'user_ana1', email: mail('ana') };
 
 const LOCAL: AccountState = { mode: 'local', user: null, isAdmin: false, termsAccepted: false };
 const SIGNED_OUT: AccountState = { mode: 'cloud', user: null, isAdmin: false, termsAccepted: false };
@@ -53,6 +51,38 @@ describe('buildMenuItems', () => {
     expect(playAction(SIGNED_OUT)).toBe('blocked');
   });
 
+  it('cloud mode while Clerk loads: a disabled "carregando conta…" instead of Entrar', () => {
+    const items = buildMenuItems(SIGNED_OUT, { loading: true });
+    expect(ids(items)).toEqual(['login', 'play', 'howto', 'analysis']);
+    expect(items[0]).toEqual({ id: 'login', label: 'carregando conta…', enabled: false });
+    expect(enabledIds(items)).toEqual(['howto']);
+    expect(items[firstEnabled(items)].id).toBe('howto');
+    // loading wins over a previous failure (a retry is running)
+    expect(buildMenuItems(SIGNED_OUT, { loading: true, failed: true })[0].label).toBe('carregando conta…');
+  });
+
+  it('cloud mode after a failure: a retry entry instead of Entrar; Jogar and Análise still disabled', () => {
+    const items = buildMenuItems(SIGNED_OUT, { failed: true });
+    expect(ids(items)).toEqual(['retry', 'play', 'howto', 'analysis']);
+    expect(items[0]).toEqual({ id: 'retry', label: 'sem conexão — tentar de novo', enabled: true });
+    expect(enabledIds(items)).toEqual(['retry', 'howto']);
+    expect(items[firstEnabled(items)].id).toBe('retry');
+  });
+
+  it('the service flags do not matter once signed in, nor in local mode', () => {
+    for (const flags of [{ loading: true }, { failed: true }]) {
+      expect(buildMenuItems(READY, flags)).toEqual(buildMenuItems(READY));
+      expect(buildMenuItems(NO_TERMS, flags)).toEqual(buildMenuItems(NO_TERMS));
+      expect(buildMenuItems(LOCAL, flags)).toEqual(MENU_ITEMS);
+    }
+  });
+
+  it('an account without e-mail signs out with a plain "Sair"', () => {
+    const noMail: AccountState = { ...READY, user: { id: 'user_x1', email: '' } };
+    expect(buildMenuItems(noMail).find((i) => i.id === 'logout')!.label).toBe('Sair');
+    expect(accountStatusLine(noMail, false)).toBe('nuvem · conta conectada');
+  });
+
   it('signed in without consent: Jogar leads to the term; Sair and Apagar meus dados shown', () => {
     const items = buildMenuItems(NO_TERMS);
     expect(ids(items)).toEqual(['play', 'howto', 'analysis', 'logout', 'deleteData']);
@@ -71,6 +101,10 @@ describe('buildMenuItems', () => {
 
   it('moveSelection never stops on a disabled item in any state', () => {
     for (const s of [LOCAL, SIGNED_OUT, NO_TERMS, READY]) expectNeverOnDisabled(buildMenuItems(s));
+    for (const flags of [{ loading: true }, { failed: true }]) expectNeverOnDisabled(buildMenuItems(SIGNED_OUT, flags));
+    const loading = buildMenuItems(SIGNED_OUT, { loading: true });
+    expect(moveSelection(loading, 2, 1)).toBe(2); // Como jogar is the only enabled item
+    expect(moveSelection(loading, 2, -1)).toBe(2);
     const signedOut = buildMenuItems(SIGNED_OUT);
     expect(moveSelection(signedOut, 0, 1)).toBe(2); // skips the disabled Jogar
     expect(moveSelection(signedOut, 2, 1)).toBe(0); // skips the disabled Análise, wraps
@@ -108,34 +142,25 @@ describe('menu helpers', () => {
     expect(accountStatusLine(SIGNED_OUT, true)).toBe('nuvem simulada · entre para jogar');
     expect(accountStatusLine(NO_TERMS, false)).toBe(`nuvem · ${mail('ana')} · termo pendente`);
     expect(accountStatusLine(READY, true)).toBe(`nuvem simulada · ${mail('ana')}`);
+    expect(accountStatusLine(SIGNED_OUT, false, { loading: true })).toBe('nuvem · carregando conta…');
+    expect(accountStatusLine(SIGNED_OUT, true, { failed: true })).toBe('nuvem simulada · sem conexão com o serviço de contas');
+    expect(accountStatusLine(READY, false, { failed: true })).toBe(`nuvem · ${mail('ana')}`);
+    expect(accountStatusLine(LOCAL, false, { loading: true })).toBe('modo local (sem conta)');
+  });
+
+  it('the last user restored offline (Clerk unreachable) plays with the usual items, the line says offline', () => {
+    const status = { failed: true, offline: true };
+    expect(accountStatusLine(READY, false, status)).toBe(`nuvem · ${mail('ana')} · offline (sem envio)`);
+    expect(accountStatusLine(NO_TERMS, false, status)).toBe(`nuvem · ${mail('ana')} · termo pendente · offline (sem envio)`);
+    expect(ids(buildMenuItems(READY, status))).toEqual(['play', 'howto', 'analysis', 'logout', 'deleteData']);
+    expect(playAction(READY)).toBe('start');
   });
 
   it('error messages in Portuguese from CloudError.kind', () => {
     expect(cloudErrorMessage(new CloudError('network', 'x'))).toMatch(/sem conexão/i);
-    expect(cloudErrorMessage(new CloudError('auth', 'x'))).toMatch(/e-mail ou senha inválidos.*sessão expirada/i);
+    expect(cloudErrorMessage(new CloudError('auth', 'x'))).toMatch(/sessão expirada/i);
+    expect(cloudErrorMessage(new CloudError('auth', 'x'))).not.toMatch(/senha/i); // passwords are Clerk's business now
     expect(cloudErrorMessage(new CloudError('other', 'x'))).toMatch(/tente novamente/i);
     expect(cloudErrorMessage(new Error('boom'))).toBe(cloudErrorMessage(new CloudError('other', 'x')));
-  });
-
-  it('sign-up and new-password failures have their own messages (never "sessão expirada")', () => {
-    for (const kind of ['auth', 'other'] as const) {
-      const signUp = cloudErrorMessage(new CloudError(kind, 'x'), 'signUp');
-      const newPw = cloudErrorMessage(new CloudError(kind, 'x'), 'newPassword');
-      expect(signUp).toMatch(/não foi possível criar a conta/i);
-      expect(newPw).toMatch(/não foi possível trocar a senha/i);
-      expect(signUp + newPw).not.toMatch(/sessão expirada/i);
-    }
-    expect(cloudErrorMessage(new CloudError('network', 'x'), 'signUp')).toMatch(/sem conexão/i);
-    expect(cloudErrorMessage(new CloudError('network', 'x'), 'newPassword')).toMatch(/sem conexão/i);
-  });
-
-  it('validates the e-mail and new passwords', () => {
-    expect(emailProblem('')).not.toBeNull();
-    expect(emailProblem('no-at-sign')).not.toBeNull();
-    expect(emailProblem(` ${mail('ana')} `)).toBeNull();
-    expect(newPasswordProblem('12345')).toMatch(/6/);
-    expect(newPasswordProblem('123456')).toBeNull();
-    expect(newPasswordProblem('123456', '123457')).toMatch(/não conferem/);
-    expect(newPasswordProblem('123456', '123456')).toBeNull();
   });
 });

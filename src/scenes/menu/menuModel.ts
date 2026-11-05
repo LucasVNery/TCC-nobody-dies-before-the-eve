@@ -1,4 +1,4 @@
-export type MenuId = 'login' | 'play' | 'howto' | 'analysis' | 'logout' | 'deleteData';
+export type MenuId = 'login' | 'retry' | 'play' | 'howto' | 'analysis' | 'logout' | 'deleteData';
 
 export interface MenuItem {
   id: MenuId;
