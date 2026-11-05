@@ -98,8 +98,8 @@ export class SyncingEventStore implements EventStore {
 
   /**
    * Brings in the cloud's events the local store lacks; returns how many were new.
-   * Pulled events are marked as synced, so they are never pushed back (for an admin,
-   * they include other users' events, which must not land in the admin's account).
+   * Pulled events are marked as synced, so they are never pushed back (the server
+   * returns the caller's own events only; this also guards against foreign ones leaking in).
    * Progress is written before the events: it only holds seqs the server confirmed, and
    * if the append is then lost the next pull re-appends them (they are still missing
    * locally). The other order could leave pulled events pending and push them back.

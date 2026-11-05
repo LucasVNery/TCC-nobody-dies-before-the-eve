@@ -88,12 +88,11 @@ export class FakeCloudApi implements CloudApi {
     }
   }
 
-  /** Own events; an admin sees every user's, as the server's row-level policy allows. */
+  /** Own events only, even for an admin (others' events are visible only through the SQL view). */
   async pullEvents(): Promise<LoggedEvent[]> {
     this.maybeFail();
     const acc = this.requireAccount();
-    const sources = this.admins.has(acc.user.id) ? [...this.accounts.values()] : [acc];
-    return sources.flatMap((a) => [...a.batches.values()].flatMap((b) => structuredClone(b.events)));
+    return [...acc.batches.values()].flatMap((b) => structuredClone(b.events));
   }
 
   async deleteMyData(): Promise<void> {

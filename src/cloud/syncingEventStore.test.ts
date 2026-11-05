@@ -234,23 +234,19 @@ describe('SyncingEventStore', () => {
     expect(closed).toBe(true);
   });
 
-  it("an admin pull of other users' events never pushes them into the admin account", async () => {
-    const api = new FakeCloudApi();
-    const adminMail = ['admin', 'test.invalid'].join('@');
-    await api.signUp(MAIL, PW);
-    await api.signUp(adminMail, PW);
-    await api.signIn(MAIL, PW);
-    const player = new SyncingEventStore({ local: new MemoryEventStore(), api, schedule: () => {} });
-    await player.append(range('theirs', 0, 2));
-    await player.syncNow();
-    const admin = await api.signIn(adminMail, PW);
-    api.setAdmin(admin.id);
+  it("a pull that returns another user's events never pushes them into this account", async () => {
+    // The real API returns own events only; this stub guards the store against a misbehaving server.
+    const { api, userId } = await signedInApi();
+    const foreign = range('theirs', 0, 2);
+    const stub: FakeCloudApi = Object.assign(Object.create(api) as FakeCloudApi, {
+      pullEvents: async () => structuredClone(foreign),
+    });
 
-    const store = new SyncingEventStore({ local: new MemoryEventStore(), api, schedule: () => {} });
+    const store = new SyncingEventStore({ local: new MemoryEventStore(), api: stub, schedule: () => {} });
     expect(await store.pull()).toBe(3);
     expect(await store.pendingCount()).toBe(0);
     expect(await store.syncNow()).toEqual({ sent: 0, failed: false });
-    expect(api.batchesOf(admin.id)).toEqual([]);
+    expect(api.batchesOf(userId)).toEqual([]);
   });
 
   it('a lost append after pull wrote progress leaves nothing pending, and the next pull re-appends', async () => {

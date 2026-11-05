@@ -35,6 +35,7 @@ export interface CloudApi {
   acceptedTermsVersion(): Promise<string | null>;
   acceptTerms(version: string): Promise<void>;
   pushBatches(batches: readonly EventBatch[]): Promise<void>;
+  /** The signed-in user's own events only, even for an admin. */
   pullEvents(): Promise<LoggedEvent[]>;
   deleteMyData(): Promise<void>;
   /** Returns the unsubscribe function. */
