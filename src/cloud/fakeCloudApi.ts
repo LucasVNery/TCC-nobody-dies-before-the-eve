@@ -1,25 +1,30 @@
 import type { LoggedEvent } from '../telemetry/schema';
-import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser, type EventBatch, type PullCursor, type PullPage } from './cloudApi';
+import { CloudError, type CloudApi, type CloudUser, type EventBatch, type PullCursor, type PullPage } from './cloudApi';
 import { compareRowKey, flattenBatches, PULL_PAGE_SIZE } from './batching';
 
 interface Account {
   user: CloudUser;
-  password: string;
   terms: string | null;
   /** Keyed by `${sessionId}:${firstSeq}`, mirroring the server's unique key. */
   batches: Map<string, EventBatch>;
 }
 
-/** In-memory CloudApi for tests and offline development. */
+/** The account openSignIn() signs in (built at runtime: no e-mail literals in the repo). */
+export const FAKE_DEFAULT_EMAIL = ['jogador', 'simulado.invalid'].join('@');
+
+/**
+ * In-memory CloudApi for tests and offline development: no Clerk. Signing in is immediate
+ * (openSignIn, or signInAs for a chosen account); ids look like Clerk's ('user_' + alphanumerics).
+ */
 export class FakeCloudApi implements CloudApi {
   private accounts = new Map<string, Account>(); // by email
   private current: Account | null = null;
   private admins = new Set<string>();
-  private listeners = new Set<(user: CloudUser | null, event?: AuthChangeEvent) => void>();
+  private listeners = new Set<(user: CloudUser | null) => void>();
   private failures = 0;
   private nextId = 1;
 
-  constructor(private readonly opts: { needsEmailConfirmation?: boolean; pullPageSize?: number } = {}) {}
+  constructor(private readonly opts: { pullPageSize?: number } = {}) {}
 
   /** The next n network-bound calls throw a 'network' CloudError. */
   failNext(n: number): void {
@@ -39,18 +44,18 @@ export class FakeCloudApi implements CloudApi {
     return this.current?.user ?? null;
   }
 
-  async signUp(email: string, password: string): Promise<{ needsEmailConfirmation: boolean }> {
-    this.maybeFail();
-    if (this.accounts.has(email)) throw new CloudError('other', 'already registered');
-    const user = { id: `user-${this.nextId++}`, email };
-    this.accounts.set(email, { user, password, terms: null, batches: new Map() });
-    return { needsEmailConfirmation: this.opts.needsEmailConfirmation ?? false };
+  /** As Clerk's sign-in window, at once: signs the default account in. */
+  openSignIn(): void {
+    this.signInAs(FAKE_DEFAULT_EMAIL);
   }
 
-  async signIn(email: string, password: string): Promise<CloudUser> {
-    this.maybeFail();
-    const acc = this.accounts.get(email);
-    if (!acc || acc.password !== password) throw new CloudError('auth', 'invalid credentials');
+  /** Signs in the account of `email` (created on first use), as completing Clerk's sign-in would. */
+  signInAs(email: string): CloudUser {
+    let acc = this.accounts.get(email);
+    if (!acc) {
+      acc = { user: { id: `user_fake${this.nextId++}`, email }, terms: null, batches: new Map() };
+      this.accounts.set(email, acc);
+    }
     this.current = acc;
     this.emit();
     return acc.user;
@@ -59,23 +64,6 @@ export class FakeCloudApi implements CloudApi {
   async signOut(): Promise<void> {
     this.current = null;
     this.emit();
-  }
-
-  async resetPassword(_email: string): Promise<void> {
-    this.maybeFail();
-  }
-
-  async updatePassword(newPassword: string): Promise<void> {
-    this.maybeFail();
-    this.requireAccount().password = newPassword;
-  }
-
-  /** Simulates opening the recovery link sent to `email`: signs that account in with a recovery event. */
-  simulateRecovery(email: string): void {
-    const acc = this.accounts.get(email);
-    if (!acc) throw new CloudError('auth', 'no such account');
-    this.current = acc;
-    this.emit('recovery');
   }
 
   async isAdmin(): Promise<boolean> {
@@ -141,7 +129,7 @@ export class FakeCloudApi implements CloudApi {
     acc.terms = null;
   }
 
-  onAuthChange(listener: (user: CloudUser | null, event?: AuthChangeEvent) => void): () => void {
+  onAuthChange(listener: (user: CloudUser | null) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -160,8 +148,8 @@ export class FakeCloudApi implements CloudApi {
     }
   }
 
-  private emit(event: AuthChangeEvent = 'other'): void {
+  private emit(): void {
     const user = this.current?.user ?? null;
-    for (const l of this.listeners) l(user, event);
+    for (const l of [...this.listeners]) l(user);
   }
 }

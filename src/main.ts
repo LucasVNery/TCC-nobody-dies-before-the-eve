@@ -7,11 +7,12 @@ import { Account, ACCOUNT_REGISTRY_KEY, browserAccountChannel } from './cloud/ac
 import type { CloudApi } from './cloud/cloudApi';
 import { readCloudConfig } from './cloud/cloudConfig';
 import { createSupabaseCloudApi } from './cloud/supabaseCloudApi';
+import { createClerkSession } from './cloud/clerkSession';
 import { FakeCloudApi } from './cloud/fakeCloudApi';
 
 /**
- * Development only: `?cloud=fake` runs the cloud mode on the in-memory FakeCloudApi (no Supabase;
- * everything is lost on reload). `import.meta.env.DEV` is the constant false in a production build,
+ * Development only: `?cloud=fake` runs the cloud mode on the in-memory FakeCloudApi (no Clerk, no
+ * Supabase: Entrar signs a fake player in at once; everything is lost on reload). `import.meta.env.DEV` is the constant false in a production build,
  * so this branch and FakeCloudApi are dropped from the published bundle.
  */
 function devFakeCloud(): CloudApi | null {
@@ -26,21 +27,31 @@ function devFakeCloud(): CloudApi | null {
       if (user) api.setAdmin(user.id);
     });
   }
-  // For manual checks in the console, e.g. opening a recovery link: __tccFakeCloud.simulateRecovery(email).
+  // For manual checks in the console, e.g. another account: __tccFakeCloud.signInAs(email).
   (window as unknown as { __tccFakeCloud?: FakeCloudApi }).__tccFakeCloud = api;
   return api;
 }
 
-// Without VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY the account is in local mode and the game runs as before.
+// Cloud mode needs all three of VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (the Supabase publishable key)
+// and VITE_CLERK_PUBLISHABLE_KEY; without them the account is in local mode and the game runs as before.
 const cloudConfig = readCloudConfig({
   VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL as string | undefined,
   VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined,
+  VITE_CLERK_PUBLISHABLE_KEY: import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined,
 });
 const fake = devFakeCloud();
+
+function realCloud(): CloudApi | null {
+  if (!cloudConfig) return null;
+  // Clerk loads in the background (account.init): the menu opens at once and says "carregando conta…".
+  return createSupabaseCloudApi(cloudConfig, createClerkSession(cloudConfig.clerkPublishableKey));
+}
+
 // The channel tells the game's other tabs when this account's data was deleted.
 const account = fake
   ? new Account(fake, { simulated: true, channel: browserAccountChannel() })
-  : new Account(cloudConfig ? createSupabaseCloudApi(cloudConfig) : null, { channel: browserAccountChannel() });
+  : new Account(realCloud(), { channel: browserAccountChannel() });
+// Never rejects: a failed Clerk load leaves the game signed out with account.loadError (retryable).
 void account.init();
 
 new Phaser.Game({

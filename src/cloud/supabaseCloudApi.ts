@@ -1,7 +1,8 @@
-import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { LoggedEvent } from '../telemetry/schema';
 import { CloudError, type CloudApi, type CloudUser, type EventBatch, type PullCursor } from './cloudApi';
 import type { CloudConfig } from './cloudConfig';
+import type { ClerkSession, ClerkSessionUser } from './clerkSession';
 import { flattenBatches, PULL_PAGE_SIZE } from './batching';
 
 export { flattenBatches };
@@ -54,7 +55,9 @@ const FETCH_FAILURE = /failed to fetch|fetch failed|networkerror|network request
  * Maps any error the Supabase client returns or throws to a CloudError.
  * auth-js errors (name starts with 'Auth'): network on fetch failures, auth on 400/401/403.
  * PostgREST errors: auth only on HTTP 401/403, SQLSTATE 42501, class 28 and PGRST30x;
- * check violations and the like (even at HTTP 400) are 'other'.
+ * check violations and the like (even at HTTP 400) are 'other'. A missing, expired or invalid Clerk
+ * token is refused by PostgREST with HTTP 401 and PGRST301/PGRST303 (or by the gateway with 401): 'auth'.
+ * Clerk errors carry an HTTP `status` and follow the same rule.
  */
 export function toCloudError(err: unknown, httpStatus?: number): CloudError {
   if (err instanceof CloudError) return err;
@@ -77,7 +80,7 @@ export function toCloudError(err: unknown, httpStatus?: number): CloudError {
   return new CloudError('other', message);
 }
 
-function toCloudUser(user: User | null | undefined): CloudUser | null {
+function toCloudUser(user: ClerkSessionUser | null): CloudUser | null {
   return user ? { id: user.id, email: user.email ?? '' } : null;
 }
 
@@ -94,73 +97,39 @@ async function guard<T>(fn: () => PromiseLike<T>): Promise<T> {
   }
 }
 
-/** Redirect links in auth e-mails go back to the page that asked, when running in a browser. */
-function redirectOptions(key: 'emailRedirectTo'): { emailRedirectTo?: string };
-function redirectOptions(key: 'redirectTo'): { redirectTo?: string };
-function redirectOptions(key: string): Record<string, string> {
-  return typeof window !== 'undefined' && window.location ? { [key]: window.location.origin } : {};
-}
+/**
+ * The Supabase client as a database only: Clerk authenticates, and its session token goes with every
+ * request (Supabase third-party auth: `sub` is the Clerk user id, `role` is 'authenticated').
+ */
+export function createSupabaseCloudApi(config: CloudConfig, session: ClerkSession): CloudApi {
+  // With `accessToken` supabase-js has no auth client of its own (client.auth is not available), keeps
+  // no session in storage and makes no request at creation. The token is asked for on every request;
+  // Clerk caches and refreshes it, so an expired one heals itself.
+  const client: SupabaseClient = createClient(config.supabaseUrl, config.anonKey, {
+    accessToken: async () => (await session.getToken()) ?? null,
+  });
 
-export function createSupabaseCloudApi(config: CloudConfig): CloudApi {
-  // With empty storage creating the client makes no request. A stored expired session, or a
-  // confirmation/recovery URL, may trigger auth requests at creation.
-  const client: SupabaseClient = createClient(config.url, config.anonKey);
-
-  async function currentUser(): Promise<CloudUser | null> {
-    // Local session (refreshed automatically); getUser() would hit the network.
-    const { data, error } = await client.auth.getSession();
-    check({ error });
-    return toCloudUser(data.session?.user);
-  }
-
+  /**
+   * The signed-in user, for a data call: refused ('auth', no request made) when Clerk has no user or
+   * no token right now.
+   */
   async function requireUser(): Promise<CloudUser> {
-    const user = await currentUser();
+    const user = toCloudUser(session.getUser());
     if (!user) throw new CloudError('auth', 'not signed in');
+    if (!(await session.getToken())) throw new CloudError('auth', 'no session token');
     return user;
   }
 
   return {
-    getUser: () => guard(currentUser),
-
-    signUp: (email, password) =>
+    getUser: () =>
       guard(async () => {
-        const { data, error } = await client.auth.signUp({ email, password, options: redirectOptions('emailRedirectTo') });
-        check({ error });
-        return { needsEmailConfirmation: data.session === null };
+        await session.load();
+        return toCloudUser(session.getUser());
       }),
 
-    signIn: (email, password) =>
-      guard(async () => {
-        const { data, error } = await client.auth.signInWithPassword({ email, password });
-        check({ error });
-        const user = toCloudUser(data.user);
-        if (!user) throw new CloudError('other', 'sign-in returned no user');
-        return user;
-      }),
+    openSignIn: () => session.openSignIn(),
 
-    signOut: () =>
-      guard(async () => {
-        const { error } = await client.auth.signOut();
-        if (error) {
-          // A failed global sign-out must not trap the user: end the local session regardless.
-          if (toCloudError(error).kind !== 'network') throw toCloudError(error);
-          const local = await client.auth.signOut({ scope: 'local' });
-          check({ error: local.error });
-        }
-      }),
-
-    resetPassword: (email) =>
-      guard(async () => {
-        const { error } = await client.auth.resetPasswordForEmail(email, redirectOptions('redirectTo'));
-        check({ error });
-      }),
-
-    updatePassword: (newPassword) =>
-      guard(async () => {
-        await requireUser();
-        const { error } = await client.auth.updateUser({ password: newPassword });
-        check({ error });
-      }),
+    signOut: () => guard(() => session.signOut()),
 
     isAdmin: () =>
       guard(async () => {
@@ -231,16 +200,12 @@ export function createSupabaseCloudApi(config: CloudConfig): CloudApi {
       guard(async () => {
         const user = await requireUser();
         if (user.id !== expectedUserId) throw new CloudError('auth', 'the signed-in user is not the account being deleted');
-        // The server checks it again: delete_my_data(expected) raises 42501 unless expected = auth.uid().
+        // The server checks it again: delete_my_data(expected) raises 42501 unless expected is the token's sub.
         check(await client.rpc('delete_my_data', { expected: expectedUserId }));
       }),
 
-    onAuthChange: (listener) => {
-      // Synchronous: awaiting another client call inside this callback deadlocks supabase-js.
-      const { data } = client.auth.onAuthStateChange((event, session) => {
-        listener(toCloudUser(session?.user), event === 'PASSWORD_RECOVERY' ? 'recovery' : 'other');
-      });
-      return () => data.subscription.unsubscribe();
-    },
+    onAuthChange: (listener) =>
+      // Synchronous: the listener only reads the user Clerk already holds.
+      session.onChange(() => listener(toCloudUser(session.getUser()))),
   };
 }

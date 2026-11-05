@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { Account, accountDbName, accountFromRegistry, ACCOUNT_REGISTRY_KEY, termsCacheKey, type AccountState, type TermsStorage } from './account';
 import { FakeCloudApi } from './fakeCloudApi';
-import { CloudError } from './cloudApi';
+import { CloudError, type CloudUser } from './cloudApi';
 import { TERMS_VERSION } from './consentText';
 import { openAccountStore } from './syncBoot';
 import { IndexedDbEventStore } from '../telemetry/eventStore';
@@ -10,7 +10,6 @@ import type { LoggedEvent } from '../telemetry/schema';
 
 // Built at runtime: no credential or e-mail literals in the repo.
 const mail = (name: string): string => [name, 'test.invalid'].join('@');
-const PW = `pw-${4242}`;
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -31,10 +30,13 @@ function ev(player_id: string, session_id: string, seq: number): LoggedEvent {
   return { v: 2, seq, t_ms: seq, player_id, session_id, run_idx: 0, room_idx: 0, enc_idx: 0, type: 'x' };
 }
 
-async function apiWith(...names: string[]): Promise<FakeCloudApi> {
-  const api = new FakeCloudApi();
-  for (const n of names) await api.signUp(mail(n), PW);
-  return api;
+
+/** Signs in through the fake (as finishing Clerk's window would) and waits until the account loaded the details. */
+async function signIn(account: Account, email: string): Promise<CloudUser> {
+  await account.init();
+  const user = (account.cloud as FakeCloudApi).signInAs(email);
+  await account.whenReady();
+  return user;
 }
 
 describe('Account', () => {
@@ -43,16 +45,17 @@ describe('Account', () => {
     await account.init();
     expect(account.state).toEqual({ mode: 'local', user: null, isAdmin: false, termsAccepted: false });
     expect(account.cloud).toBeNull();
-    await expect(account.signIn(mail('ana'), PW)).rejects.toBeInstanceOf(CloudError);
-    await expect(account.signUp(mail('ana'), PW)).rejects.toBeInstanceOf(CloudError);
+    expect(account.loading).toBe(false);
+    expect(account.loadError).toBeNull();
+    expect(() => account.openSignIn()).toThrow(CloudError);
     await expect(account.signOut()).rejects.toBeInstanceOf(CloudError);
     await expect(account.acceptTerms()).rejects.toBeInstanceOf(CloudError);
     await expect(account.deleteMyData()).rejects.toBeInstanceOf(CloudError);
   });
 
   it('init restores a stored session with its admin role and consent', async () => {
-    const api = await apiWith('ana');
-    const user = await api.signIn(mail('ana'), PW);
+    const api = new FakeCloudApi();
+    const user = api.signInAs(mail('ana'));
     api.setAdmin(user.id);
     await api.acceptTerms(TERMS_VERSION);
     const account = new Account(api, { defer: queueMicrotask });
@@ -62,7 +65,7 @@ describe('Account', () => {
 
   it('a session restore that fails leaves the game signed out instead of throwing', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const api = await apiWith();
+    const api = new FakeCloudApi();
     vi.spyOn(api, 'getUser').mockRejectedValue(new CloudError('network', 'offline'));
     const account = new Account(api);
     await expect(account.init()).resolves.toBeUndefined();
@@ -70,15 +73,15 @@ describe('Account', () => {
   });
 
   it('signIn loads the details; consent counts only for the current terms version', async () => {
-    const api = await apiWith('ana');
-    await api.signIn(mail('ana'), PW);
+    const api = new FakeCloudApi();
+    api.signInAs(mail('ana'));
     await api.acceptTerms('an-older-version');
     await api.signOut();
     const account = new Account(api, { defer: queueMicrotask });
     await account.init();
     const seen: AccountState[] = [];
     account.onChange((s) => seen.push(s));
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     expect(account.state).toEqual({ mode: 'cloud', user, isAdmin: false, termsAccepted: false });
     expect(seen[0].user).toEqual(user);
 
@@ -88,12 +91,12 @@ describe('Account', () => {
   });
 
   it('the auth callback only updates state: client calls run afterwards, outside it', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const d = manualDefer();
     const account = new Account(api, { defer: d.defer });
     await account.init();
     const isAdmin = vi.spyOn(api, 'isAdmin');
-    await api.signIn(mail('ana'), PW); // signed in by another path: only onAuthChange reports it
+    api.signInAs(mail('ana')); // signed in by another path: only onAuthChange reports it
     expect(account.state.user?.email).toBe(mail('ana'));
     expect(isAdmin).not.toHaveBeenCalled();
     d.flush();
@@ -102,22 +105,22 @@ describe('Account', () => {
   });
 
   it('a session lost mid-game only clears the user (sync pauses); signing in again restores it', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const account = new Account(api, { defer: queueMicrotask });
     await account.init();
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     expect(account.canSync(user.id)).toBe(true);
     await api.signOut(); // expiry reported by the client
     expect(account.state.user).toBeNull();
     expect(account.canSync(user.id)).toBe(false);
-    await account.signIn(mail('ana'), PW);
+    await signIn(account, mail('ana'));
     expect(account.canSync(user.id)).toBe(true);
     expect(account.canSync('someone-else')).toBe(false);
   });
 
   it('a token refresh of the same user does not reset the details nor notify', async () => {
-    const api = await apiWith('ana');
-    const user = await api.signIn(mail('ana'), PW);
+    const api = new FakeCloudApi();
+    const user = api.signInAs(mail('ana'));
     await api.acceptTerms(TERMS_VERSION);
     let emit!: (u: typeof user | null) => void;
     vi.spyOn(api, 'onAuthChange').mockImplementation((l) => {
@@ -135,22 +138,22 @@ describe('Account', () => {
 
   it('a failing change listener does not break the others', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const account = new Account(api, { defer: queueMicrotask });
     const ok = vi.fn();
     account.onChange(() => {
       throw new Error('boom');
     });
     account.onChange(ok);
-    await account.signIn(mail('ana'), PW);
+    await signIn(account, mail('ana'));
     expect(ok).toHaveBeenCalled();
   });
 
   it('signOut ends the session and keeps the account database', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     const opened = await openAccountStore(account, { factory, timers: { set: () => 0, clear: () => {} } });
     opened!.store.close();
     await account.signOut();
@@ -160,10 +163,10 @@ describe('Account', () => {
   });
 
   it('deleteMyData clears the cloud and the account database, so nothing is pushed back later', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     await account.acceptTerms();
     const timers = { set: () => 0, clear: () => {} };
     const first = await openAccountStore(account, { factory, timers });
@@ -184,10 +187,10 @@ describe('Account', () => {
   });
 
   it('a last push that lands after the settle wait does not bring deleted server data back', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask, settleTimeoutMs: 10 });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     const timers = { set: () => 0, clear: () => {} };
     const opened = await openAccountStore(account, { factory, timers });
     await idle(); // boot push (nothing pending) done
@@ -215,7 +218,7 @@ describe('Account', () => {
 
   it('a last push that lands after the local database is gone (but within the second wait) is removed by the second delete', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {}); // the closed store's progress write fails, as expected
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     let releasePush!: () => void;
     // The push is released right after the local database is deleted (which no longer waits for it,
@@ -228,7 +231,7 @@ describe('Account', () => {
       },
     } as unknown as IDBFactory;
     const account = new Account(api, { idb: () => deletingFactory, defer: queueMicrotask, settleTimeoutMs: 60 });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     const opened = await openAccountStore(account, { factory, timers: { set: () => 0, clear: () => {} } });
     await idle(); // boot push (nothing pending) done
     const gate = new Promise<void>((r) => (releasePush = r));
@@ -249,10 +252,10 @@ describe('Account', () => {
   });
 
   it('pausing and resuming for a deletion notifies listeners', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     const seen: boolean[] = [];
     account.onChange(() => seen.push(account.canSync(user.id)));
     await account.deleteMyData();
@@ -261,10 +264,10 @@ describe('Account', () => {
   });
 
   it('no push for the user starts while their data is being deleted', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     let release!: () => void;
     // The first server delete hangs until released; the second (after the local database) answers at once.
     vi.spyOn(api, 'deleteMyData')
@@ -278,60 +281,92 @@ describe('Account', () => {
     expect(account.canSync(user.id)).toBe(true);
   });
 
-  it('a recovery link sets passwordRecovery synchronously; updatePassword clears it and sets the password', async () => {
-    const api = await apiWith('ana');
-    const d = manualDefer();
-    const account = new Account(api, { defer: d.defer });
-    await account.init();
-    const updates = vi.spyOn(api, 'updatePassword');
+  it('loading lasts until the session restore settles, and notifies', async () => {
+    const api = new FakeCloudApi();
+    let release!: () => void;
+    const getUser = api.getUser.bind(api);
+    vi.spyOn(api, 'getUser').mockImplementation(async () => {
+      await new Promise<void>((r) => (release = r)); // Clerk still loading
+      return getUser();
+    });
+    const account = new Account(api, { defer: queueMicrotask });
+    expect(account.loading).toBe(true);
     const seen: boolean[] = [];
-    account.onChange(() => seen.push(account.passwordRecovery));
-    api.simulateRecovery(mail('ana'));
-    expect(account.passwordRecovery).toBe(true);
+    account.onChange(() => seen.push(account.loading));
+    const init = account.init();
+    await idle();
+    expect(account.loading).toBe(true);
+    release();
+    await init;
+    expect(account.loading).toBe(false);
+    expect(account.loadError).toBeNull();
+    expect(seen).toEqual([false]);
+  });
+
+  it('a failed load (Clerk unreachable) leaves the game signed out with a retryable network error', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const api = new FakeCloudApi();
+    api.signInAs(mail('ana')); // the session Clerk would find once it loads
+    const getUser = vi.spyOn(api, 'getUser').mockRejectedValueOnce(new CloudError('network', 'could not load Clerk'));
+    const account = new Account(api, { defer: queueMicrotask });
+    await expect(account.init()).resolves.toBeUndefined();
+    expect(account.loading).toBe(false);
+    expect(account.loadError?.kind).toBe('network');
+    expect(account.state.user).toBeNull();
+
+    const seen: [boolean, string | null][] = [];
+    account.onChange(() => seen.push([account.loading, account.loadError?.kind ?? null]));
+    await account.retry();
+    expect(getUser).toHaveBeenCalledTimes(2);
+    expect(account.loadError).toBeNull();
     expect(account.state.user?.email).toBe(mail('ana'));
-    expect(seen).toEqual([true]);
-    expect(updates).not.toHaveBeenCalled(); // nothing awaited inside the auth callback
-    d.flush();
-    await account.updatePassword('pw-new');
-    expect(account.passwordRecovery).toBe(false);
-    expect(seen[seen.length - 1]).toBe(false);
-    await account.signOut();
-    await account.signIn(mail('ana'), 'pw-new');
+    expect(seen[0]).toEqual([true, null]);
+    expect(seen).toContainEqual([false, null]);
   });
 
-  it('a recovery event for the already signed-in user still notifies; dismiss and sign-out clear it', async () => {
-    const api = await apiWith('ana');
-    const account = new Account(api, { defer: queueMicrotask });
+  it('follows the auth provider: sign-in, switch to another user, sign-out; never opens the sign-in window itself', async () => {
+    const api = new FakeCloudApi();
+    const opens = vi.spyOn(api, 'openSignIn');
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
     await account.init();
-    await account.signIn(mail('ana'), PW);
-    const listener = vi.fn();
-    account.onChange(listener);
-    api.simulateRecovery(mail('ana'));
-    expect(account.passwordRecovery).toBe(true);
-    expect(listener).toHaveBeenCalledTimes(1);
-    account.dismissPasswordRecovery();
-    expect(account.passwordRecovery).toBe(false);
-    api.simulateRecovery(mail('ana'));
-    await account.signOut();
-    expect(account.passwordRecovery).toBe(false);
+    expect(account.state.user).toBeNull();
+    const tokens = [account.signInToken];
+
+    const ana = api.signInAs(mail('ana'));
+    api.setAdmin(ana.id);
+    await account.whenReady();
+    expect(account.state).toEqual({ mode: 'cloud', user: ana, isAdmin: true, termsAccepted: false });
+    tokens.push(account.signInToken);
+
+    const bia = api.signInAs(mail('bia')); // another account, without signing out first
+    expect(account.state.user).toEqual(bia);
+    expect(account.state.isAdmin).toBe(false); // reset at once, before bia's details load
+    expect(account.canSync(ana.id)).toBe(false);
+    await account.whenReady();
+    expect(account.state.isAdmin).toBe(false);
+    tokens.push(account.signInToken);
+
+    await api.signOut(); // ended in Clerk (another tab, expiry)
+    expect(account.state.user).toBeNull();
+    tokens.push(account.signInToken);
+    expect(new Set(tokens).size).toBe(4);
+    expect(opens).not.toHaveBeenCalled();
   });
 
-  it('updatePassword needs a signed-in user; a failure keeps the recovery state', async () => {
-    const api = await apiWith('ana');
+  it('openSignIn asks the CloudApi (the fake signs in at once)', async () => {
+    const api = new FakeCloudApi();
     const account = new Account(api, { defer: queueMicrotask });
     await account.init();
-    await expect(account.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'auth' });
-    api.simulateRecovery(mail('ana'));
-    api.failNext(1);
-    await expect(account.updatePassword('pw-new')).rejects.toMatchObject({ kind: 'network' });
-    expect(account.passwordRecovery).toBe(true);
-    await expect(new Account(null).updatePassword('pw-new')).rejects.toBeInstanceOf(CloudError);
+    account.openSignIn();
+    await account.whenReady();
+    expect(account.state.user).not.toBeNull();
   });
 
   it('simulated is set only with a CloudApi and the option', async () => {
     expect(new Account(null, { simulated: true }).simulated).toBe(false);
-    expect(new Account(await apiWith(), { simulated: true }).simulated).toBe(true);
-    expect(new Account(await apiWith()).simulated).toBe(false);
+    expect(new Account(new FakeCloudApi(), { simulated: true }).simulated).toBe(true);
+    expect(new Account(new FakeCloudApi()).simulated).toBe(false);
   });
 
   it('is found in the game registry', () => {
@@ -362,10 +397,10 @@ describe('Account', () => {
 
     it('acceptTerms caches only the version, per user; a network failure on reload uses it', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const api = await apiWith('ana');
+      const api = new FakeCloudApi();
       const storage = memoryStorage();
       const account = new Account(api, { defer: queueMicrotask, termsStorage: storage });
-      const user = await account.signIn(mail('ana'), PW);
+      const user = await signIn(account, mail('ana'));
       await account.acceptTerms();
       expect([...storage.map]).toEqual([[termsCacheKey(user.id), TERMS_VERSION]]);
       expect(termsCacheKey(user.id)).toBe(`tcc-terms-${user.id}`);
@@ -378,8 +413,8 @@ describe('Account', () => {
 
     it('a successful details load refreshes the cache; any other failure or another version does not count', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const api = await apiWith('ana');
-      const user = await api.signIn(mail('ana'), PW);
+      const api = new FakeCloudApi();
+      const user = api.signInAs(mail('ana'));
       await api.acceptTerms(TERMS_VERSION);
       const storage = memoryStorage();
       expect((await reload(api, storage)).state.termsAccepted).toBe(true);
@@ -400,11 +435,11 @@ describe('Account', () => {
     });
 
     it('deleteMyData clears the cache; a broken storage is ignored', async () => {
-      const api = await apiWith('ana');
+      const api = new FakeCloudApi();
       const factory = new IDBFactory() as unknown as IDBFactory;
       const storage = memoryStorage();
       const account = new Account(api, { idb: () => factory, defer: queueMicrotask, termsStorage: storage });
-      const user = await account.signIn(mail('ana'), PW);
+      const user = await signIn(account, mail('ana'));
       await account.acceptTerms();
       await account.deleteMyData();
       expect(storage.getItem(termsCacheKey(user.id))).toBeNull();
@@ -428,10 +463,10 @@ describe('Account', () => {
   });
 
   it('events recorded offline stay in the account database and go out on the next boot', async () => {
-    const api = await apiWith('ana');
+    const api = new FakeCloudApi();
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask });
-    const user = await account.signIn(mail('ana'), PW);
+    const user = await signIn(account, mail('ana'));
     api.failNext(10); // offline the whole time
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const timers = { set: () => 0, clear: () => {} };

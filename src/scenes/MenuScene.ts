@@ -7,7 +7,6 @@ import { LOCAL_ACCESS, toolKeysEnabled } from './input/debugKeys';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
 import { createBrowserPlatform, openBrowserAccountStore } from './session/browserPlatform';
 import { accountFromRegistry, accountDbName, LocalDataBlockedError, type Account } from '../cloud/account';
-import { AuthPanel, NewPasswordPanel } from '../cloud/authPanel';
 import { ConsentPanel } from '../cloud/consentPanel';
 import { ImportPanel } from '../cloud/importPanel';
 import { adoptHistory, readLocalGuestHistory, readLegacyMarker, writeLegacyMarker, LEGACY_IMPORT_KEY, type LegacyImportAnswer } from '../cloud/adoptLocal';
@@ -19,7 +18,7 @@ import { buildAnalysisView } from '../debug/analysis/analysisViewModel';
 import { AnalysisPanel } from '../debug/analysis/analysisPanel';
 
 type Screen = 'main' | 'howto' | 'analysis' | 'panel';
-type PanelKind = 'auth' | 'consent' | 'deleteData' | 'newPassword' | 'import';
+type PanelKind = 'consent' | 'deleteData' | 'import';
 
 const FONT = 'monospace';
 const BUTTON_W = 480;
@@ -43,6 +42,15 @@ const COLOR = {
  * mode the account screens (login, consent, new password, delete confirmation) are DOM panels created
  * on open and destroyed on close; while one is open the menu ignores its own keys.
  */
+/** The status line, with the auth provider's loading and failure (interim, until the menu redesign). */
+function statusLine(account: Account): string {
+  if (account.mode === 'cloud' && !account.state.user) {
+    if (account.loading) return 'nuvem · carregando conta…';
+    if (account.loadError) return 'nuvem · sem conexão com o serviço de contas · Entrar: tentar de novo';
+  }
+  return accountStatusLine(account.state, account.simulated);
+}
+
 export class MenuScene extends Phaser.Scene {
   private screen: Screen = 'main';
   private selected = 0;
@@ -162,14 +170,12 @@ export class MenuScene extends Phaser.Scene {
     this.selected = keepSelection(this.items, prevId);
     this.buildButtons();
     const account = this.account;
-    this.statusText.setText(account ? accountStatusLine(account.state, account.simulated) : '');
+    this.statusText.setText(account ? statusLine(account) : '');
     if (!account || account.mode !== 'cloud') return;
     const signedIn = account.state.user !== null;
     const kind = this.accountPanel?.kind;
-    // Signed in by another path (session restored, another tab): the login form has nothing left to do.
-    if (kind === 'auth' && signedIn) this.closeAccountPanel();
     // The session ended while a signed-in panel was open.
-    if ((kind === 'consent' || kind === 'deleteData' || kind === 'newPassword' || kind === 'import') && !signedIn) this.closeAccountPanel();
+    if ((kind === 'consent' || kind === 'deleteData' || kind === 'import') && !signedIn) this.closeAccountPanel();
     // The consent is on the server already (our own acceptance, or the details finished loading after
     // Jogar opened the term): the player asked to play, so the run starts (startGame runs once).
     if (kind === 'consent' && playAction(account.state) === 'start') {
@@ -177,8 +183,7 @@ export class MenuScene extends Phaser.Scene {
       this.startGame();
       return;
     }
-    if (account.passwordRecovery && signedIn && this.accountPanel?.kind !== 'newPassword') this.openNewPassword(account);
-    else if (signedIn && account.state.termsAccepted) void this.maybeOfferImport(account);
+    if (signedIn && account.state.termsAccepted) void this.maybeOfferImport(account);
   }
 
   private move(delta: 1 | -1): void {
@@ -216,8 +221,12 @@ export class MenuScene extends Phaser.Scene {
         void this.openAnalysis();
         return;
       case 'login':
-        if (account?.mode === 'cloud') this.openAuth(account);
-        return; // local mode: no accounts
+        // Clerk's own window signs in or creates the account; the result arrives as an account change.
+        // Interim wiring: the menu redesign (next task) gives the loading and retry states their own items.
+        if (account?.mode !== 'cloud') return; // local mode: no accounts
+        if (account.loadError) void account.retry();
+        else account.openSignIn(); // nothing happens while Clerk is still loading
+        return;
       case 'logout':
         if (account) void this.signOut(account);
         return;
@@ -257,21 +266,6 @@ export class MenuScene extends Phaser.Scene {
     if (this.alive && this.screen === 'panel') this.showMain();
   }
 
-  private openAuth(account: Account): void {
-    this.openPanel('auth', () =>
-      new AuthPanel(document.body, {
-        simulated: account.simulated,
-        actions: {
-          signIn: (email, password) => account.signIn(email, password),
-          signUp: (email, password) => account.signUp(email, password),
-          resetPassword: (email) => account.resetPassword(email),
-        },
-        onDone: () => this.closeAccountPanel(),
-        onCancel: () => this.closeAccountPanel(),
-      }),
-    );
-  }
-
   private openConsent(account: Account): void {
     this.openPanel('consent', () =>
       new ConsentPanel(document.body, {
@@ -288,24 +282,6 @@ export class MenuScene extends Phaser.Scene {
     );
   }
 
-  private openNewPassword(account: Account): void {
-    this.openPanel('newPassword', () =>
-      new NewPasswordPanel(document.body, {
-        simulated: account.simulated,
-        email: account.state.user?.email ?? '',
-        updatePassword: (password) => account.updatePassword(password),
-        onDone: () => {
-          this.closeAccountPanel();
-          this.setNotice('Senha alterada.');
-        },
-        onCancel: () => {
-          this.closeAccountPanel(); // first: the account change below must not reopen it
-          account.dismissPasswordRecovery();
-        },
-      }),
-    );
-  }
-
   /** Whether the menu is idle: nothing running, no panel open, signed-in state unchanged. */
   private canOfferImport(account: Account, userId: string): boolean {
     return (
@@ -314,7 +290,6 @@ export class MenuScene extends Phaser.Scene {
       !this.accountBusy &&
       this.screen === 'main' &&
       this.accountPanel === null &&
-      !account.passwordRecovery &&
       account.state.user?.id === userId &&
       account.state.termsAccepted
     );

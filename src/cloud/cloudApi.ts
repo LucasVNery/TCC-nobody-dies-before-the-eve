@@ -1,7 +1,9 @@
 import type { LoggedEvent } from '../telemetry/schema';
 
 export interface CloudUser {
+  /** The Clerk user id (text, e.g. 'user_' + alphanumerics): the row owner on the server. */
   id: string;
+  /** The primary e-mail address; '' when the account has none. */
   email: string;
 }
 
@@ -36,18 +38,13 @@ export class CloudError extends Error {
   }
 }
 
-/** 'recovery': the session came from a password-recovery link (the player should set a new password). */
-export type AuthChangeEvent = 'recovery' | 'other';
-
 /** Everything the game needs from the cloud; the real client and the in-memory fake both implement it. */
 export interface CloudApi {
+  /** The signed-in user once the auth provider has loaded; rejects ('network') when it cannot load. */
   getUser(): Promise<CloudUser | null>;
-  signUp(email: string, password: string): Promise<{ needsEmailConfirmation: boolean }>;
-  signIn(email: string, password: string): Promise<CloudUser>;
+  /** Opens the provider's sign-in window (Clerk); the result arrives through onAuthChange. Never throws. */
+  openSignIn(): void;
   signOut(): Promise<void>;
-  resetPassword(email: string): Promise<void>;
-  /** Sets the signed-in user's password (after a recovery link, or any time while signed in). */
-  updatePassword(newPassword: string): Promise<void>;
   isAdmin(): Promise<boolean>;
   acceptedTermsVersion(): Promise<string | null>;
   acceptTerms(version: string): Promise<void>;
@@ -64,5 +61,5 @@ export interface CloudApi {
   /** Deletes the signed-in user's batches and consents; refused ('auth') unless that user is `expectedUserId`. */
   deleteMyData(expectedUserId: string): Promise<void>;
   /** Returns the unsubscribe function. The listener must stay synchronous (no client call awaited inside). */
-  onAuthChange(listener: (user: CloudUser | null, event?: AuthChangeEvent) => void): () => void;
+  onAuthChange(listener: (user: CloudUser | null) => void): () => void;
 }

@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { FakeCloudApi } from './fakeCloudApi';
+import { FAKE_DEFAULT_EMAIL, FakeCloudApi } from './fakeCloudApi';
 import { CloudError, type EventBatch } from './cloudApi';
 import type { LoggedEvent } from '../telemetry/schema';
 
-const MAIL_A = 'a@test.invalid';
-const MAIL_B = 'b@test.invalid';
-const PW = 'pw-one';
+// Built at runtime: no e-mail literals in the repo.
+const MAIL_A = ['a', 'test.invalid'].join('@');
+const MAIL_B = ['b', 'test.invalid'].join('@');
 
 function ev(session_id: string, seq: number, extra: Record<string, unknown> = {}): LoggedEvent {
   return { v: 2, seq, t_ms: seq, player_id: 'p', session_id, run_idx: 0, room_idx: 0, enc_idx: 0, type: 'x', ...extra };
@@ -18,25 +18,29 @@ async function expectKind(p: Promise<unknown>, kind: string): Promise<void> {
   await expect(p).rejects.toSatisfy((e: unknown) => e instanceof CloudError && e.kind === kind);
 }
 async function signedIn(api: FakeCloudApi, email = MAIL_A) {
-  await api.signUp(email, PW);
-  return api.signIn(email, PW);
+  return api.signInAs(email);
 }
 
 describe('FakeCloudApi', () => {
-  it('signs up and signs in, returning the user', async () => {
+  it('signInAs signs an account in (the same one again for the same e-mail), with a Clerk-like id', async () => {
     const api = new FakeCloudApi();
-    expect(await api.signUp(MAIL_A, PW)).toEqual({ needsEmailConfirmation: false });
-    const user = await api.signIn(MAIL_A, PW);
+    const user = api.signInAs(MAIL_A);
     expect(user.email).toBe(MAIL_A);
+    expect(user.id).toMatch(/^user_[A-Za-z0-9]+$/);
     expect(await api.getUser()).toEqual(user);
     await api.signOut();
     expect(await api.getUser()).toBeNull();
+    expect(api.signInAs(MAIL_A)).toEqual(user);
+    expect(api.signInAs(MAIL_B).id).not.toBe(user.id);
   });
 
-  it('rejects a wrong password with an auth error', async () => {
+  it('openSignIn signs the default account in at once', async () => {
     const api = new FakeCloudApi();
-    await api.signUp(MAIL_A, PW);
-    await expectKind(api.signIn(MAIL_A, 'wrong'), 'auth');
+    const seen: (string | null)[] = [];
+    api.onAuthChange((u) => seen.push(u?.email ?? null));
+    api.openSignIn();
+    expect(seen).toEqual([FAKE_DEFAULT_EMAIL]);
+    expect((await api.getUser())?.email).toBe(FAKE_DEFAULT_EMAIL);
   });
 
   it('notifies auth listeners until unsubscribed', async () => {
@@ -46,7 +50,7 @@ describe('FakeCloudApi', () => {
     await signedIn(api);
     await api.signOut();
     off();
-    await api.signIn(MAIL_A, PW);
+    api.signInAs(MAIL_A);
     expect(seen).toEqual([MAIL_A, null]);
   });
 
@@ -82,11 +86,6 @@ describe('FakeCloudApi', () => {
     (await api.pullAll()).pop();
     expect(api.batchesOf(user.id)[0].events).toHaveLength(2);
     expect(await api.pullAll()).toHaveLength(2);
-  });
-
-  it('can require e-mail confirmation on sign-up', async () => {
-    const api = new FakeCloudApi({ needsEmailConfirmation: true });
-    expect(await api.signUp(MAIL_A, PW)).toEqual({ needsEmailConfirmation: true });
   });
 
   it('pulls only the signed-in user events', async () => {
@@ -138,38 +137,6 @@ describe('FakeCloudApi', () => {
     expect(await api.isAdmin()).toBe(false);
     api.setAdmin(user.id);
     expect(await api.isAdmin()).toBe(true);
-  });
-
-  it('updatePassword changes the signed-in user password and requires a session', async () => {
-    const api = new FakeCloudApi();
-    await expectKind(api.updatePassword('pw-two'), 'auth');
-    await signedIn(api);
-    await api.updatePassword('pw-two');
-    await api.signOut();
-    await expectKind(api.signIn(MAIL_A, PW), 'auth');
-    expect((await api.signIn(MAIL_A, 'pw-two')).email).toBe(MAIL_A);
-  });
-
-  it('updatePassword fails with a network error when asked to', async () => {
-    const api = new FakeCloudApi();
-    await signedIn(api);
-    api.failNext(1);
-    await expectKind(api.updatePassword('pw-two'), 'network');
-    await api.signOut();
-    expect((await api.signIn(MAIL_A, PW)).email).toBe(MAIL_A);
-  });
-
-  it('simulateRecovery signs the account in with a recovery event', async () => {
-    const api = new FakeCloudApi();
-    await api.signUp(MAIL_A, PW);
-    const seen: [string | null, string | undefined][] = [];
-    api.onAuthChange((u, event) => seen.push([u?.email ?? null, event]));
-    api.simulateRecovery(MAIL_A);
-    expect(seen).toEqual([[MAIL_A, 'recovery']]);
-    expect((await api.getUser())?.email).toBe(MAIL_A);
-    await api.signOut();
-    expect(seen[1]).toEqual([null, 'other']);
-    expect(() => api.simulateRecovery(MAIL_B)).toThrow(CloudError);
   });
 
   it('refuses rows of another user than the session (as RLS WITH CHECK)', async () => {

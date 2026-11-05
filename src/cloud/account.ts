@@ -1,4 +1,4 @@
-import { CloudError, type AuthChangeEvent, type CloudApi, type CloudUser } from './cloudApi';
+import { CloudError, type CloudApi, type CloudUser } from './cloudApi';
 import { TERMS_VERSION } from './consentText';
 
 export interface AccountState {
@@ -16,7 +16,10 @@ export function accountFromRegistry(registry: { get(key: string): unknown }): Ac
   return value instanceof Account ? value : undefined;
 }
 
-/** Each account has its own local database, so two accounts in one browser never share events or sync progress. */
+/**
+ * Each account has its own local database, so two accounts in one browser never share events or sync progress.
+ * The id is Clerk's ('user_' + alphanumerics): any string is a valid IndexedDB name.
+ */
 export function accountDbName(userId: string): string {
   return `tcc-telemetry-${userId}`;
 }
@@ -26,7 +29,7 @@ const SETTLE_TIMEOUT_MS = 4000;
 /** Longest wait for a local-database deletion that another connection (an old tab) holds up. */
 export const DELETE_BLOCKED_TIMEOUT_MS = 3000;
 
-/** Per-user localStorage key holding only the accepted terms version (lets an offline reload play). */
+/** Per-user localStorage key holding only the accepted terms version (lets an offline reload play). Any string is a valid key. */
 export function termsCacheKey(userId: string): string {
   return `tcc-terms-${userId}`;
 }
@@ -93,8 +96,8 @@ export interface AccountOptions {
   /** IndexedDB holding the per-account databases; default the global one, read only when needed. */
   idb?: () => IDBFactory;
   /**
-   * Runs work outside an auth-change callback: supabase-js deadlocks when such a callback
-   * awaits another client call. Default: a zero-delay timeout.
+   * Runs work outside an auth-change callback, which must stay synchronous (it runs inside Clerk's
+   * session emission). Default: a zero-delay timeout.
    */
   defer?: (run: () => void) => void;
   settleTimeoutMs?: number;
@@ -154,8 +157,10 @@ export class Account {
   private readonly background = new Set<Promise<unknown>>();
   /** The user whose data is being deleted: no push for them starts meanwhile. */
   private deleting: string | null = null;
-  /** The session came from a password-recovery link and no new password was set yet. */
-  private recovering = false;
+  /** Cloud mode: the session is being restored (the auth provider is loading). */
+  private _loading: boolean;
+  private _loadError: CloudError | null = null;
+  private restoring: Promise<void> | null = null;
   private readonly termsStorage: TermsStorage | undefined;
   private readonly channel: AccountChannel | undefined;
   private unsubscribeChannel: (() => void) | null = null;
@@ -165,6 +170,7 @@ export class Account {
   constructor(private readonly api: CloudApi | null, opts: AccountOptions = {}) {
     this._state = { mode: api ? 'cloud' : 'local', user: null, isAdmin: false, termsAccepted: false };
     this.simulated = api !== null && (opts.simulated ?? false);
+    this._loading = api !== null;
     this.termsVersion = opts.termsVersion ?? TERMS_VERSION;
     this.idb = opts.idb ?? (() => indexedDB);
     this.defer = opts.defer ?? ((run) => void setTimeout(run, 0));
@@ -227,37 +233,84 @@ export class Account {
     return this.api;
   }
 
-  /** Restores a stored session; never rejects. Idempotent. */
+  /**
+   * Cloud mode: true from creation until the first session restore settles (the auth provider is
+   * loading; the menu says so), and during retry(). Changes notify the onChange listeners. Always
+   * false in local mode.
+   */
+  get loading(): boolean {
+    return this._loading;
+  }
+
+  /**
+   * Why the last session restore failed ('network' when Clerk could not load), null otherwise.
+   * The game goes on signed out; retry() tries again.
+   */
+  get loadError(): CloudError | null {
+    return this._loadError;
+  }
+
+  /** Restores the session (loads the auth provider); never rejects. Idempotent. */
   init(): Promise<void> {
     if (!this.initing) this.initing = this.restore();
     return this.initing;
   }
 
+  /** Tries the session restore again (after loadError); never rejects. */
+  retry(): Promise<void> {
+    if (!this.initing) return this.init();
+    return this.restoreSession();
+  }
+
+  /** Resolves once the session is restored and the current user's details are loaded; never rejects. */
+  async whenReady(): Promise<void> {
+    await this.init();
+    if (this.restoring) await this.restoring;
+    await this.loadDetails(this.userToken);
+  }
+
   private async restore(): Promise<void> {
     const api = this.api;
     if (!api) return;
-    this.unsubscribeAuth = api.onAuthChange((user, event) => this.onAuth(user, event));
-    let user: CloudUser | null = null;
-    try {
-      user = await api.getUser();
-    } catch (err) {
-      console.warn('[account] could not restore the session', err);
-    }
-    if (user) {
-      this.setUser(user);
-      await this.loadDetails(this.userToken);
-    }
+    this.unsubscribeAuth = api.onAuthChange((user) => this.onAuth(user));
+    await this.restoreSession();
+  }
+
+  private restoreSession(): Promise<void> {
+    const api = this.api;
+    if (!api) return Promise.resolve();
+    if (this.restoring) return this.restoring;
+    const restoring = (async () => {
+      this.setLoading(true, null);
+      let user: CloudUser | null = null;
+      let error: CloudError | null = null;
+      try {
+        user = await api.getUser();
+      } catch (err) {
+        console.warn('[account] could not restore the session', err);
+        error = err instanceof CloudError ? err : new CloudError('other', String(err));
+      }
+      this.restoring = null;
+      this.setLoading(false, error);
+      if (user) {
+        this.setUser(user);
+        await this.loadDetails(this.userToken);
+      }
+    })();
+    this.restoring = restoring;
+    return restoring;
+  }
+
+  private setLoading(loading: boolean, error: CloudError | null): void {
+    if (this._loading === loading && this._loadError === error) return;
+    this._loading = loading;
+    this._loadError = error;
+    this.update({});
   }
 
   /** Synchronous on purpose (see AccountOptions.defer): only the state changes here. */
-  private onAuth(user: CloudUser | null, event: AuthChangeEvent = 'other'): void {
-    const wasRecovering = this.recovering;
-    if (!user) this.recovering = false;
-    else if (event === 'recovery') this.recovering = true;
-    if (!this.setUser(user)) {
-      if (this.recovering !== wasRecovering) this.update({});
-      return;
-    }
+  private onAuth(user: CloudUser | null): void {
+    if (!this.setUser(user)) return;
     if (!user) return;
     const token = this.userToken;
     this.defer(() => void this.loadDetails(token));
@@ -311,40 +364,12 @@ export class Account {
     return this.loadDetails(this.userToken);
   }
 
-  async signIn(email: string, password: string): Promise<CloudUser> {
-    const api = this.requireApi();
-    const user = await api.signIn(email, password);
-    this.setUser(user);
-    await this.loadDetails(this.userToken);
-    return user;
-  }
-
-  async signUp(email: string, password: string): Promise<{ needsEmailConfirmation: boolean }> {
-    return this.requireApi().signUp(email, password);
-  }
-
-  async resetPassword(email: string): Promise<void> {
-    return this.requireApi().resetPassword(email);
-  }
-
-  /** True while the session came from a password-recovery link and no new password was set (the menu asks for one). */
-  get passwordRecovery(): boolean {
-    return this.recovering;
-  }
-
-  /** Sets the signed-in user's new password; ends the recovery state. The password is not kept. */
-  async updatePassword(newPassword: string): Promise<void> {
-    const api = this.requireApi();
-    if (!this._state.user) throw new CloudError('auth', 'not signed in');
-    await api.updatePassword(newPassword);
-    this.dismissPasswordRecovery();
-  }
-
-  /** The player chose not to set a new password now. */
-  dismissPasswordRecovery(): void {
-    if (!this.recovering) return;
-    this.recovering = false;
-    this.update({});
+  /**
+   * Opens the sign-in window (Clerk; the fake signs in at once). The result arrives through the auth
+   * change, never from here. Nothing happens while the auth provider is still loading.
+   */
+  openSignIn(): void {
+    this.requireApi().openSignIn();
   }
 
   /** Lets the last pushes go out first (bounded), then ends the session. The account's local database is kept. */
@@ -352,7 +377,6 @@ export class Account {
     const api = this.requireApi();
     await this.settle();
     await api.signOut();
-    this.recovering = false;
     this.setUser(null);
   }
 

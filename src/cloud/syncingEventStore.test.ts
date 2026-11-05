@@ -8,7 +8,6 @@ import type { LoggedEvent } from '../telemetry/schema';
 
 // Built at runtime: no credential or e-mail literals in the repo.
 const MAIL = ['player', 'test.invalid'].join('@');
-const PW = `pw-${4242}`;
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -20,8 +19,7 @@ const range = (s: string, from: number, to: number): LoggedEvent[] =>
 
 async function signedInApi(opts: { pullPageSize?: number } = {}): Promise<{ api: FakeCloudApi; userId: string; sync: SyncApi }> {
   const api = new FakeCloudApi(opts);
-  await api.signUp(MAIL, PW);
-  const user = await api.signIn(MAIL, PW);
+  const user = api.signInAs(MAIL);
   return { api, userId: user.id, sync: syncApiFor(api, user.id) };
 }
 

@@ -18,6 +18,7 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@clerk/clerk-js": "6.40.0",
     "@supabase/supabase-js": "2.118.0",
     "phaser": "^3.80.1"
   }

@@ -8,14 +8,13 @@ import { IndexedDbEventStore, MemoryEventStore, type EventStore } from '../telem
 import { adoptHistory } from './adoptLocal';
 import { loadProfileState, type BootState } from '../telemetry/bootstrap';
 import type { LoggedEvent } from '../telemetry/schema';
-import type { EventBatch, PullPage } from './cloudApi';
+import type { CloudUser, EventBatch, PullPage } from './cloudApi';
 import { SessionController } from '../scenes/session/sessionController';
 import { createBrowserPlatform } from '../scenes/session/browserPlatform';
 import type { Platform } from '../scenes/session/platform';
 
 // Built at runtime: no credential or e-mail literals in the repo.
 const mail = (name: string): string => [name, 'test.invalid'].join('@');
-const PW = `pw-${4242}`;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -85,8 +84,12 @@ function machine(api: FakeCloudApi): Machine {
   return { factory, account, clock, online, platform };
 }
 
-async function register(api: FakeCloudApi, name: string): Promise<void> {
-  await api.signUp(mail(name), PW);
+/** Signs in through the fake (as finishing Clerk's window would) and waits until the account loaded the details. */
+async function signIn(account: Account, email: string): Promise<CloudUser> {
+  await account.init();
+  const user = (account.cloud as FakeCloudApi).signInAs(email);
+  await account.whenReady();
+  return user;
 }
 
 /** A short session: one death (run 0 ends) and an action in run 1, then the scene leaves. */
@@ -129,9 +132,8 @@ function ev(player_id: string, session_id: string, seq: number): LoggedEvent {
 describe('openAccountStore (boot with sync)', () => {
   it('a new machine rebuilds, from the downloaded log, the same profile the original local log gives', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const a = machine(api);
-    const user = await a.account.signIn(mail('ana'), PW);
+    const user = await signIn(a.account, mail('ana'));
     await playSession(a);
     await playSession(a);
     await a.account.signOut(); // waits for the last push of the closed store
@@ -143,7 +145,7 @@ describe('openAccountStore (boot with sync)', () => {
     expect(keys(serverEvents(api, user.id))).toEqual(keys(originalEvents));
 
     const b = machine(api);
-    await b.account.signIn(mail('ana'), PW);
+    await signIn(b.account, mail('ana'));
     const opened = await b.platform.openStore();
     expect(keys(await opened.store.readAll())).toEqual(keys(originalEvents));
     const fromCloud = await loadProfileState(opened.store, () => 'unused');
@@ -154,9 +156,8 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('new sessions log the account id as player_id, set in meta before the profile is loaded', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const user = await m.account.signIn(mail('ana'), PW);
+    const user = await signIn(m.account, mail('ana'));
     const c = await playSession(m);
     expect(c.status().playerId).toBe(user.id);
     const store = await IndexedDbEventStore.open(m.factory, accountDbName(user.id));
@@ -169,14 +170,12 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('two accounts in one browser use separate databases and never see or push each other\'s events', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
-    await register(api, 'bia');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     await playSession(m);
     await m.account.signOut();
 
-    const bia = await m.account.signIn(mail('bia'), PW);
+    const bia = await signIn(m.account, mail('bia'));
     const c = await playSession(m);
     expect(c.status().playerId).toBe(bia.id);
     await m.account.signOut();
@@ -197,14 +196,12 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('a store left open by one account pushes nothing while another account is signed in', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
-    await register(api, 'bia');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const { store } = await m.platform.openStore();
     // ana's session expires and bia signs in elsewhere on the same client; ana's game keeps recording
     await api.signOut();
-    const bia = await m.account.signIn(mail('bia'), PW);
+    const bia = await signIn(m.account, mail('bia'));
     await store.append([ev(ana.id, 's-ana', 0), ev(ana.id, 's-ana', 1)]);
     m.clock.fire();
     for (const l of m.online) l();
@@ -216,9 +213,8 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('only events of the account itself are pushed (an imported foreign session stays local)', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const { store } = await m.platform.openStore();
     await store.append([ev('someone-else', 's-x', 0), ev(ana.id, 's-ana', 0)]);
     store.close();
@@ -228,13 +224,12 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('the local (pre-login) database is never synced', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
     const legacy = await IndexedDbEventStore.open(m.factory); // tcc-telemetry
     await legacy.setMeta('player_id', 'browser-uuid');
     await legacy.append([ev('browser-uuid', 's-old', 0)]);
     legacy.close();
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     await playSession(m);
     await m.account.signOut();
     expect(serverEvents(api, ana.id).some((e) => e.session_id === 's-old')).toBe(false);
@@ -247,15 +242,14 @@ describe('openAccountStore (boot with sync)', () => {
   it('a failing pull does not stop the game from starting on the local copy', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     await playSession(m);
     const local = await IndexedDbEventStore.open(m.factory, accountDbName(ana.id));
     const before = (await local.readAll()).length;
     local.close();
     await m.account.signOut(); // a new sign-in pulls again (the first one already pulled in this page load)
-    await m.account.signIn(mail('ana'), PW);
+    await signIn(m.account, mail('ana'));
 
     api.failNext(5);
     const c = new SessionController({ platform: m.platform, entitySize: 20, nextSeed: () => 4242 });
@@ -270,9 +264,8 @@ describe('openAccountStore (boot with sync)', () => {
   it('a pull that hangs is given up after the time limit, and its late answer writes nothing', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     let answer!: (page: PullPage) => void;
     vi.spyOn(api, 'pullPage').mockImplementation(() => new Promise((r) => (answer = r)));
 
@@ -295,11 +288,10 @@ describe('openAccountStore (boot with sync)', () => {
   it('a pull whose session check hangs is given up after the time limit too', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
     await m.account.init();
-    const ana = await m.account.signIn(mail('ana'), PW);
-    await api.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
+    await api.signInAs(mail('ana'));
     const getUser = api.getUser.bind(api);
     let answer!: () => void;
     const gate = new Promise<void>((r) => (answer = r));
@@ -329,8 +321,7 @@ describe('openAccountStore (boot with sync)', () => {
   it('a session restore that hangs starts the game signed out, and the account catches up later', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
-    const ana = await api.signIn(mail('ana'), PW); // stored session from an earlier visit
+    const ana = await api.signInAs(mail('ana')); // stored session from an earlier visit
     const getUser = api.getUser.bind(api);
     let answer!: () => void;
     const gate = new Promise<void>((r) => (answer = r));
@@ -351,9 +342,8 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('losing the session mid-game pauses the push; signing in again sends what piled up', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const { store } = await m.platform.openStore();
 
     await api.signOut(); // expired session, reported through onAuthChange
@@ -364,7 +354,7 @@ describe('openAccountStore (boot with sync)', () => {
     expect(serverEvents(api, ana.id)).toEqual([]);
     expect(m.clock.pending.size).toBe(0); // no retry loop while signed out
 
-    await m.account.signIn(mail('ana'), PW);
+    await signIn(m.account, mail('ana'));
     await vi.waitFor(() => expect(keys(serverEvents(api, ana.id))).toEqual(['s#0', 's#1']));
     store.close();
   });
@@ -372,9 +362,8 @@ describe('openAccountStore (boot with sync)', () => {
   it('a failed push is retried on a timer with growing delays, and when the network comes back', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const { store } = await m.platform.openStore();
     await idle(); // the boot push (nothing pending) is done
 
@@ -394,9 +383,8 @@ describe('openAccountStore (boot with sync)', () => {
 
   it('close cancels its timers and listeners, and still pushes the last events', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const { store } = await m.platform.openStore();
     await store.append([ev(ana.id, 's', 0)]);
     expect(m.clock.pending.size).toBe(1);
@@ -480,9 +468,8 @@ describe('pull once per sign-in, with partial progress (I1)', () => {
   it('a slow pull keeps the pages that arrived before the time limit, and the next open continues from there', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi({ pullPageSize: 2 });
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     await seedRows(api, ana.id, 6); // 12 events in 3 pages
 
     const realPage = api.pullPage.bind(api);
@@ -514,7 +501,7 @@ describe('pull once per sign-in, with partial progress (I1)', () => {
     await idle();
 
     await m.account.signOut();
-    await m.account.signIn(mail('ana'), PW);
+    await signIn(m.account, mail('ana'));
     const fourth = await m.platform.openStore(); // a new sign-in pulls again, from the start
     expect(page).toHaveBeenCalledTimes(4);
     expect(page.mock.calls[0][0]).toBeNull();
@@ -523,9 +510,8 @@ describe('pull once per sign-in, with partial progress (I1)', () => {
 
   it('pushed rows carry the user the store is bound to', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const m = machine(api);
-    const ana = await m.account.signIn(mail('ana'), PW);
+    const ana = await signIn(m.account, mail('ana'));
     const push = vi.spyOn(api, 'pushBatches');
     const { store } = await m.platform.openStore();
     await store.append([ev(ana.id, 's', 0)]);
@@ -554,14 +540,13 @@ describe('two tabs of one account and data deletion (I4)', () => {
   it("deleting in one tab closes the other tab's store (no blocked delete, nothing pushed back) and tells it", async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const factory = new IDBFactory() as unknown as IDBFactory;
     const channel = channelPair();
     const tabA = new Account(api, { idb: () => factory, defer: queueMicrotask, channel });
     const tabB = new Account(api, { idb: () => factory, defer: queueMicrotask, channel });
     await tabA.init();
     await tabB.init();
-    const ana = await tabA.signIn(mail('ana'), PW);
+    const ana = await signIn(tabA, mail('ana'));
     await tabA.acceptTerms();
     await vi.waitFor(() => expect(tabB.state.user?.id).toBe(ana.id));
     await tabB.refresh();
@@ -601,10 +586,9 @@ describe('two tabs of one account and data deletion (I4)', () => {
 
   it('a connection that never closes (an old tab) makes the deletion fail with a clear message instead of hanging', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'ana');
     const factory = new IDBFactory() as unknown as IDBFactory;
     const account = new Account(api, { idb: () => factory, defer: queueMicrotask, deleteBlockedTimeoutMs: 20 });
-    const ana = await account.signIn(mail('ana'), PW);
+    const ana = await signIn(account, mail('ana'));
     const opened = await openAccountStore(account, { factory, timers: manualTimers().timers });
     opened!.store.close();
     await idle();
@@ -633,9 +617,8 @@ describe('two tabs of one account and data deletion (I4)', () => {
 describe('adopting the pre-login history (Task 9)', () => {
   it('the adopted events are pushed to the account with their keys unchanged', async () => {
     const api = new FakeCloudApi();
-    await register(api, 'adopt');
     const m = machine(api);
-    const user = await m.account.signIn(mail('adopt'), PW);
+    const user = await signIn(m.account, mail('adopt'));
     const history = [ev('local-old', 's1', 0), ev('local-old', 's1', 1), ev('local-old', 's2', 0)];
     const opened = await openAccountStore(m.account, { factory: m.factory, timers: m.clock.timers });
     await adoptHistory(history, user.id, opened!.store);
