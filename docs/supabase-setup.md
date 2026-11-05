@@ -1,7 +1,8 @@
-# Supabase e Vercel: roteiro de configuração
+# Clerk, Supabase e Vercel: roteiro de configuração
 
 Passo a passo para o autor colocar no ar as contas e o armazenamento dos eventos na nuvem.
-Especificação: `docs/superpowers/specs/2026-11-03-supabase-design.md` (seções 5 a 8, 12 e 13).
+Arquitetura: o **Clerk** autentica (janela de entrada, e-mails, sessão); o **Supabase** é só o banco de dados; a **Vercel** hospeda o jogo. O id de cada jogador é o id do usuário no Clerk (texto como `user_...`).
+Especificações: `docs/superpowers/specs/2026-11-03-supabase-design.md` (dados e sincronização) e `docs/superpowers/specs/2026-11-05-clerk-auth-design.md` (autenticação com o Clerk).
 Arquivos: `supabase/migrations/0001_init.sql` (esquema e regras de acesso) e `supabase/tests/rls_check.sql` (verificação das regras).
 
 Todas as ações abaixo são feitas pelo autor, no painel de cada serviço. Nenhuma chave vai para o repositório.
@@ -29,49 +30,45 @@ O banco identifica cada jogador pelo **id do usuário no Clerk** (texto como `us
 
 A migração roda uma vez só. Rodar de novo dá erro de "já existe"; isso é esperado e não estraga nada (ela está dentro de uma transação).
 
-## 3. Autenticação
+## 3. Autenticação com Clerk
 
-No painel, em **Authentication** (procure por "Sign In / Providers" ou "Providers" e por "URL Configuration"):
+Tudo aqui é feito nos painéis do Clerk (<https://clerk.com>) e do Supabase. Os nomes de menus mudam; procure pelo termo entre aspas.
 
-1. Provedor **Email**: ligado.
-2. **Confirm email** (confirmação de e-mail): ligado.
-3. **Site URL**: a URL da Vercel quando existir (`https://<SEU_PROJETO>.vercel.app`); até lá, `http://localhost:5173`.
-4. **Redirect URLs** (URLs permitidas de redirecionamento, usadas pela confirmação de e-mail e pela recuperação de senha). Cadastre as duas:
-   - `http://localhost:5173/**`
-   - `https://<SEU_PROJETO>.vercel.app/**`
+1. **Criar a aplicação no Clerk.** Entre no painel do Clerk e crie uma aplicação nova (Create application). O Clerk cria uma instância de **desenvolvimento**; a de produção é tratada na seção 7.2.
+2. **Escolher os métodos de entrada** (procure por "User & Authentication" ou "Sign-in options"):
+   - **E-mail** (com código de verificação ou senha, à escolha do autor): suficiente para a pesquisa. O Clerk envia os próprios e-mails (verificação, recuperação); **não é preciso configurar SMTP** no Supabase nem em outro lugar.
+   - **Google** (opcional): em desenvolvimento o Clerk usa credenciais compartilhadas; **em produção é preciso criar credenciais Google próprias**. O autor mencionou que isso exigiria CNPJ: **a confirmar** (não verificado). Sem Google, o e-mail funciona.
+3. **Ativar a integração com o Supabase no Clerk.** No painel do Clerk, procure por "Integrations" ou "Supabase" e ative a integração. O painel mostra um **domínio do Clerk** (o endereço da instância); copie-o. Essa integração faz o token de sessão do Clerk ser aceito pelo Supabase e acrescenta ao token a claim `role` = `authenticated`.
+4. **Adicionar o Clerk como provedor no Supabase.** No painel do Supabase, em **Authentication > Sign In / Providers** (procure por "Third-Party Auth"), adicione o **Clerk** e cole o domínio copiado no passo 3.
+5. **Conferir o papel do token.** O token precisa chegar com `role` = `authenticated` (seção 2: sem isso o banco o trata como `anon`, sem acesso a nada). Confira na integração do Clerk que a claim `role` está ligada; a conferência real é um item da seção 12.
+6. **DESLIGAR os cadastros do Supabase Auth.** Em **Authentication > Sign In / Providers**, desligue o provedor **Email** e o login **anônimo** (Anonymous sign-ins), e deixe desligada qualquer outra forma de cadastro no Supabase (procure por "Allow new users to sign up"). O jogo só usa tokens do Clerk. Se os cadastros do Supabase ficarem ligados, qualquer pessoa com a chave pública pode obter do próprio Supabase um token `authenticated` cujo `sub` é um uuid: não dá acesso aos dados de outro usuário (as regras de linha comparam o `sub`), mas permite gravar lixo no banco com um id que não é de um jogador.
 
-### 3.1 SMTP próprio: OBRIGATÓRIO antes de chamar participantes
-
-O servidor de e-mail embutido do Supabase só entrega mensagens para endereços de membros da equipe do projeto (da organização no Supabase) e tem limite muito baixo (cerca de 2 e-mails por hora; conferir o valor atual na documentação). Ele serve **só** para a conta de teste do próprio autor. Com ele, um participante comum não recebe o e-mail de confirmação e não consegue criar a conta.
-
-Antes de coletar dados de participantes:
-
-1. Em **Authentication**, procure por **SMTP Settings** e ligue o SMTP próprio (custom SMTP), com os dados de um provedor de e-mail transacional (host, porta, usuário, senha do SMTP e o remetente). A senha do SMTP fica só no painel do Supabase, nunca no repositório.
-2. Depois, em **Authentication**, procure por **Rate Limits** e ajuste o limite de e-mails por hora para o número esperado de cadastros.
-3. Teste criando uma conta com um e-mail que **não** seja de membro da equipe e confira que a confirmação chega.
+Não há "Site URL" nem "Redirect URLs" do Supabase para configurar: o Supabase não participa do login. As URLs permitidas ficam no Clerk (seção 7.2).
 
 ## 4. Chaves no ambiente local
 
-1. No painel, procure por **Project Settings > API** (ou "API Keys" / "Data API"). Copie:
+1. No painel do **Clerk**, procure por "API Keys" e copie a **Publishable key** (começa com `pk_`; a de desenvolvimento e a de produção são diferentes). A **Secret key** (`sk_...`) **não** é copiada para lugar nenhum do jogo.
+2. No painel do **Supabase**, procure por **Project Settings > API** (ou "API Keys" / "Data API"). Copie:
    - **Project URL** (`https://<algo>.supabase.co`);
-   - a chave pública. Projetos novos podem mostrar chaves no formato novo: **`sb_publishable_...`** (pública) e **`sb_secret_...`** (secreta), além ou no lugar das antigas **anon** e **service_role**. Use a **publishable** (`sb_publishable_...`) ou, se só houver as antigas, a **anon**. Ela vai em `VITE_SUPABASE_ANON_KEY` (o nome da variável continua o mesmo).
-2. Na raiz do repositório, copie `.env.example` para `.env.local` e preencha:
+   - a chave pública. Projetos novos podem mostrar chaves no formato novo: **`sb_publishable_...`** (pública) e **`sb_secret_...`** (secreta), além ou no lugar das antigas **anon** e **service_role**. Use a **publishable** (`sb_publishable_...`) ou, se só houver as antigas, a **anon**. Ela vai em `VITE_SUPABASE_ANON_KEY` (o nome da variável continua exatamente esse, mesmo recebendo a chave publishable).
+3. Na raiz do repositório, copie `.env.example` para `.env.local` e preencha as **três** variáveis:
 
    ```
+   VITE_CLERK_PUBLISHABLE_KEY=<chave publishable do Clerk (pk_...)>
    VITE_SUPABASE_URL=https://<algo>.supabase.co
-   VITE_SUPABASE_ANON_KEY=<chave publishable (sb_publishable_...) ou anon>
+   VITE_SUPABASE_ANON_KEY=<chave publishable do Supabase (sb_publishable_...) ou anon>
    ```
 
-3. `.env.local` está no `.gitignore` e nunca vai para o repositório.
+4. `.env.local` está no `.gitignore` e nunca vai para o repositório.
 
-A chave publishable/`anon` é pública por desenho: ela vai dentro do jogo enviado ao navegador, e a segurança está nas regras de linha (RLS), não em esconder a chave.
-A chave secreta (**`sb_secret_...`** ou a antiga **`service_role`**) ignora todas as regras: o jogo **nunca** a usa, e ela **nunca** vai para `.env.local`, para a Vercel ou para qualquer arquivo do repositório.
+As chaves publishable do Clerk e do Supabase são públicas por desenho: vão dentro do jogo enviado ao navegador, e a segurança está nas regras de linha (RLS) e nas sessões do Clerk, não em esconder a chave.
+**Nunca** use no jogo, em `.env.local`, na Vercel ou em qualquer arquivo do repositório: a **Secret key do Clerk** (`sk_...`) e a chave secreta do Supabase (**`sb_secret_...`** ou a antiga **`service_role`**, que ignora todas as regras).
 
-Sem `.env.local` o jogo continua no modo local de hoje (sem login, só IndexedDB).
+O modo nuvem só liga com as **três** variáveis preenchidas. Se faltar qualquer uma, o jogo roda **em silêncio** no modo local de antes (sem login, só IndexedDB, sem nenhuma coleta).
 
 ## 5. Tornar-se administrador
 
-1. Rode o jogo (`npm run dev`, em `http://localhost:5173`) e crie a sua conta pelo menu do jogo.
+1. Rode o jogo (`npm run dev`, em `http://localhost:5173`) e crie a sua conta pelo menu do jogo (Entrar / Criar conta, que abre a janela do Clerk).
 2. No painel do **Clerk**, na lista de usuários (procure por "Users"), abra a sua conta e copie o **id do usuário** (um texto que começa com `user_`).
 3. No **SQL Editor** do Supabase, rode (troque o parâmetro pelo id copiado; o id não é gravado em nenhum arquivo do repositório):
 
@@ -92,10 +89,11 @@ A tabela `admins` só se altera assim, por SQL no painel; o jogo não tem como e
 2. No **SQL Editor**, cole o conteúdo inteiro de `supabase/tests/rls_check.sql` e execute.
 3. **O editor vai mostrar um ERRO.** Isso é proposital: o roteiro termina levantando um erro cuja mensagem é o relatório, e o erro faz o banco desfazer tudo o que o roteiro criou (lotes, consentimentos e a linha em `admins` de dois usuários simulados).
 4. Leia a mensagem: uma linha por verificação com `OK` ou `FALHOU`, e no fim `RESULTADO: TODOS OK` ou `RESULTADO: HA FALHAS`. Se a mensagem for outra, o roteiro não conseguiu nem começar (por exemplo, a migração não foi aplicada nesse projeto).
-5. Não é preciso criar usuários: o roteiro simula dois jogadores (`user_test_a` e `user_test_b`, ids falsos) colocando o `sub` direto nas claims do token, como o PostgREST faz com o token do Clerk. O Clerk nem precisa estar configurado no projeto de teste.
+5. Não é preciso criar usuários e o roteiro **não usa `auth.users`**: ele simula dois jogadores (`user_test_a` e `user_test_b`, ids falsos) colocando o `sub` direto nas claims do token (`request.jwt.claims`), como o PostgREST faz com o token do Clerk. O Clerk nem precisa estar configurado no projeto de teste.
+   - As verificações 48 e 49 aceitam **dois** códigos de erro; depois da primeira execução real, estreite-as para o código que realmente apareceu.
 6. Só considere a verificação concluída com `RESULTADO: TODOS OK`. Qualquer `FALHOU` bloqueia a coleta de dados até ser entendido.
 
-Este roteiro **não foi executado** durante o desenvolvimento (não havia projeto Supabase disponível); rodá-lo num projeto real é uma verificação que só o autor pode fazer (seção 11).
+Este roteiro **não foi executado** durante o desenvolvimento (não havia projeto Supabase disponível); rodá-lo num projeto real é uma verificação que só o autor pode fazer (seção 12).
 
 O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não insere lote em nome de B; A insere e reenvia (upsert) o próprio lote, e um reenvio menor (desatualizado) não encolhe o lote guardado; sem `user_id`, o lote e o consentimento ficam com o `sub` do token; lotes acima de 1000 eventos ou 1 MiB são recusados; A não lê `events_flat`; A não se coloca em `admins` nem vê os registros de outros; o administrador B lê todos os lotes, consentimentos e `events_flat` (sem duplicatas de lotes reenviados); um token sem `sub` (ou com `sub` vazio) não lê nem grava nada; `delete_my_data(expected)` apaga só os dados de quem chama, é recusada sem usuário e é recusada (sem apagar nada) quando `expected` não é quem está logado, de modo que o `sub` de A nunca apaga dados de B; `anon` (sem login), mesmo com o `sub` de outro usuário no token, não lê nem escreve nada.
 
@@ -103,25 +101,33 @@ O que o roteiro confere: A não lê nem altera nem apaga dados de B; A não inse
 
 1. Em <https://vercel.com>, importe o repositório do GitHub (Add New > Project, ou procure por "Import Project").
 2. Framework: **Vite**. Build command: `npm run build`. Output directory: `dist`. (A Vercel costuma detectar sozinha; confira.)
-3. Em **Settings > Environment Variables** do projeto, crie as duas variáveis abaixo **nos ambientes Production E Preview**:
+3. Em **Settings > Environment Variables** do projeto, crie as três variáveis abaixo **nos ambientes Production E Preview**:
+   - `VITE_CLERK_PUBLISHABLE_KEY` = chave publishable do Clerk (`pk_...`; **nunca** a `sk_...`)
    - `VITE_SUPABASE_URL` = Project URL
-   - `VITE_SUPABASE_ANON_KEY` = chave publishable (`sb_publishable_...`) ou anon (**nunca** a secreta / `service_role`)
+   - `VITE_SUPABASE_ANON_KEY` = chave publishable do Supabase (`sb_publishable_...`) ou anon (**nunca** a secreta / `service_role`)
 
    As variáveis `VITE_*` entram no pacote no momento do build: depois de criar ou mudar uma, faça um novo deploy (Redeploy).
-4. Depois do primeiro deploy, copie a URL do site (`https://<SEU_PROJETO>.vercel.app`) e volte ao passo 3 (Site URL e Redirect URLs) no Supabase.
-5. Teste no site: criar conta, confirmar e-mail, aceitar o termo, jogar, abrir em outro navegador e ver o mesmo perfil.
+4. Depois do primeiro deploy, copie a URL do site (`https://<SEU_PROJETO>.vercel.app`) e cadastre-a no Clerk (seção 7.2).
+5. Teste no site: criar conta (com verificação de e-mail), aceitar o termo, jogar, abrir em outro navegador e ver o mesmo perfil.
+
+> **ATENÇÃO:** um build da Vercel **sem as três** variáveis de ambiente roda em **modo local**: não há login nem coleta de dados, e as teclas de desenvolvimento (F2, F3, F8, F9, Tab) ficam **expostas a todos**. Se o site publicado não mostrar "Entrar / Criar conta", alguma variável está faltando (ou o deploy foi feito antes de criá-las: faça Redeploy).
 
 ### 7.1 Checklist de deploy
 
-- [ ] `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` definidas em **Production** e em **Preview** (só a chave publishable/anon).
-- [ ] **Site URL** e **Redirect URLs** do Supabase Auth apontando para a URL da Vercel (e para `http://localhost:5173/**` no desenvolvimento).
-- [ ] **SMTP próprio** ligado (seção 3.1); sem ele participantes comuns não recebem o e-mail de confirmação.
+- [ ] `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` definidas em **Production** e em **Preview** (só chaves publishable/anon; nenhuma `sk_...` nem secreta).
+- [ ] Clerk: origens/redirecionamentos permitidos para `http://localhost:5173` e para a URL da Vercel (seção 7.2).
+- [ ] Clerk como provedor no Supabase e **cadastros do Supabase Auth desligados** (seção 3).
 - [ ] Migração aplicada e `rls_check.sql` com `TODOS OK` no projeto de teste.
 - [ ] Primeiro administrador criado (seção 5).
-- [ ] Texto do termo de consentimento definitivo no lugar do provisório (seção 12).
-- [ ] Depois do deploy, abrir o site em janela anônima e conferir que aparece Login/Criar conta e que as teclas de desenvolvimento não funcionam.
+- [ ] Texto do termo de consentimento definitivo no lugar do provisório e `TERMS_VERSION` aumentada (seção 13).
+- [ ] Depois do deploy, abrir o site em janela anônima e conferir que aparece "Entrar / Criar conta" e que as teclas de desenvolvimento não funcionam.
 
-> **ATENÇÃO:** um build da Vercel **sem** essas variáveis de ambiente roda em **modo local**: não há login nem coleta de dados, e as teclas de desenvolvimento (F2, F3, F8, F9, Tab) ficam **expostas a todos**. Se o site publicado não mostrar Login/Criar conta, as variáveis estão faltando (ou o deploy foi feito antes de criá-las: faça Redeploy).
+### 7.2 Instância do Clerk e URLs permitidas
+
+- **Instância de desenvolvimento:** funciona em qualquer domínio (inclusive `*.vercel.app`), mas mostra um aviso de desenvolvimento na janela de entrada e tem limites (por exemplo, de usuários; conferir os valores atuais no painel/preços do Clerk).
+- **Instância de produção:** pelo que se sabe, exige um **domínio próprio** (não aceita `*.vercel.app`). **Confirme antes de publicar** e decida: comprar um domínio, ou ficar na instância de desenvolvimento com o aviso. A decisão é do autor.
+- No painel do Clerk (procure por "Domains", "Paths" ou "Allowed origins/redirect URLs"), cadastre `http://localhost:5173` e a URL do site na Vercel como origens e destinos de redirecionamento permitidos.
+- Ao trocar de instância (desenvolvimento para produção), a chave publishable e o domínio do Clerk mudam: atualize `VITE_CLERK_PUBLISHABLE_KEY` na Vercel, o domínio no provedor do Supabase (seção 3, passo 4) e faça Redeploy. Os usuários não passam de uma instância para outra: os ids (`user_...`) mudam, e os dados antigos ficam no banco com os ids antigos.
 
 ## 8. Exportar os dados da pesquisa
 
@@ -159,8 +165,16 @@ Os participantes aparecem pelo `user_id` (o id do Clerk, texto como `user_...`),
 ## 9. Direitos do participante
 
 - **Apagar meus dados:** o jogo chama `public.delete_my_data(<id da conta>)`, que apaga todos os lotes e consentimentos de quem está logado (e só dele). O servidor recusa (erro 42501, nada é apagado) se o token da requisição não for dessa conta, por exemplo se outra conta entrou em outra aba nesse meio-tempo. Depois o jogo apaga o banco local da conta neste navegador.
-  - **Não apaga:** a conta de login (o **e-mail continua guardado** no serviço de login), a linha em `admins` (se houver) e o histórico anterior ao login deste navegador (o banco `tcc-telemetry`, de antes de entrar na conta). O jogo diz isso na tela de confirmação.
-- **Apagar a conta inteira (apagamento completo, inclusive o e-mail):** apagar a conta de login **não** apaga nada no banco (não há ligação entre as tabelas e a lista de usuários). Primeiro apague os dados (pelo jogo, "Apagar meus dados", ou por SQL no painel: `delete from public.event_batches where user_id = '<ID_DO_CLERK>';` e o mesmo em `public.consents` e, se for o caso, `public.admins`); depois apague o usuário no painel do serviço de login. Só o autor pode fazer a parte do painel.
+  - **Não apaga:** a **conta no Clerk** (ela continua existindo, com o **e-mail guardado no Clerk**), a linha em `admins` (se houver) e o histórico anterior ao login deste navegador (o banco `tcc-telemetry`, de antes de entrar na conta). O jogo diz isso na tela de confirmação.
+- **Apagar a conta inteira (apagamento completo, inclusive o e-mail):** apagar o usuário no Clerk **não** apaga nenhuma linha no banco (não há chave estrangeira nem cascata; o Supabase nem conhece a lista de usuários). Portanto, **antes** de apagar o usuário no painel do Clerk, apague os dados: pelo jogo ("Apagar meus dados") ou por SQL no painel do Supabase:
+
+  ```sql
+  delete from public.event_batches where user_id = '<ID_DO_CLERK>';
+  delete from public.consents      where user_id = '<ID_DO_CLERK>';
+  delete from public.admins        where user_id = '<ID_DO_CLERK>';
+  ```
+
+  Depois apague o usuário no painel do Clerk (Users). Se o usuário for apagado no Clerk antes, as linhas ficam órfãs (sem dono que consiga acessá-las); apague-as pelo SQL acima com o id que estava no painel ou nos dados exportados. Só o autor pode fazer a parte dos painéis.
 
 ## 10. Plano gratuito: limites e cuidados
 
@@ -176,43 +190,47 @@ Os participantes aparecem pelo `user_id` (o id do Clerk, texto como `user_...`),
 - **Envio em segundo plano:** os lotes de eventos são enviados em segundo plano e reenviados se falharem (com espera crescente, quando a rede volta e quando a conta entra de novo), no máximo 20 lotes por requisição. O envio depende **só de haver a conta logada** (a mesma conta dona dos eventos), não do termo: o termo bloqueia o **registro** (sem aceite não se joga, então nada novo é gravado), não o envio do que já estava gravado. Cada linha enviada leva o `user_id` da conta explicitamente; se o token da sessão for de outra conta, o servidor recusa (RLS) e o envio é tentado de novo depois.
   - **Consequência ao aumentar `TERMS_VERSION`:** eventos gravados sob o termo antigo que ainda estavam pendentes (por exemplo, jogados offline) são enviados assim que o menu abrir **Análise** ou **Jogar** com a conta logada, mesmo antes de a pessoa aceitar o termo novo (Análise não pede o aceite; Jogar abre o termo, mas o banco da conta já foi aberto e o envio já começou). Eles foram coletados sob o termo antigo, que a pessoa aceitou na época.
 - **Download do histórico (outro navegador/computador):** ao abrir o banco da conta, o jogo baixa o histórico da nuvem em páginas de 100 linhas, guardando cada página assim que chega. Espera no máximo 5 s; o que chegou até ali fica guardado e a próxima abertura (Análise, Jogar) continua de onde parou. O download completo acontece **uma vez por entrada na conta por carregamento da página**; as aberturas seguintes reaproveitam.
-- **Banco local por conta:** cada conta tem seu próprio banco local no navegador; trocar de conta não mistura históricos. Sem conta logada no momento de começar a partida (modo nuvem), a partida fica **só na memória** (não é salva) e o jogo avisa na tela; o banco anterior ao login nunca é usado no modo nuvem.
-- **Sem internet:** o aceite do termo fica guardado neste navegador (`localStorage`, chave `tcc-terms-<id>`, só a versão). Recarregar a página sem rede ainda permite jogar se a sessão continuar válida; os eventos ficam no navegador e são enviados depois.
+- **Entrada pelo Clerk:** "Entrar / Criar conta" abre a janela do próprio Clerk (e-mail, e Google se ativado). Enquanto ela está aberta, as teclas não chegam ao menu nem aos atalhos do jogo. O Clerk é carregado só no modo nuvem e em segundo plano: o menu abre na hora e mostra "carregando conta…"; se o serviço não puder ser carregado (sem rede), aparece "sem conexão — tentar de novo" (ou, se alguém já entrou neste navegador, o jogo segue offline com esse usuário; ver "Sem internet"). A sessão do Clerk dura entre recarregamentos; o token que vai ao Supabase é pedido ao Clerk a cada requisição.
+- **Banco local por conta:** cada conta tem seu próprio banco local no navegador, com nome derivado do id do Clerk (`tcc-telemetry-user_...`); trocar de conta não mistura históricos. Sem conta logada no momento de começar a partida (modo nuvem), a partida fica **só na memória** (não é salva) e o jogo avisa na tela; o banco anterior ao login nunca é usado no modo nuvem.
+- **Sem internet (ou Clerk fora do ar):** o aceite do termo fica guardado neste navegador (`localStorage`, chave `tcc-terms-<id>`, só a versão), e o último usuário que entrou neste navegador também (`tcc-last-user`, só id e e-mail; apagado ao clicar em Sair e quando o Clerk carrega sem ninguém logado). Se o Clerk não carregar ao recarregar a página, o jogo usa esse último usuário: com o aceite guardado, Jogar funciona no banco local da conta e a linha de estado mostra "offline (sem envio)". Nada é enviado nem baixado (não há token), as ferramentas de administrador ficam desligadas e aceitar o termo ou apagar os dados pedem conexão. Quando a rede volta (ou ao voltar ao menu), o jogo tenta carregar o Clerk de novo; o que o Clerk disser vale: o mesmo usuário passa a enviar o que ficou pendente, outro usuário (ou ninguém) substitui o usuário guardado, sem misturar contas. Um token que falha por falta de rede conta como "sem conexão" (vale o aceite guardado), não como sessão expirada.
 - **Importação do histórico anterior ao login:** na primeira entrada, o jogo oferece importar o histórico local de antes do login, **uma vez por navegador**, com o aviso de importar só se foi a própria pessoa quem jogou ali antes de entrar.
-- **Apagar meus dados:** apaga na nuvem os lotes e consentimentos da conta (`delete_my_data(<id>)`) e o banco local da conta neste navegador; outras abas do jogo na mesma conta têm o banco fechado e param de enviar. Não apaga o histórico anterior ao login nem o e-mail (seção 9).
+- **Apagar meus dados:** apaga na nuvem os lotes e consentimentos da conta (`delete_my_data(<id>)`) e o banco local da conta neste navegador; outras abas do jogo na mesma conta têm o banco fechado e param de enviar. Não apaga o histórico anterior ao login nem a conta do Clerk (nem o e-mail guardado lá; seção 9).
 - **Ferramentas de desenvolvimento só para administrador:** F2, F3, F4, F6, F8/F9, Tab e `?boss=demo` só funcionam para contas na tabela `admins`. Quem não é administrador não as vê.
 - **`?cloud=fake` e `&admin=1` são só de desenvolvimento** (`npm run dev`): o primeiro troca a nuvem por uma simulação em memória, o segundo faz toda conta ser administradora. Nenhum dos dois existe no build publicado.
-- **Recuperação de senha** só funciona com a **Site URL** (e as Redirect URLs) configuradas no Supabase; sem isso o link do e-mail leva a um endereço errado.
+- **Depois de entrar**, o redirecionamento do Clerk pode recarregar a página (o jogo não passa funções de navegação ao Clerk). É inofensivo: a sessão é restaurada ao recarregar e o termo é pedido em seguida. **Sair** não recarrega: o jogo pede ao Clerk para não navegar depois de sair, então a página continua (com o aviso "Você saiu da conta.", o caminho e a query, como `?boss=demo`). Sair enquanto o Clerk não carregou (jogando offline com o usuário guardado, ou com o Clerk ainda carregando) apaga o usuário guardado e deixa uma saída pendente neste navegador (`localStorage`, chave `tcc-signout-pending`, sobrevive a recarregar a página): quando o Clerk carregar, o jogo encerra a sessão do Clerk **antes** de aceitar qualquer usuário, então a conta **não volta sozinha** (nem quando a rede volta, nem ao recarregar). Se o Clerk carregar sem ninguém logado, a pendência só é apagada.
+- **Recuperação de senha e e-mails de verificação** são do Clerk, sem configuração no Supabase.
 
 ## 12. Verificações que só o autor pode fazer
 
-Nada abaixo foi (nem poderia ser) verificado no desenvolvimento, que usou só simulação em memória:
+Nada abaixo foi (nem poderia ser) verificado no desenvolvimento, que usou só simulação em memória, sem chaves do Clerk nem do Supabase:
 
-- [ ] Rodar `supabase/tests/rls_check.sql` num projeto Supabase real de teste (seção 6) e obter `TODOS OK`.
-- [ ] Cadastro real com e-mail de confirmação, com um endereço que não seja de membro da equipe (SMTP próprio).
-- [ ] Link real de recuperação de senha chegando e funcionando.
-- [ ] Deploy na Vercel com as variáveis de ambiente (seção 7.1).
-- [ ] Playtest real da tecla Tab com uma conta **não** administradora (não deve fazer nada) e com a administradora.
-- [ ] Enter mantido pressionado na tela de consentimento, num teclado real (não deve aceitar o termo sozinho por repetição de tecla).
-- [ ] Layout em celular (login, termo, menu de conta).
-- [ ] O banco legado do painel de navegador (o IndexedDB de antes das contas) continua intacto.
+- [ ] **SQL num projeto Supabase de teste:** aplicar `0001_init.sql`, rodar `supabase/tests/rls_check.sql` (seção 6) e obter `TODOS OK`; depois estreitar as verificações 48 e 49 ao código de erro que apareceu.
+- [ ] **Entrada real pelo Clerk:** criar conta com um e-mail comum, receber a verificação, entrar, sair e entrar de novo.
+- [ ] **Token aceito pelo Supabase:** logado, o jogo lê e grava (o token chega com `role` = `authenticated`; conferir a claim na integração do Clerk); sem token (deslogado), nada é devolvido nem gravado; e com os cadastros do Supabase Auth desligados (seção 3, passo 6).
+- [ ] **Janela do Clerk no navegador real:** no DevTools, com a janela aberta, existe um elemento `.cl-modalBackdrop` (se a janela estiver dentro de um shadow root ou tiver outras classes, o jogo não a detecta e devolve as teclas ao menu depois de 10 s); digitar, Enter (enviar) e Esc dentro da janela funcionam sem o menu reagir.
+- [ ] **Recarga depois de entrar:** o redirecionamento do Clerk recarregar a página é inofensivo (sessão restaurada, termo pedido em seguida).
+- [ ] **Entrar e sair em duas abas** da mesma conta: as duas abas acompanham a sessão e o envio não mistura contas.
+- [ ] **Google** (opcional): entrada com Google em desenvolvimento; em produção, credenciais próprias e a exigência de CNPJ (a confirmar).
+- [ ] **Domínio de produção do Clerk:** confirmar se aceita `*.vercel.app` ou exige domínio próprio (seção 7.2) e decidir.
+- [ ] **Deploy na Vercel** com as três variáveis em Production e Preview, aberto em janela anônima (seção 7.1): aparece "Entrar / Criar conta", teclas de desenvolvimento não funcionam.
+- [ ] **Tempo de leitura em outro computador:** com uma conta com cerca de 1 hora de histórico (1000 a 1800 linhas), medir quanto leva o download num navegador novo (limite de 5 s; deve continuar nas aberturas seguintes) e se há travadas no jogo durante o envio em segundo plano e durante a Análise. O limite de 5 s inclui a leitura do banco local feita antes de baixar.
+- [ ] **Egress:** acompanhar Usage > Egress durante a coleta (estimativa na seção 13).
+- [ ] **Banco legado do painel de navegador:** o IndexedDB de antes das contas continua intacto.
+- [ ] **Layout em celular:** menu, termo, menu de conta e a janela do Clerk.
+- [ ] Playtest real da tecla Tab com uma conta **não** administradora (não deve fazer nada) e com a administradora; Enter mantido pressionado na tela de consentimento, num teclado real (não deve aceitar o termo sozinho).
+- [ ] Depois de entrar e aceitar o termo, recarregar a página sem internet (DevTools > Network > Offline) e conferir que Jogar funciona, com "offline (sem envio)" na linha de estado e sem ferramentas de administrador; religar a rede e conferir que o Clerk carrega sozinho e os eventos pendentes são enviados. Repetir com outra conta entrando ao religar a rede (o jogo deve trocar para ela, sem enviar eventos da primeira com o token da segunda). Clicar em Sair e conferir que a página não recarrega e mostra "Você saiu da conta.". Offline com o usuário guardado, clicar em Sair, religar a rede e conferir que a conta **não** volta (nem depois de recarregar).
+- [ ] Conferir que o limite de linhas por resposta do PostgREST (`max_rows`, em Project Settings > API / Data API) **não é menor que 100**: se for, cada página volta com menos e o jogo entende que o histórico acabou (o download termina cedo, sem erro).
+- [ ] Confirmar que "Apagar meus dados" apaga os lotes e consentimentos e mantém a conta do Clerk (esperado); para apagar tudo, seguir a seção 9.
 - [ ] **Antes de enviar o repositório ao GitHub (para a Vercel):** o e-mail do autor continua no histórico do git, no commit `46c7836` (a especificação). Decidir se reescreve o histórico ou aceita que ele fique público.
-- [ ] Confirmar que "Apagar meus dados" apaga os lotes e consentimentos da conta e mantém a conta de login (esperado); para apagar tudo, seguir a seção 9.
-- [ ] Confirmar no navegador que, depois do link de confirmação e do link de recuperação, o supabase-js remove os tokens da URL (a barra de endereço não deve ficar com `#access_token=...` ou `?code=...`).
-- [ ] Medir, com uma conta com cerca de 1 hora de histórico (1000 a 1800 linhas), quanto tempo leva o download num navegador novo (limite de 5 s; deve continuar nas aberturas seguintes) e se há travadas no jogo durante o envio em segundo plano e durante a Análise.
-- [ ] Recarregar a página sem internet com a sessão válida e conferir que Jogar funciona; com o token já vencido offline, conferir o que acontece (provavelmente pede para entrar de novo; ver seção 13).
-- [ ] Medir o tempo do download na abertura do banco da conta: o limite de 5 s inclui também a leitura completa do banco local que o jogo faz antes de baixar (para saber o que já tem). Com muito histórico local, essa leitura sozinha pode gastar parte dos 5 s.
-- [ ] Conferir no painel que o limite de linhas por resposta do PostgREST (`max_rows`, em Project Settings > API / Data API) **não é menor que 100**: se for, cada página volta com menos de 100 linhas e o jogo entende que o histórico acabou (o download termina cedo, sem erro).
-- [ ] Acompanhar o tráfego de saída (Usage > Egress) durante a coleta (estimativa na seção 13).
-- [ ] Rodar de novo `rls_check.sql` depois desta revisão (o esquema passou a usar o id do Clerk em texto; as verificações 43 a 54 são novas).
 
 ## 13. Limites conhecidos
 
 - **Capacidade do plano gratuito:** cerca de 14 horas-participante no total (seção 10). Acima disso, é preciso exportar e apagar, reduzir eventos ou mudar de plano.
 - **Duas abas na mesma conta** usam o mesmo banco local. Cada aba envia os eventos das próprias sessões (as sessões não se misturam); se uma aba fechar sem conseguir enviar, o que ficou pendente dela é enviado na próxima vez que o banco da conta for aberto numa página nova. Reenvios duplicados são inofensivos (upsert; `events_flat` não repete eventos). Ao **apagar os dados** numa aba, a outra aba tem a conexão com o banco fechada na hora (não bloqueia a exclusão), para de enviar e passa a pedir o aceite do termo de novo; o que ela gravar depois disso se perde (o banco foi apagado). Uma aba aberta com uma versão **antiga** do jogo (anterior a esta correção) não fecha a conexão: nesse caso "Apagar meus dados" apaga a nuvem e mostra "feche as outras abas do jogo e tente de novo" para terminar a parte local. Um envio que já estava a caminho na outra aba no instante da exclusão é coberto por uma segunda exclusão no servidor logo depois; um envio que chegue depois disso (rede muito lenta) não é coberto.
 - **Reenvio menor nunca encolhe** um lote já guardado (a regra mantém o maior); se um lote foi enviado com mais eventos, ele permanece assim.
-- **"Apagar meus dados" não apaga o banco legado** do navegador (o de antes das contas), só os dados da conta na nuvem e o banco local da conta. Também não apaga a conta de login nem o e-mail (seção 9).
-- **Token vencido sem internet:** o aceite guardado no navegador permite jogar offline, mas a conta (sessão) continua obrigatória. Se o token da sessão venceu enquanto não havia rede, o jogo pode não conseguir restaurar a sessão e pedir para entrar de novo, o que exige internet. Não verificado com o Supabase real.
+- **"Apagar meus dados" não apaga o banco legado** do navegador (o de antes das contas), só os dados da conta na nuvem e o banco local da conta. Também não apaga a conta do Clerk nem o e-mail guardado lá (seção 9).
+- **Sair com o Clerk carregado mas sem rede:** o Clerk 6.40.0 trata a falha de rede ao encerrar a sessão como sucesso (limpa a sessão só no navegador). O menu mostra "Você saiu da conta.", mas a sessão no servidor do Clerk pode continuar válida, e a mesma conta pode voltar ao recarregar a página com rede. Num computador compartilhado, saia com a internet funcionando (ou confira, depois de recarregar, que o menu mostra "Entrar / Criar conta"). Não corrigido; não verificado com o Clerk real.
+- **Jogo offline com o usuário guardado:** sem o Clerk (sem rede ou fora do ar), o jogo confia no último usuário guardado neste navegador (`tcc-last-user`) só para jogar localmente; não é uma sessão (nada é enviado, nada de administrador). Se a conta tiver sido encerrada ou trocada em outro lugar, o jogo só descobre quando o Clerk carregar; os eventos gravados offline ficam no banco local da conta guardada e são enviados só quando essa mesma conta estiver logada de novo. Sem aceite guardado (primeira vez neste navegador, ou dados apagados), o termo exige rede. Não verificado com o Clerk nem o Supabase reais.
 - **Linhas por hora:** como o envio vai a cada ~2 s, cada linha tem cerca de 30 a 60 eventos (1000 a 1800 linhas por hora de jogo). O espaço total quase não muda (seção 10), mas o download num navegador novo tem muitas linhas; ele é feito em páginas de 100 linhas e continua nas aberturas seguintes se não terminar em 5 s.
 - **Download completo a cada carregamento da página:** em cada carregamento (e entrada na conta) o histórico inteiro é baixado de novo para conferir o que falta. Com muito histórico isso custa tempo e dados; as páginas que já estão no navegador são apenas conferidas, não regravadas.
   - **Estimativa de tráfego de saída (egress):** 2 h de histórico são cerca de 36 MB de JSON. Com cerca de 15 participantes recarregando a página cerca de 10 vezes cada no mês, são cerca de 15 x 10 x 36 MB, ou cerca de **5 GB por mês**, antes de compressão (a resposta costuma ir comprimida, então o real deve ser menor). O plano gratuito tem uma cota mensal de egress (conferir o valor atual na página de preços); acompanhe em **Usage > Egress**. Se ficar perto da cota, este é o primeiro ponto a otimizar (download só do que falta).
@@ -223,10 +241,17 @@ Nada abaixo foi (nem poderia ser) verificado no desenvolvimento, que usou só si
 - **Não implementado: indicador de envio pendente** (especificação, seção 10). O jogo não mostra quantos eventos ainda não foram enviados; só o console do navegador registra falhas de envio.
 - **Ferramenta de administrador F9 (importar histórico) no modo nuvem:** a importação regrava `meta.player_id` com o id da conta, e os lotes importados de outro jogador (outro `player_id`) são marcados como enviados sem serem enviados (ficam só neste navegador). Não corrigido; use F9 só em testes.
 - **Sem limite de tempo nas requisições:** as chamadas de rede não têm timeout próprio. Um último envio que trave (rede ruim) faz "Apagar meus dados" e "Sair" esperarem até 4 s por ele; depois disso seguem, mas a requisição travada não é cancelada e pode chegar mais tarde. Uma chamada de apagamento ou de saída que trave deixa a tela em "Apagando..."/"Saindo..." até a rede responder.
+- **Pacote de interface do Clerk sem versão fixa e sem SRI:** o `@clerk/clerk-js` está fixado em versão exata, mas a interface da janela (`@clerk/ui@1`) é carregada em tempo de execução a partir do host Frontend API da instância do Clerk, sem versão exata nem verificação de integridade (SRI). É a forma documentada pelo Clerk; a confiança fica no domínio do Clerk. Se esse script não carregar, o menu mostra "sem conexão — tentar de novo".
+- **Domínios de terceiros que o Clerk pode contatar:** além do Frontend API da instância, o Clerk pode carregar `challenges.cloudflare.com` (proteção contra robôs). A telemetria do SDK do Clerk está desligada pelo jogo (`telemetry: false`). O repositório não define política de segurança de conteúdo (CSP).
+- **Dependências recentes no lockfile:** só o `@clerk/clerk-js` foi fixado (versão com mais de 14 dias); os pacotes que ele puxa foram resolvidos na versão mais nova disponível na instalação, que pode ter menos de 14 dias. O `package-lock.json` os congela.
+- **Rejeições não tratadas do Clerk:** o `openSignIn` do Clerk encadeia promessas internas sem `catch`; se a janela falhar ao montar depois de um carregamento bem-sucedido, o console pode registrar uma rejeição não tratada vinda do código do Clerk.
+- **Linhas órfãs ao apagar usuário no Clerk:** apagar o usuário no Clerk não apaga as linhas do banco (seção 9). Apague os dados antes.
 - **O texto do termo de consentimento é PROVISÓRIO** (`src/cloud/consentText.ts`). Antes de coletar dados de verdade, substitua-o pelo texto aprovado e **aumente `TERMS_VERSION`**, para que toda conta seja obrigada a aceitar de novo.
 
 ## Referências
 
+- Clerk, integração com o Supabase: <https://clerk.com/docs/integrations/databases/supabase>
+- Supabase, Third-Party Auth: <https://supabase.com/docs/guides/auth/third-party/overview>
 - Supabase, Project Pausing: <https://supabase.com/docs/guides/platform/free-project-pausing>
 - Supabase, Row Level Security: <https://supabase.com/docs/guides/database/postgres/row-level-security>
 - Supabase, preços e limites: <https://supabase.com/pricing>
