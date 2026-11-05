@@ -1,5 +1,5 @@
 // src/scenes/session/browserPlatform.ts
-import { IndexedDbEventStore } from '../../telemetry/eventStore';
+import { IndexedDbEventStore, type EventStore } from '../../telemetry/eventStore';
 import type { Account } from '../../cloud/account';
 import { openAccountStore, type CloudStoreDeps } from '../../cloud/syncBoot';
 import type { Platform } from './platform';
@@ -56,6 +56,11 @@ function browserSyncDeps(): CloudStoreDeps {
       return () => window.removeEventListener('online', listener);
     },
   };
+}
+
+/** The signed-in account's own synced store, or null when nobody is signed in (never the pre-login database). */
+export function openBrowserAccountStore(account: Account): Promise<{ store: EventStore; persistent: boolean } | null> {
+  return openAccountStore(account, browserSyncDeps());
 }
 
 /**

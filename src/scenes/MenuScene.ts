@@ -5,19 +5,21 @@ import { accountStatusLine, buildMenuItems, cloudErrorMessage, keepSelection, pl
 import { howToPlayLines } from './menu/howToPlay';
 import { LOCAL_ACCESS, toolKeysEnabled } from './input/debugKeys';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
-import { createBrowserPlatform } from './session/browserPlatform';
-import { accountFromRegistry, type Account } from '../cloud/account';
+import { createBrowserPlatform, openBrowserAccountStore } from './session/browserPlatform';
+import { accountFromRegistry, accountDbName, type Account } from '../cloud/account';
 import { AuthPanel, NewPasswordPanel } from '../cloud/authPanel';
 import { ConsentPanel } from '../cloud/consentPanel';
+import { ImportPanel } from '../cloud/importPanel';
+import { adoptHistory, readLocalGuestHistory, readLegacyMarker, writeLegacyMarker, LEGACY_IMPORT_KEY, type LegacyImportAnswer } from '../cloud/adoptLocal';
 import { ConfirmPanel } from '../cloud/accountOverlay';
 import { claimStore } from './session/storeHandoff';
-import type { EventStore } from '../telemetry/eventStore';
-import { GAME_VERSION } from '../telemetry/schema';
+import { IndexedDbEventStore, type EventStore } from '../telemetry/eventStore';
+import { GAME_VERSION, type LoggedEvent } from '../telemetry/schema';
 import { buildAnalysisView } from '../debug/analysis/analysisViewModel';
 import { AnalysisPanel } from '../debug/analysis/analysisPanel';
 
 type Screen = 'main' | 'howto' | 'analysis' | 'panel';
-type PanelKind = 'auth' | 'consent' | 'deleteData' | 'newPassword';
+type PanelKind = 'auth' | 'consent' | 'deleteData' | 'newPassword' | 'import';
 
 const FONT = 'monospace';
 const BUTTON_W = 480;
@@ -61,6 +63,8 @@ export class MenuScene extends Phaser.Scene {
   private starting = false;
   /** A sign-out is running: no other action starts meanwhile. */
   private accountBusy = false;
+  /** The user whose pre-login history was already looked at in this visit to the menu (asked at most once per visit). */
+  private importCheckedFor: string | null = null;
   /** False after shutdown: late async results must not touch destroyed objects. */
   private alive = false;
 
@@ -78,6 +82,7 @@ export class MenuScene extends Phaser.Scene {
     this.accountPanel = null;
     this.starting = false; // the scene object is reused when the Arena comes back here
     this.accountBusy = false;
+    this.importCheckedFor = null;
     this.alive = true;
 
     const title = this.add.text(640, 120, 'TCC · arena adaptativa', { fontFamily: FONT, fontSize: '40px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
@@ -164,7 +169,7 @@ export class MenuScene extends Phaser.Scene {
     // Signed in by another path (session restored, another tab): the login form has nothing left to do.
     if (kind === 'auth' && signedIn) this.closeAccountPanel();
     // The session ended while a signed-in panel was open.
-    if ((kind === 'consent' || kind === 'deleteData' || kind === 'newPassword') && !signedIn) this.closeAccountPanel();
+    if ((kind === 'consent' || kind === 'deleteData' || kind === 'newPassword' || kind === 'import') && !signedIn) this.closeAccountPanel();
     // The consent is on the server already (our own acceptance, or the details finished loading after
     // Jogar opened the term): the player asked to play, so the run starts (startGame runs once).
     if (kind === 'consent' && playAction(account.state) === 'start') {
@@ -173,6 +178,7 @@ export class MenuScene extends Phaser.Scene {
       return;
     }
     if (account.passwordRecovery && signedIn && this.accountPanel?.kind !== 'newPassword') this.openNewPassword(account);
+    else if (signedIn && account.state.termsAccepted) void this.maybeOfferImport(account);
   }
 
   private move(delta: 1 | -1): void {
@@ -296,6 +302,98 @@ export class MenuScene extends Phaser.Scene {
           this.closeAccountPanel(); // first: the account change below must not reopen it
           account.dismissPasswordRecovery();
         },
+      }),
+    );
+  }
+
+  /** Whether the menu is idle: nothing running, no panel open, signed-in state unchanged. */
+  private canOfferImport(account: Account, userId: string): boolean {
+    return (
+      this.alive &&
+      !this.starting &&
+      !this.accountBusy &&
+      this.screen === 'main' &&
+      this.accountPanel === null &&
+      !account.passwordRecovery &&
+      account.state.user?.id === userId &&
+      account.state.termsAccepted
+    );
+  }
+
+  /**
+   * Offers to import the browser's pre-login history into the account. Only once the account accepted the
+   * current terms, from the menu with no game running, and at most once per visit; a failure to look is
+   * silent (the offer comes back next time) and never blocks the menu. The old database is only read.
+   */
+  private async maybeOfferImport(account: Account): Promise<void> {
+    const user = account.state.user;
+    if (!user || account.mode !== 'cloud' || this.importCheckedFor === user.id || !this.canOfferImport(account, user.id)) return;
+    this.importCheckedFor = user.id;
+    let history: LoggedEvent[] = [];
+    try {
+      // One account per browser takes (or declines) the old history: the marker lives outside every database.
+      if (readLegacyMarker() !== null) return;
+      history = await readLocalGuestHistory();
+      if (history.length > 0) {
+        // Only the account's local meta is read (no sync store): menu visits cause no cloud traffic.
+        const local = await IndexedDbEventStore.open(indexedDB, accountDbName(user.id));
+        try {
+          if ((await local.getMeta<LegacyImportAnswer>(LEGACY_IMPORT_KEY)) !== undefined) return; // this account answered before
+        } finally {
+          local.close();
+        }
+      }
+    } catch (err) {
+      console.warn('[menu] could not look at the pre-login history', err);
+      return;
+    }
+    if (history.length === 0 || !this.canOfferImport(account, user.id)) return;
+    this.openImport(account, user.id, history);
+  }
+
+  private openImport(account: Account, userId: string, history: readonly LoggedEvent[]): void {
+    /** Opens the account's own store, runs `work` on it and closes it, with no game holding the store. */
+    const withAccountStore = async (work: (store: EventStore) => Promise<void>): Promise<void> => {
+      const claim = claimStore(this.registry);
+      try {
+        await claim.ready;
+        const opened = await openBrowserAccountStore(account);
+        if (!opened) throw new Error('no signed-in account');
+        try {
+          // Never write into another account's (or the pre-login) database.
+          if (account.state.user?.id !== userId || (await opened.store.getMeta<string>('player_id')) !== userId) {
+            throw new Error('the signed-in account changed');
+          }
+          await work(opened.store);
+        } finally {
+          opened.store.close();
+        }
+      } finally {
+        claim.release();
+      }
+    };
+    this.openPanel('import', () =>
+      new ImportPanel(document.body, {
+        simulated: account.simulated,
+        eventCount: history.length,
+        sessionCount: new Set(history.map((e) => e.session_id)).size,
+        runImport: () =>
+          withAccountStore(async (store) => {
+            await adoptHistory(await readLocalGuestHistory(), userId, store);
+            await store.setMeta(LEGACY_IMPORT_KEY, 'imported' satisfies LegacyImportAnswer);
+            writeLegacyMarker(userId, 'imported');
+          }),
+        runDiscard: () =>
+          withAccountStore(async (store) => {
+            await store.setMeta(LEGACY_IMPORT_KEY, 'discarded' satisfies LegacyImportAnswer);
+            writeLegacyMarker(userId, 'discarded');
+          }),
+        errorMessage: () => 'Não foi possível concluir agora. Tente de novo, ou escolha "Decidir depois".',
+        onDone: (answer) => {
+          this.closeAccountPanel();
+          this.setNotice(answer === 'imported' ? 'Histórico anterior importado para a sua conta.' : 'Histórico anterior descartado (continua só neste navegador).');
+        },
+        onCancel: () => this.closeAccountPanel(),
       }),
     );
   }

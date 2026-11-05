@@ -5,6 +5,7 @@ import { FakeCloudApi } from './fakeCloudApi';
 import { openAccountStore, AUTH_TIMEOUT_MS, PULL_TIMEOUT_MS, RETRY_MIN_MS, type SyncTimers } from './syncBoot';
 import { CLOUD_SYNCED_KEY } from './syncingEventStore';
 import { IndexedDbEventStore, type EventStore } from '../telemetry/eventStore';
+import { adoptHistory } from './adoptLocal';
 import { loadProfileState, type BootState } from '../telemetry/bootstrap';
 import type { LoggedEvent } from '../telemetry/schema';
 import { SessionController } from '../scenes/session/sessionController';
@@ -435,5 +436,22 @@ describe('createBrowserPlatform store', () => {
     expect(store).toBeInstanceOf(IndexedDbEventStore);
     expect(await databases(factory)).toEqual(['tcc-telemetry']);
     store.close();
+  });
+});
+
+describe('adopting the pre-login history (Task 9)', () => {
+  it('the adopted events are pushed to the account with their keys unchanged', async () => {
+    const api = new FakeCloudApi();
+    await register(api, 'adopt');
+    const m = machine(api);
+    const user = await m.account.signIn(mail('adopt'), PW);
+    const history = [ev('local-old', 's1', 0), ev('local-old', 's1', 1), ev('local-old', 's2', 0)];
+    const opened = await openAccountStore(m.account, { factory: m.factory, timers: m.clock.timers });
+    await adoptHistory(history, user.id, opened!.store);
+    opened!.store.close();
+    await idle();
+    const pushed = serverEvents(api, user.id);
+    expect(keys(pushed)).toEqual(keys(history));
+    expect(pushed.every((e) => e.player_id === user.id)).toBe(true);
   });
 });
