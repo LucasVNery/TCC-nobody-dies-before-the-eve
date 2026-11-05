@@ -10,6 +10,7 @@ import { generatePlaceholderTextures, ENTITY_SIZE } from '../visual/placeholderT
 import { SessionController } from './session/sessionController';
 import { BOSS_CONFIG_DEMO } from '../boss/bossConfig';
 import { createBrowserPlatform } from './session/browserPlatform';
+import { accountFromRegistry } from '../cloud/account';
 import { PlayerInput, type PlayerIntents } from './input/playerInput';
 import { bindHotkeys } from './input/hotkeys';
 import { debugKeysEnabled } from './input/debugKeys';
@@ -83,7 +84,7 @@ export class ArenaScene extends Phaser.Scene {
     // Playtest shortcuts (F4/F6) only with ?boss=demo or in a dev build.
     const debugKeys = debugKeysEnabled(window.location.search, import.meta.env.DEV);
     const session = new SessionController({
-      platform: createBrowserPlatform(),
+      platform: createBrowserPlatform(accountFromRegistry(this.registry)),
       entitySize: ENTITY_SIZE,
       nextSeed: () => Math.floor(Math.random() * 0x100000000),
       // playtest: open the game with ?boss=demo for the short-run thresholds

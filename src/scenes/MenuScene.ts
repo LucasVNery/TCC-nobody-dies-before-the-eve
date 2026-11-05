@@ -4,6 +4,7 @@ import { MENU_ITEMS, firstEnabled, moveSelection, type MenuId } from './menu/men
 import { HOW_TO_PLAY_LINES } from './menu/howToPlay';
 import { loadStoredAnalysis } from './menu/storedAnalysis';
 import { createBrowserPlatform } from './session/browserPlatform';
+import { accountFromRegistry } from '../cloud/account';
 import { claimStore } from './session/storeHandoff';
 import type { EventStore } from '../telemetry/eventStore';
 import { GAME_VERSION } from '../telemetry/schema';
@@ -156,7 +157,7 @@ export class MenuScene extends Phaser.Scene {
     try {
       await claim.ready;
       if (token !== this.analysisToken) return;
-      const platform = createBrowserPlatform();
+      const platform = createBrowserPlatform(accountFromRegistry(this.registry));
       store = (await platform.openStore()).store;
       if (token !== this.analysisToken) return;
       const input = await loadStoredAnalysis(store, platform.newUuid);

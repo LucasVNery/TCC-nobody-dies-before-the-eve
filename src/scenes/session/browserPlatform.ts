@@ -1,5 +1,7 @@
 // src/scenes/session/browserPlatform.ts
 import { IndexedDbEventStore } from '../../telemetry/eventStore';
+import type { Account } from '../../cloud/account';
+import { openAccountStore, type CloudStoreDeps } from '../../cloud/syncBoot';
 import type { Platform } from './platform';
 
 /**
@@ -46,11 +48,29 @@ function pickFile(): Promise<string | null> {
   });
 }
 
-export function createBrowserPlatform(): Platform {
+function browserSyncDeps(): CloudStoreDeps {
+  return {
+    factory: indexedDB,
+    onOnline(listener) {
+      window.addEventListener('online', listener);
+      return () => window.removeEventListener('online', listener);
+    },
+  };
+}
+
+/**
+ * Without an account in cloud mode, the store is the local `tcc-telemetry` database, as before
+ * accounts existed. In cloud mode with a signed-in user it is that account's own database, synced
+ * (see openAccountStore); with no user signed in it falls back to the local database, which is
+ * never synced (pre-login history).
+ */
+export function createBrowserPlatform(account?: Account): Platform {
+  const openLocal = async () => ({ store: await IndexedDbEventStore.open(), persistent: true });
   return {
     newUuid,
     nowIso: () => new Date().toISOString(),
-    openStore: async () => ({ store: await IndexedDbEventStore.open(), persistent: true }),
+    openStore:
+      account?.mode === 'cloud' ? async () => (await openAccountStore(account, browserSyncDeps())) ?? openLocal() : openLocal,
     downloadText,
     pickFile,
     onHide(listener) {

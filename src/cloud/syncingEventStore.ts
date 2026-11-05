@@ -8,7 +8,8 @@ export const CLOUD_SYNCED_KEY = 'cloud_synced';
 
 type Progress = Record<string, number>;
 
-const SYNC_DELAY_MS = 2000;
+/** Delay between a burst of appends and its push. */
+export const SYNC_DELAY_MS = 2000;
 const defaultSchedule = (run: () => void): void => {
   setTimeout(run, SYNC_DELAY_MS);
 };
