@@ -12,3 +12,5 @@ experiments/v0/out/
 # Local secrets (Supabase URL/anon key for development)
 .env.local
 .env*.local
+
+.vercel

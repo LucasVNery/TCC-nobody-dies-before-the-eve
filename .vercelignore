@@ -1,0 +1,11 @@
+.env*
+.claude
+.superpowers
+.git
+node_modules
+dist
+docs
+Contexto_pesquisa
+experiments
+supabase
+tools
